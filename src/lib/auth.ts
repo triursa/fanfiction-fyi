@@ -1,4 +1,5 @@
-import type { User, Pseud } from './types';
+import type { User, Pseud, UserRole } from './types';
+import { ROLE_LEVEL } from './types';
 import { queryFirst, run, queryAll } from './db';
 
 const SESSION_COOKIE = 'session';
@@ -91,6 +92,23 @@ export async function requireAuth(
   if (!auth) {
     const err = new Error('Unauthorized');
     (err as any).status = 401;
+    throw err;
+  }
+  return auth;
+}
+
+// Require a minimum role level (founder > admin > mod > user)
+export async function requireRole(
+  db: D1Database,
+  request: Request,
+  minimumRole: UserRole
+): Promise<{ user: User; pseuds: Pseud[] }> {
+  const auth = await requireAuth(db, request);
+  const userLevel = ROLE_LEVEL[auth.user.role as UserRole] ?? 0;
+  const requiredLevel = ROLE_LEVEL[minimumRole] ?? 0;
+  if (userLevel < requiredLevel) {
+    const err = new Error('Forbidden');
+    (err as any).status = 403;
     throw err;
   }
   return auth;
