@@ -1,0 +1,179 @@
+---
+export const prerender = false;
+import Base from '../../../layouts/Base.astro';
+import { queryFirst, queryAll } from '../../../lib/db';
+
+const collectionId = Number(Astro.params.id);
+if (!collectionId) return Astro.redirect('/collections');
+
+const db = Astro.locals.runtime.env.DB as D1Database;
+
+const collection = await queryFirst<any>(db,
+  `SELECT c.*, p.name as owner_name
+   FROM collections c
+   JOIN pseuds p ON c.owner_pseud_id = p.id
+   WHERE c.id = ?1`,
+  collectionId
+);
+
+if (!collection) return Astro.redirect('/collections');
+
+// Only show public/unrevealed
+if (!['public', 'unrevealed'].includes(collection.privacy)) return Astro.redirect('/collections');
+
+const works = await queryAll<any>(db,
+  `SELECT w.id, w.title, w.summary, w.word_count, w.published_at
+   FROM works w
+   JOIN collection_items ci ON w.id = ci.work_id
+   WHERE ci.collection_id = ?1
+     AND w.published_at IS NOT NULL`,
+  collectionId
+);
+---
+
+<Base title={`${collection.name} — fanfiction.fyi`}>
+  <section class="collection-detail">
+    <header class="collection-header">
+      <h1 class="collection-title">{collection.name}</h1>
+      <span class={`privacy-badge privacy-badge--${collection.privacy}`}>{collection.privacy}</span>
+      <div class="collection-meta">
+        <span>Curated by <strong>{collection.owner_name}</strong></span>
+        <span>·</span>
+        <span>Created {new Date(collection.created_at).toLocaleDateString()}</span>
+      </div>
+      {collection.description && <p class="collection-description">{collection.description}</p>}
+    </header>
+
+    <div class="collection-works">
+      <h2 class="section-title">Works ({works.length})</h2>
+
+      {works.length === 0 && (
+        <p class="placeholder-text">This collection is empty.</p>
+      )}
+
+      <div class="works-grid">
+        {works.map(w => (
+          <a href={`/works/${w.id}`} class="work-card">
+            <h3 class="work-card__title">{w.title}</h3>
+            {w.summary && <p class="work-card__summary">{w.summary.length > 200 ? w.summary.slice(0, 200) + '…' : w.summary}</p>}
+            <div class="work-card__meta">
+              <span>{w.word_count.toLocaleString()} words</span>
+              {w.published_at && <><span>·</span><span>Published {new Date(w.published_at).toLocaleDateString()}</span></>}
+            </div>
+          </a>
+        ))}
+      </div>
+    </div>
+  </section>
+</Base>
+
+<style is:global>
+  @import '../../../styles/theme.css';
+
+  .collection-detail { max-width: 900px; margin: 0 auto; }
+
+  .collection-header {
+    margin-bottom: var(--space-8);
+  }
+
+  .collection-title {
+    font: var(--md-sys-typescale-headline-large);
+    color: var(--md-sys-color-on-surface);
+    margin: 0 0 var(--space-2);
+    display: inline;
+    margin-right: var(--space-2);
+  }
+
+  .collection-meta {
+    font: var(--md-sys-typescale-body-medium);
+    color: var(--md-sys-color-on-surface-variant);
+    display: flex;
+    gap: var(--space-2);
+    flex-wrap: wrap;
+    margin-top: var(--space-2);
+  }
+
+  .collection-description {
+    font: var(--md-sys-typescale-body-large);
+    color: var(--md-sys-color-on-surface-variant);
+    margin: var(--space-4) 0 0;
+    line-height: 1.6;
+  }
+
+  .section-title {
+    font: var(--md-sys-typescale-title-large);
+    color: var(--md-sys-color-on-surface);
+    margin: 0 0 var(--space-4);
+  }
+
+  .placeholder-text {
+    font: var(--md-sys-typescale-body-large);
+    color: var(--md-sys-color-outline);
+    font-style: italic;
+  }
+
+  .works-grid {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-4);
+  }
+
+  .work-card {
+    display: block;
+    padding: var(--space-4) var(--space-6);
+    background: var(--md-sys-color-surface-container);
+    border: 1px solid var(--md-sys-color-outline-variant);
+    border-radius: var(--md-sys-shape-corner-large);
+    text-decoration: none;
+    color: var(--md-sys-color-on-surface);
+    transition: background var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard);
+  }
+  .work-card:hover {
+    background: var(--md-sys-color-surface-container-high);
+    text-decoration: none;
+  }
+
+  .work-card__title {
+    font: var(--md-sys-typescale-title-large);
+    color: var(--md-sys-color-primary);
+    margin: 0 0 var(--space-1);
+  }
+  .work-card__summary {
+    font: var(--md-sys-typescale-body-medium);
+    color: var(--md-sys-color-on-surface-variant);
+    margin: 0 0 var(--space-2);
+  }
+  .work-card__meta {
+    font: var(--md-sys-typescale-body-small);
+    color: var(--md-sys-color-outline);
+    display: flex;
+    gap: var(--space-2);
+    flex-wrap: wrap;
+  }
+
+  /* ── Privacy Badges ── */
+  .privacy-badge {
+    font: var(--md-sys-typescale-body-small);
+    padding: 2px var(--space-3);
+    border-radius: var(--md-sys-shape-corner-full);
+    text-transform: capitalize;
+    white-space: nowrap;
+    vertical-align: middle;
+  }
+  .privacy-badge--public {
+    background: rgba(72, 168, 108, 0.15);
+    color: #48A86C;
+  }
+  .privacy-badge--unrevealed {
+    background: rgba(218, 165, 32, 0.15);
+    color: #DAA520;
+  }
+  .privacy-badge--hidden {
+    background: rgba(255, 100, 100, 0.15);
+    color: #FF6464;
+  }
+  .privacy-badge--private {
+    background: rgba(140, 145, 153, 0.15);
+    color: var(--md-sys-color-outline);
+  }
+</style>
