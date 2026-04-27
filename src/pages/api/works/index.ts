@@ -56,8 +56,8 @@ export const POST: APIRoute = async ({ request, locals }) => {
   const contentHtml = contentMd ? markdownToHtml(contentMd) : null;
   const wordCount = contentMd ? contentMd.split(/\s+/).filter(Boolean).length : 0;
 
-  const workResult = await run(db, `INSERT INTO works (title, summary, notes, language, word_count, complete, published_at, updated_at, created_at) VALUES (?1, ?2, ?3, 'en', ?4, 0, ?, datetime('now'), datetime('now'))`,
-    title, summary || null, notes || null, wordCount, isDraft ? null : "datetime('now')");
+  const workResult = await run(db, `INSERT INTO works (title, summary, notes, language, word_count, complete, published_at, updated_at, created_at) VALUES (?1, ?2, ?3, 'en', ?4, 0, ${isDraft ? 'NULL' : "CURRENT_TIMESTAMP"}, datetime('now'), datetime('now'))`,
+    title, summary || null, notes || null, wordCount);
 
   const workId = workResult.meta.last_row_id;
 

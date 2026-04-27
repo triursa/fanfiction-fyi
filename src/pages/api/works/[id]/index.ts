@@ -31,6 +31,35 @@ export const PUT: APIRoute = async ({ params, request, locals }) => {
   let body: any;
   try { body = await request.json(); } catch { return new Response(JSON.stringify({ error: 'Invalid JSON' }), { status: 400, headers: { 'Content-Type': 'application/json' } }); }
 
+  // Handle tag updates: clear existing and re-add
+  if (Array.isArray(body.tag_ids)) {
+    await run(db, `DELETE FROM taggings WHERE work_id = ?1`, workId);
+    for (const tagId of body.tag_ids) {
+      await run(db, `INSERT OR IGNORE INTO taggings (tag_id, work_id) VALUES (?1, ?2)`, tagId, workId);
+    }
+  }
+
+  // Handle auto-create rating/category/warning tags
+  const autoTags = [
+    { type: 'rating', name: body.rating },
+    { type: 'category', name: body.category },
+    { type: 'warning', name: body.warning },
+  ].filter(t => t.name);
+
+  for (const t of autoTags) {
+    // Remove existing tags of this type for the work
+    await run(db, `DELETE FROM taggings WHERE work_id = ?1 AND tag_id IN (SELECT id FROM tags WHERE type = ?2)`, workId, t.type);
+    const existing = await queryFirst<any>(db, `SELECT id FROM tags WHERE name = ?1 AND type = ?2`, t.name, t.type);
+    if (existing) {
+      await run(db, `INSERT OR IGNORE INTO taggings (tag_id, work_id) VALUES (?1, ?2)`, existing.id, workId);
+    } else {
+      const tagResult = await run(db, `INSERT OR IGNORE INTO tags (name, type) VALUES (?1, ?2)`, t.name, t.type);
+      if (tagResult.meta.last_row_id) {
+        await run(db, `INSERT OR IGNORE INTO taggings (tag_id, work_id) VALUES (?1, ?2)`, tagResult.meta.last_row_id, workId);
+      }
+    }
+  }
+
   const fields: string[] = [];
   const values: any[] = [];
   if (body.title !== undefined) { fields.push('title = ?'); values.push(body.title); }
@@ -39,12 +68,19 @@ export const PUT: APIRoute = async ({ params, request, locals }) => {
   if (body.end_notes !== undefined) { fields.push('end_notes = ?'); values.push(body.end_notes); }
   if (body.complete !== undefined) { fields.push('complete = ?'); values.push(body.complete ? 1 : 0); }
   if (body.language !== undefined) { fields.push('language = ?'); values.push(body.language); }
+  if (body.publish) {
+    // Set published_at only if it's currently null (first publish)
+    fields.push("published_at = COALESCE(published_at, CURRENT_TIMESTAMP)");
+  }
 
-  if (fields.length === 0) return new Response(JSON.stringify({ error: 'No fields to update' }), { status: 400, headers: { 'Content-Type': 'application/json' } });
-  fields.push("updated_at = datetime('now')");
-  values.push(workId);
+  if (fields.length === 0 && !Array.isArray(body.tag_ids) && autoTags.length === 0) return new Response(JSON.stringify({ error: 'No fields to update' }), { status: 400, headers: { 'Content-Type': 'application/json' } });
 
-  await run(db, `UPDATE works SET ${fields.join(', ')} WHERE id = ?`, ...values);
+  if (fields.length > 0) {
+    fields.push("updated_at = datetime('now')");
+    values.push(workId);
+    await run(db, `UPDATE works SET ${fields.join(', ')} WHERE id = ?`, ...values);
+  }
+
   const work = await queryFirst<any>(db, `SELECT * FROM works WHERE id = ?1`, workId);
   return new Response(JSON.stringify(work), { headers: { 'Content-Type': 'application/json' } });
 };
