@@ -1,5 +1,61 @@
 ---
+export const prerender = false;
 import Base from '../layouts/Base.astro';
+import { queryFirst, queryAll } from '../lib/db';
+
+const db = Astro.locals.runtime.env.DB as D1Database;
+
+// Check auth status
+let authUser = null;
+let userPseudId: number | null = null;
+const cookie = Astro.request.headers.get('cookie') ?? '';
+const sessionMatch = cookie.match(/session=([a-f0-9]+)/);
+if (sessionMatch) {
+  const session = await queryFirst<any>(db, `SELECT user_id FROM sessions WHERE token = ?1 AND expires_at > datetime('now')`, sessionMatch[1]);
+  if (session) {
+    authUser = await queryFirst<any>(db, `SELECT * FROM users WHERE id = ?1`, session.user_id);
+    if (authUser) {
+      const userPseud = await queryFirst<any>(db, `SELECT id FROM pseuds WHERE user_id = ?1 ORDER BY id LIMIT 1`, authUser.id);
+      userPseudId = userPseud?.id ?? null;
+    }
+  }
+}
+
+// Fetch personalized data for logged-in users
+let continueReading: any[] = [];
+let markedForLater: any[] = [];
+if (userPseudId) {
+  continueReading = await queryAll<any>(
+    db,
+    `SELECT r.last_chapter, r.updated_at as reading_updated, w.id, w.title, w.summary, w.word_count, w.complete, w.updated_at
+     FROM readings r JOIN works w ON r.work_id = w.id
+     WHERE r.pseud_id = ?1 AND r.for_later = 0 AND r.last_chapter IS NOT NULL
+     ORDER BY r.updated_at DESC LIMIT 10`,
+    userPseudId
+  );
+
+  markedForLater = await queryAll<any>(
+    db,
+    `SELECT r.work_id as id, w.title, w.summary, w.word_count, w.complete, w.updated_at
+     FROM readings r JOIN works w ON r.work_id = w.id
+     WHERE r.pseud_id = ?1 AND r.for_later = 1
+     ORDER BY r.updated_at DESC LIMIT 10`,
+    userPseudId
+  );
+}
+
+// Recently updated works (always shown)
+const recentlyUpdated = await queryAll<any>(
+  db,
+  `SELECT id, title, summary, word_count, complete, updated_at, published_at FROM works
+   WHERE published_at IS NOT NULL
+   ORDER BY updated_at DESC LIMIT 10`
+);
+
+// Attach author info to recently updated
+for (const w of recentlyUpdated) {
+  w.authors = await queryAll<any>(db, `SELECT p.name FROM pseuds p JOIN creatorships c ON p.id = c.pseud_id WHERE c.work_id = ?1`, w.id);
+}
 ---
 
 <Base title="fanfiction.fyi">
@@ -27,9 +83,56 @@ import Base from '../layouts/Base.astro';
     </a>
   </section>
 
-  <section class="recent-works">
+  {authUser && continueReading.length > 0 && (
+    <section class="home-section">
+      <h2 class="section-title">Continue Reading</h2>
+      <ul class="work-list">
+        {continueReading.map(w => (
+          <li class="work-list-item">
+            <a href={`/works/${w.id}${w.last_chapter ? `?chapter=${w.last_chapter}` : ''}`} class="work-list-link">{w.title}</a>
+            <span class="work-list-meta">{w.word_count?.toLocaleString()} words · Updated {new Date(w.updated_at).toLocaleDateString()}</span>
+          </li>
+        ))}
+      </ul>
+    </section>
+  )}
+
+  {authUser && markedForLater.length > 0 && (
+    <section class="home-section">
+      <h2 class="section-title">Marked for Later</h2>
+      <ul class="work-list">
+        {markedForLater.map(w => (
+          <li class="work-list-item">
+            <a href={`/works/${w.id}`} class="work-list-link">{w.title}</a>
+            <span class="work-list-meta">{w.word_count?.toLocaleString()} words · Updated {new Date(w.updated_at).toLocaleDateString()}</span>
+          </li>
+        ))}
+      </ul>
+    </section>
+  )}
+
+  <section class="home-section">
     <h2 class="section-title">Recently Updated</h2>
-    <p class="placeholder-text">Works will appear here once the archive is seeded.</p>
+    {recentlyUpdated.length === 0 ? (
+      <p class="placeholder-text">Works will appear here once the archive is seeded.</p>
+    ) : (
+      <ul class="work-list">
+        {recentlyUpdated.map(w => (
+          <li class="work-list-item">
+            <div class="work-list-info">
+              <a href={`/works/${w.id}`} class="work-list-link">{w.title}</a>
+              {w.authors?.length > 0 && <span class="work-list-authors"> by {w.authors.map((a: any) => a.name).join(', ')}</span>}
+            </div>
+            <span class="work-list-meta">
+              {w.word_count?.toLocaleString()} words
+              · {w.complete ? 'Complete' : 'WIP'}
+              · {new Date(w.updated_at).toLocaleDateString()}
+            </span>
+            {w.summary && <p class="work-list-summary">{w.summary.length > 160 ? w.summary.slice(0, 160) + '…' : w.summary}</p>}
+          </li>
+        ))}
+      </ul>
+    )}
   </section>
 </Base>
 
@@ -110,5 +213,59 @@ import Base from '../layouts/Base.astro';
     font: var(--md-sys-typescale-body-large);
     color: var(--md-sys-color-outline);
     font-style: italic;
+  }
+
+  .home-section {
+    margin-bottom: var(--space-10);
+  }
+
+  .work-list {
+    list-style: none;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-3);
+  }
+
+  .work-list-item {
+    background: var(--md-sys-color-surface-container);
+    border: 1px solid var(--md-sys-color-outline-variant);
+    border-radius: var(--md-sys-shape-corner-large);
+    padding: var(--space-4);
+  }
+
+  .work-list-link {
+    font: var(--md-sys-typescale-title-medium);
+    color: var(--md-sys-color-primary);
+    text-decoration: none;
+  }
+
+  .work-list-link:hover {
+    text-decoration: underline;
+  }
+
+  .work-list-meta {
+    font: var(--md-sys-typescale-body-small);
+    color: var(--md-sys-color-outline);
+    display: block;
+    margin-top: var(--space-1);
+  }
+
+  .work-list-info {
+    display: flex;
+    align-items: baseline;
+    gap: var(--space-2);
+    flex-wrap: wrap;
+  }
+
+  .work-list-authors {
+    font: var(--md-sys-typescale-body-medium);
+    color: var(--md-sys-color-on-surface-variant);
+  }
+
+  .work-list-summary {
+    font: var(--md-sys-typescale-body-medium);
+    color: var(--md-sys-color-on-surface-variant);
+    margin: var(--space-1) 0 0;
   }
 </style>

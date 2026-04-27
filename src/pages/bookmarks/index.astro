@@ -1,0 +1,214 @@
+---
+export const prerender = false;
+import Base from '../../layouts/Base.astro';
+import { queryAll, queryFirst } from '../../lib/db';
+
+const db = Astro.locals.runtime.env.DB as D1Database;
+
+// Auth check
+const cookie = Astro.request.headers.get('cookie') ?? '';
+const sessionMatch = cookie.match(/session=([a-f0-9]+)/);
+if (!sessionMatch) return Astro.redirect('/login');
+
+const session = await queryFirst<any>(db, `SELECT user_id FROM sessions WHERE token = ?1 AND expires_at > datetime('now')`, sessionMatch[1]);
+if (!session) return Astro.redirect('/login');
+
+const user = await queryFirst<any>(db, `SELECT * FROM users WHERE id = ?1`, session.user_id);
+if (!user) return Astro.redirect('/login');
+
+const pseuds = await queryAll<any>(db, `SELECT id, name FROM pseuds WHERE user_id = ?1 ORDER BY id`, user.id);
+const pseudId = pseuds[0]?.id;
+
+if (!pseudId) {
+  // No pseud — shouldn't happen but handle gracefully
+  return Astro.redirect('/login');
+}
+
+const bookmarks = await queryAll<any>(
+  db,
+  `SELECT b.*, w.title, w.summary, w.word_count, w.complete, w.updated_at as work_updated_at
+   FROM bookmarks b
+   JOIN works w ON b.work_id = w.id
+   WHERE b.pseud_id = ?1
+   ORDER BY b.created_at DESC`,
+  pseudId
+);
+---
+
+<Base title="Bookmarks — fanfiction.fyi">
+  <section class="bookmarks-page">
+    <h1 class="page-title">Bookmarks</h1>
+
+    {bookmarks.length === 0 ? (
+      <p class="empty-message">You haven't bookmarked any works yet.</p>
+    ) : (
+      <ul class="bookmark-list">
+        {bookmarks.map(bm => (
+          <li class="bookmark-card">
+            <div class="bookmark-header">
+              <a href={`/works/${bm.work_id}`} class="bookmark-title">{bm.title}</a>
+              {bm.private ? <span class="badge badge-private">Private</span> : <span class="badge badge-public">Public</span>}
+            </div>
+            {bm.summary && <p class="bookmark-summary">{bm.summary}</p>}
+            {bm.notes && (
+              <div class="bookmark-notes">
+                <span class="notes-label">Your notes:</span>
+                <span>{bm.notes}</span>
+              </div>
+            )}
+            <div class="bookmark-meta">
+              <span>{bm.word_count?.toLocaleString()} words</span>
+              <span>·</span>
+              <span>{bm.work_updated_at ? `Updated ${new Date(bm.work_updated_at).toLocaleDateString()}` : ''}</span>
+              <span>·</span>
+              <span>Bookmarked {new Date(bm.created_at).toLocaleDateString()}</span>
+            </div>
+            <div class="bookmark-actions">
+              <button class="btn-remove-bookmark" data-work-id={bm.work_id}>Remove Bookmark</button>
+            </div>
+          </li>
+        ))}
+      </ul>
+    )}
+  </section>
+</Base>
+
+<style is:global>
+  @import '../../styles/theme.css';
+
+  .bookmarks-page {
+    max-width: 800px;
+    margin: 0 auto;
+  }
+
+  .page-title {
+    font: var(--md-sys-typescale-headline-large);
+    color: var(--md-sys-color-on-surface);
+    margin: 0 0 var(--space-6);
+  }
+
+  .empty-message {
+    font: var(--md-sys-typescale-body-large);
+    color: var(--md-sys-color-outline);
+    font-style: italic;
+  }
+
+  .bookmark-list {
+    list-style: none;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-4);
+  }
+
+  .bookmark-card {
+    background: var(--md-sys-color-surface-container);
+    border: 1px solid var(--md-sys-color-outline-variant);
+    border-radius: var(--md-sys-shape-corner-large);
+    padding: var(--space-4);
+  }
+
+  .bookmark-header {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    margin-bottom: var(--space-2);
+  }
+
+  .bookmark-title {
+    font: var(--md-sys-typescale-title-large);
+    color: var(--md-sys-color-primary);
+    text-decoration: none;
+  }
+
+  .bookmark-title:hover {
+    text-decoration: underline;
+  }
+
+  .badge {
+    font: var(--md-sys-typescale-label-small);
+    padding: 2px var(--space-2);
+    border-radius: var(--md-sys-shape-corner-full);
+  }
+
+  .badge-private {
+    background: var(--md-sys-color-tertiary-container);
+    color: var(--md-sys-color-on-tertiary-container);
+  }
+
+  .badge-public {
+    background: var(--md-sys-color-secondary-container);
+    color: var(--md-sys-color-on-secondary-container);
+  }
+
+  .bookmark-summary {
+    font: var(--md-sys-typescale-body-medium);
+    color: var(--md-sys-color-on-surface-variant);
+    margin: var(--space-1) 0;
+  }
+
+  .bookmark-notes {
+    font: var(--md-sys-typescale-body-medium);
+    color: var(--md-sys-color-on-surface);
+    background: var(--md-sys-color-surface-container-high);
+    border-radius: var(--md-sys-shape-corner-small);
+    padding: var(--space-2) var(--space-3);
+    margin: var(--space-2) 0;
+  }
+
+  .notes-label {
+    font: var(--md-sys-typescale-label-medium);
+    color: var(--md-sys-color-outline);
+    margin-right: var(--space-2);
+  }
+
+  .bookmark-meta {
+    font: var(--md-sys-typescale-body-small);
+    color: var(--md-sys-color-outline);
+    display: flex;
+    gap: var(--space-2);
+    flex-wrap: wrap;
+    margin-top: var(--space-1);
+  }
+
+  .bookmark-actions {
+    margin-top: var(--space-3);
+  }
+
+  .btn-remove-bookmark {
+    font: var(--md-sys-typescale-label-medium);
+    color: var(--md-sys-color-error);
+    background: transparent;
+    border: 1px solid var(--md-sys-color-error);
+    border-radius: var(--md-sys-shape-corner-full);
+    padding: var(--space-1) var(--space-4);
+    cursor: pointer;
+    transition: background var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard);
+  }
+
+  .btn-remove-bookmark:hover {
+    background: var(--md-sys-color-error-container);
+    color: var(--md-sys-color-on-error-container);
+    border-color: var(--md-sys-color-error-container);
+  }
+</style>
+
+<script>
+  document.querySelectorAll('.btn-remove-bookmark').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const workId = (btn as HTMLElement).dataset.workId;
+      if (!workId) return;
+      try {
+        const res = await fetch('/api/bookmarks', {
+          method: 'DELETE',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ work_id: Number(workId) }),
+        });
+        if (res.ok) {
+          const card = btn.closest('.bookmark-card');
+          if (card) card.remove();
+        }
+      } catch { /* silently fail */ }
+    });
+  });
+</script>

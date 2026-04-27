@@ -1,12 +1,14 @@
 ---
 export const prerender = false;
 import { queryFirst, queryAll } from '../lib/db';
+import { ROLE_LEVEL, UserRole } from '../lib/types';
 
 // Check auth status from cookie
 const cookie = Astro.request.headers.get('cookie') ?? '';
 const sessionMatch = cookie.match(/session=([a-f0-9]+)/);
 let user: any = null;
 let pseuds: any[] = [];
+let isModOrAbove = false;
 
 if (sessionMatch) {
   const db = Astro.locals.runtime.env.DB as D1Database;
@@ -15,6 +17,8 @@ if (sessionMatch) {
     user = await queryFirst<any>(db, `SELECT id, email, role FROM users WHERE id = ?1`, session.user_id);
     if (user) {
       pseuds = await queryAll<any>(db, `SELECT id, name FROM pseuds WHERE user_id = ?1 ORDER BY id`, user.id);
+      const userLevel = ROLE_LEVEL[user.role as UserRole] ?? 0;
+      isModOrAbove = userLevel >= ROLE_LEVEL[UserRole.Mod];
     }
   }
 }
@@ -42,6 +46,8 @@ const title = Astro.props.title ?? 'fanfiction.fyi';
         <a href="/tags">Tags</a>
         <a href="/collections">Collections</a>
         <a href="/search">Search</a>
+        {user && <a href="/bookmarks">Bookmarks</a>}
+        {isModOrAbove && <a href="/admin">Admin</a>}
       </nav>
       <nav class="app-bar__actions">
         {user ? (

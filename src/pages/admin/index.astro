@@ -1,0 +1,138 @@
+---
+export const prerender = false;
+import { queryFirst, queryAll } from '@/lib/db';
+import { UserRole, ROLE_LEVEL } from '@/lib/types';
+
+// Auth gate: admin+ required
+const cookie = Astro.request.headers.get('cookie') ?? '';
+const sessionMatch = cookie.match(/session=([a-f0-9]+)/);
+if (!sessionMatch) return Astro.redirect('/login');
+
+const db = Astro.locals.runtime.env.DB as D1Database;
+const session = await queryFirst<{ user_id: number }>(db, `SELECT user_id FROM sessions WHERE token = ?1 AND expires_at > datetime('now')`, sessionMatch[1]);
+if (!session) return Astro.redirect('/login');
+
+const user = await queryFirst<{ id: number; email: string; role: string }>(db, `SELECT id, email, role FROM users WHERE id = ?1`, session.user_id);
+if (!user) return Astro.redirect('/login');
+
+const userLevel = ROLE_LEVEL[user.role as UserRole] ?? 0;
+if (userLevel < ROLE_LEVEL[UserRole.Admin]) return Astro.redirect('/');
+
+// Stats
+const userCount = await queryFirst<{ cnt: number }>(db, `SELECT COUNT(*) as cnt FROM users`);
+const workCount = await queryFirst<{ cnt: number }>(db, `SELECT COUNT(*) as cnt FROM works`);
+const commentCount = await queryFirst<{ cnt: number }>(db, `SELECT COUNT(*) as cnt FROM comments`);
+const tagCount = await queryFirst<{ cnt: number }>(db, `SELECT COUNT(*) as cnt FROM tags`);
+---
+
+<h1 class="admin-heading">Admin Dashboard</h1>
+
+<div class="stats-grid">
+  <div class="stat-card">
+    <span class="stat-number">{userCount?.cnt ?? 0}</span>
+    <span class="stat-label">Users</span>
+    <a href="/admin/users" class="stat-link">Manage users →</a>
+  </div>
+  <div class="stat-card">
+    <span class="stat-number">{workCount?.cnt ?? 0}</span>
+    <span class="stat-label">Works</span>
+    <a href="/admin/content" class="stat-link">Moderate content →</a>
+  </div>
+  <div class="stat-card">
+    <span class="stat-number">{commentCount?.cnt ?? 0}</span>
+    <span class="stat-label">Comments</span>
+    <a href="/admin/content" class="stat-link">Moderate content →</a>
+  </div>
+  <div class="stat-card">
+    <span class="stat-number">{tagCount?.cnt ?? 0}</span>
+    <span class="stat-label">Tags</span>
+    <a href="/admin/tags" class="stat-link">Manage tags →</a>
+  </div>
+</div>
+
+<div class="admin-links">
+  <a href="/admin/users" class="admin-link-card">
+    <h2>User Management</h2>
+    <p>View all users, change roles, ban/activate accounts.</p>
+  </a>
+  <a href="/admin/content" class="admin-link-card">
+    <h2>Content Moderation</h2>
+    <p>Review recent comments and works. Delete inappropriate comments.</p>
+  </a>
+  <a href="/admin/tags" class="admin-link-card">
+    <h2>Tag Management</h2>
+    <p>View all tags, see usage counts, merge duplicate tags.</p>
+  </a>
+</div>
+
+<style>
+  .admin-heading {
+    font: var(--md-sys-typescale-headline-large);
+    color: var(--md-sys-color-on-surface);
+    margin-bottom: var(--space-6);
+  }
+
+  .stats-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+    gap: var(--space-4);
+    margin-bottom: var(--space-8);
+  }
+
+  .stat-card {
+    background: var(--md-sys-color-surface-container-high);
+    border-radius: var(--md-sys-shape-corner-medium);
+    padding: var(--space-5);
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+  }
+
+  .stat-number {
+    font: var(--md-sys-typescale-headline-large);
+    color: var(--md-sys-color-primary);
+  }
+
+  .stat-label {
+    font: var(--md-sys-typescale-title-medium);
+    color: var(--md-sys-color-on-surface);
+  }
+
+  .stat-link {
+    font: var(--md-sys-typescale-label-large);
+    color: var(--md-sys-color-primary);
+    margin-top: var(--space-1);
+  }
+
+  .admin-links {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    gap: var(--space-4);
+  }
+
+  .admin-link-card {
+    background: var(--md-sys-color-surface-container);
+    border: 1px solid var(--md-sys-color-outline-variant);
+    border-radius: var(--md-sys-shape-corner-large);
+    padding: var(--space-5);
+    text-decoration: none;
+    transition: background var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard);
+  }
+
+  .admin-link-card:hover {
+    background: var(--md-sys-color-surface-container-high);
+    text-decoration: none;
+  }
+
+  .admin-link-card h2 {
+    font: var(--md-sys-typescale-title-large);
+    color: var(--md-sys-color-primary);
+    margin: 0 0 var(--space-2) 0;
+  }
+
+  .admin-link-card p {
+    font: var(--md-sys-typescale-body-medium);
+    color: var(--md-sys-color-on-surface-variant);
+    margin: 0;
+  }
+</style>

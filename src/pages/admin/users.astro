@@ -1,0 +1,262 @@
+---
+export const prerender = false;
+import { queryFirst, queryAll, run } from '@/lib/db';
+import { UserRole, ROLE_LEVEL } from '@/lib/types';
+
+// Auth gate: admin+ required
+const cookie = Astro.request.headers.get('cookie') ?? '';
+const sessionMatch = cookie.match(/session=([a-f0-9]+)/);
+if (!sessionMatch) return Astro.redirect('/login');
+
+const db = Astro.locals.runtime.env.DB as D1Database;
+const session = await queryFirst<{ user_id: number }>(db, `SELECT user_id FROM sessions WHERE token = ?1 AND expires_at > datetime('now')`, sessionMatch[1]);
+if (!session) return Astro.redirect('/login');
+
+const currentUser = await queryFirst<{ id: number; email: string; role: string }>(db, `SELECT id, email, role FROM users WHERE id = ?1`, session.user_id);
+if (!currentUser) return Astro.redirect('/login');
+
+const userLevel = ROLE_LEVEL[currentUser.role as UserRole] ?? 0;
+if (userLevel < ROLE_LEVEL[UserRole.Admin]) return Astro.redirect('/');
+
+const users = await queryAll<{
+  id: number; email: string; role: string; created_at: string; google_id: string | null; banned: number;
+}>(db, `SELECT id, email, role, created_at, google_id, banned FROM users ORDER BY id`);
+
+const allRoles: UserRole[] = [UserRole.Admin, UserRole.Mod, UserRole.User];
+---
+
+<h1 class="admin-heading">User Management</h1>
+
+<div class="table-wrap">
+  <table class="admin-table">
+    <thead>
+      <tr>
+        <th>ID</th>
+        <th>Email</th>
+        <th>Role</th>
+        <th>Google</th>
+        <th>Banned</th>
+        <th>Created</th>
+        <th>Actions</th>
+      </tr>
+    </thead>
+    <tbody>
+      {users.map(u => (
+        <tr class:row-banned={u.banned === 1}>
+          <td>{u.id}</td>
+          <td>{u.email}</td>
+          <td>
+            {u.role === 'founder' ? (
+              <span class="badge badge-founder">founder</span>
+            ) : (
+              <select class="role-select" data-user-id={u.id} data-current-role={u.role}>
+                {allRoles.map(r => (
+                  <option value={r} selected={u.role === r}>{r}</option>
+                ))}
+              </select>
+            )}
+          </td>
+          <td>{u.google_id ? '✓' : '—'}</td>
+          <td>{u.banned ? 'Yes' : 'No'}</td>
+          <td>{new Date(u.created_at).toLocaleDateString()}</td>
+          <td>
+            {u.role !== 'founder' && (
+              <button
+                class={u.banned ? 'btn-activate' : 'btn-ban'}
+                data-user-id={u.id}
+                data-banned={u.banned}
+              >
+                {u.banned ? 'Activate' : 'Ban'}
+              </button>
+            )}
+          </td>
+        </tr>
+      ))}
+    </tbody>
+  </table>
+</div>
+
+<div id="toast" class="toast hidden"></div>
+
+<script>
+  // Role change handler
+  document.querySelectorAll('.role-select').forEach(sel => {
+    sel.addEventListener('change', async (e) => {
+      const select = e.target;
+      const userId = select.dataset.userId;
+      const role = select.value;
+      try {
+        const res = await fetch(`/api/admin/users/${userId}/role`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ role }),
+        });
+        if (!res.ok) {
+          const err = await res.json();
+          showToast(err.error || 'Failed to update role', true);
+          select.value = select.dataset.currentRole;
+        } else {
+          select.dataset.currentRole = role;
+          showToast('Role updated');
+        }
+      } catch {
+        showToast('Network error', true);
+        select.value = select.dataset.currentRole;
+      }
+    });
+  });
+
+  // Ban/activate handler
+  document.querySelectorAll('.btn-ban, .btn-activate').forEach(btn => {
+    btn.addEventListener('click', async (e) => {
+      const button = e.target;
+      const userId = button.dataset.userId;
+      const currentlyBanned = button.dataset.banned === '1';
+      const newBanned = currentlyBanned ? 0 : 1;
+      try {
+        const res = await fetch(`/api/admin/users/${userId}/role`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ banned: newBanned }),
+        });
+        if (!res.ok) {
+          const err = await res.json();
+          showToast(err.error || 'Failed to update status', true);
+        } else {
+          button.dataset.banned = String(newBanned);
+          button.textContent = newBanned ? 'Activate' : 'Ban';
+          button.className = newBanned ? 'btn-activate' : 'btn-ban';
+          button.closest('tr').classList.toggle('row-banned', !!newBanned);
+          button.closest('tr').querySelector('td:nth-child(5)').textContent = newBanned ? 'Yes' : 'No';
+          showToast(newBanned ? 'User banned' : 'User activated');
+        }
+      } catch {
+        showToast('Network error', true);
+      }
+    });
+  });
+
+  function showToast(msg, isError = false) {
+    const toast = document.getElementById('toast');
+    toast.textContent = msg;
+    toast.className = 'toast' + (isError ? ' toast-error' : '') + ' toast-show';
+    setTimeout(() => { toast.className = 'toast hidden'; }, 2500);
+  }
+</script>
+
+<style>
+  .admin-heading {
+    font: var(--md-sys-typescale-headline-large);
+    color: var(--md-sys-color-on-surface);
+    margin-bottom: var(--space-6);
+  }
+
+  .table-wrap {
+    overflow-x: auto;
+  }
+
+  .admin-table {
+    width: 100%;
+    border-collapse: collapse;
+    font: var(--md-sys-typescale-body-medium);
+    color: var(--md-sys-color-on-surface);
+  }
+
+  .admin-table th {
+    font: var(--md-sys-typescale-label-large);
+    color: var(--md-sys-color-on-surface-variant);
+    text-align: left;
+    padding: var(--space-3) var(--space-4);
+    border-bottom: 2px solid var(--md-sys-color-outline-variant);
+    white-space: nowrap;
+  }
+
+  .admin-table td {
+    padding: var(--space-3) var(--space-4);
+    border-bottom: 1px solid var(--md-sys-color-outline-variant);
+    white-space: nowrap;
+  }
+
+  .row-banned {
+    background: rgba(255, 100, 100, 0.1);
+  }
+
+  .badge {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: var(--md-sys-shape-corner-small);
+    font: var(--md-sys-typescale-label-large);
+  }
+
+  .badge-founder {
+    background: var(--md-sys-color-primary-container);
+    color: var(--md-sys-color-on-primary-container);
+  }
+
+  .role-select {
+    background: var(--md-sys-color-surface-container-high);
+    color: var(--md-sys-color-on-surface);
+    border: 1px solid var(--md-sys-color-outline);
+    border-radius: var(--md-sys-shape-corner-small);
+    padding: var(--space-1) var(--space-2);
+    font: var(--md-sys-typescale-body-medium);
+    cursor: pointer;
+  }
+
+  .btn-ban, .btn-activate {
+    border: none;
+    border-radius: var(--md-sys-shape-corner-small);
+    padding: var(--space-1) var(--space-3);
+    font: var(--md-sys-typescale-label-large);
+    cursor: pointer;
+    transition: background var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard);
+  }
+
+  .btn-ban {
+    background: var(--md-sys-color-error-container);
+    color: var(--md-sys-color-on-error-container);
+  }
+
+  .btn-ban:hover {
+    background: #b83030;
+    color: #fff;
+  }
+
+  .btn-activate {
+    background: var(--md-sys-color-primary-container);
+    color: var(--md-sys-color-on-primary-container);
+  }
+
+  .btn-activate:hover {
+    background: var(--md-sys-color-primary);
+    color: var(--md-sys-color-on-primary);
+  }
+
+  .toast {
+    position: fixed;
+    bottom: var(--space-8);
+    left: 50%;
+    transform: translateX(-50%);
+    padding: var(--space-3) var(--space-6);
+    border-radius: var(--md-sys-shape-corner-medium);
+    background: var(--md-sys-color-surface-container-highest);
+    color: var(--md-sys-color-on-surface);
+    font: var(--md-sys-typescale-body-medium);
+    z-index: 1000;
+    transition: opacity 0.3s;
+  }
+
+  .toast-error {
+    background: var(--md-sys-color-error-container);
+    color: var(--md-sys-color-on-error-container);
+  }
+
+  .toast-show {
+    opacity: 1;
+  }
+
+  .hidden {
+    opacity: 0;
+    pointer-events: none;
+  }
+</style>

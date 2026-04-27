@@ -1,7 +1,8 @@
 ---
 export const prerender = false;
 import Base from '../../../layouts/Base.astro';
-import { getDb, queryFirst, queryAll } from '../../../lib/db';
+import { queryFirst, queryAll } from '../../../lib/db';
+import { markdownToHtml } from '../../../lib/markdown';
 
 const workId = Number(Astro.params.id);
 if (!workId) return Astro.redirect('/works');
@@ -22,12 +23,17 @@ const chapter = chapterId ? await queryFirst<any>(db, `SELECT * FROM chapters WH
 
 // Check auth status
 let authUser = null;
+let userPseudId: number | null = null;
 const cookie = Astro.request.headers.get('cookie') ?? '';
 const sessionMatch = cookie.match(/session=([a-f0-9]+)/);
 if (sessionMatch) {
   const session = await queryFirst<any>(db, `SELECT user_id FROM sessions WHERE token = ?1 AND expires_at > datetime('now')`, sessionMatch[1]);
   if (session) {
     authUser = await queryFirst<any>(db, `SELECT * FROM users WHERE id = ?1`, session.user_id);
+    if (authUser) {
+      const userPseud = await queryFirst<any>(db, `SELECT id FROM pseuds WHERE user_id = ?1 ORDER BY id LIMIT 1`, authUser.id);
+      userPseudId = userPseud?.id ?? null;
+    }
   }
 }
 
@@ -42,6 +48,23 @@ for (const t of tags) {
 
 // Kudos count
 const kudosCount = (await queryFirst<any>(db, `SELECT COUNT(*) as cnt FROM kudos WHERE work_id = ?1`, workId))?.cnt ?? 0;
+
+// Bookmark & reading state for logged-in users
+let existingBookmark: any = null;
+let readingProgress: any = null;
+if (userPseudId) {
+  existingBookmark = await queryFirst<any>(db, `SELECT id, notes, private FROM bookmarks WHERE pseud_id = ?1 AND work_id = ?2`, userPseudId, workId);
+  readingProgress = await queryFirst<any>(db, `SELECT * FROM readings WHERE pseud_id = ?1 AND work_id = ?2`, userPseudId, workId);
+}
+
+// Comments — fetch all top-level + replies in one query, build tree client-side
+const allComments = await queryAll<any>(db, `SELECT c.*, p.name as pseud_name FROM comments c JOIN pseuds p ON c.pseud_id = p.id WHERE c.work_id = ?1 ORDER BY c.created_at ASC`, workId);
+for (const c of allComments) {
+  if (c.content) {
+    c.content_html = markdownToHtml(c.content);
+  }
+}
+const commentsJson = JSON.stringify(allComments);
 ---
 
 <Base title={`${work.title} — fanfiction.fyi`}>
@@ -118,7 +141,75 @@ const kudosCount = (await queryFirst<any>(db, `SELECT COUNT(*) as cnt FROM kudos
 
     <div class="work-actions">
       <button id="kudos-btn" class="btn-primary" data-work-id={work.id}>❤️ Leave Kudos ({kudosCount})</button>
+
+      {authUser && (
+        <div class="user-work-actions" data-authed="true">
+          <button id="bookmark-btn" class="btn-secondary" data-bookmarked={existingBookmark ? 'true' : 'false'} data-work-id={work.id}>
+            {existingBookmark ? '🔖 Bookmarked' : '🔖 Bookmark'}
+          </button>
+          <button id="mark-later-btn" class="btn-secondary" data-for-later={readingProgress?.for_later ? 'true' : 'false'} data-work-id={work.id}>
+            {readingProgress?.for_later ? '📋 Marked for Later' : '📋 Mark for Later'}
+          </button>
+        </div>
+      )}
     </div>
+
+    {authUser && existingBookmark && (
+      <div class="bookmark-info">
+        <span class="bookmark-badge">🔖 Bookmarked</span>
+        {existingBookmark.private && <span class="badge-private-inline">Private</span>}
+        {existingBookmark.notes && <p class="bookmark-user-notes">"{existingBookmark.notes}"</p>}
+      </div>
+    )}
+
+    <!-- Comments Section -->
+    <section class="comments-section">
+      <h3 class="comments-title">Comments ({allComments.length})</h3>
+
+      {authUser ? (
+        <form id="comment-form" class="comment-form">
+          <input type="hidden" name="work_id" value={work.id} />
+          <input type="hidden" name="chapter_id" value={chapter?.id ?? ''} />
+          <input type="hidden" name="parent_id" id="reply-parent-id" value="" />
+          <div class="comment-form-header">
+            <span id="reply-indicator" class="reply-indicator" style="display:none;">
+              Replying to <span id="reply-to-name"></span>
+              <button type="button" id="cancel-reply" class="cancel-reply-btn">✕</button>
+            </span>
+          </div>
+          <textarea id="comment-content" name="content" placeholder="Leave a comment…" rows="3" required class="comment-textarea"></textarea>
+          <button type="submit" class="btn-primary">Post Comment</button>
+        </form>
+      ) : (
+        <p class="login-prompt"><a href="/login">Sign in</a> to leave a comment.</p>
+      )}
+
+      <div id="comments-thread" class="comments-thread" data-comments={commentsJson}>
+        {allComments.filter(c => !c.parent_id).map(comment => (
+          <div class="comment-item" data-comment-id={comment.id}>
+            <div class="comment-body">
+              <span class="comment-author">{comment.pseud_name}</span>
+              <span class="comment-date">{new Date(comment.created_at).toLocaleDateString()}</span>
+              <div class="comment-content" set:html={comment.content_html || comment.content} />
+              {authUser && (
+                <button class="reply-btn" data-comment-id={comment.id} data-pseud-name={comment.pseud_name}>Reply</button>
+              )}
+            </div>
+            <div class="comment-replies">
+              {allComments.filter(r => r.parent_id === comment.id).map(reply => (
+                <div class="comment-item comment-reply" data-comment-id={reply.id}>
+                  <div class="comment-body">
+                    <span class="comment-author">{reply.pseud_name}</span>
+                    <span class="comment-date">{new Date(reply.created_at).toLocaleDateString()}</span>
+                    <div class="comment-content" set:html={reply.content_html || reply.content} />
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        ))}
+      </div>
+    </section>
   </article>
 </Base>
 
@@ -157,14 +248,45 @@ const kudosCount = (await queryFirst<any>(db, `SELECT COUNT(*) as cnt FROM kudos
   .prose-content p { margin: var(--space-2) 0; }
   .prose-content h1, .prose-content h2, .prose-content h3 { margin: var(--space-6) 0 var(--space-2); color: var(--md-sys-color-on-surface); }
 
-  .work-actions { margin-top: var(--space-8); display: flex; gap: var(--space-3); align-items: center; }
+  .work-actions { margin-top: var(--space-8); display: flex; gap: var(--space-3); align-items: center; flex-wrap: wrap; }
+  .user-work-actions { display: flex; gap: var(--space-3); }
+
+  .bookmark-info { background: var(--md-sys-color-secondary-container); border-radius: var(--md-sys-shape-corner-medium); padding: var(--space-3) var(--space-4); margin-top: var(--space-3); display: flex; align-items: center; gap: var(--space-2); flex-wrap: wrap; }
+  .bookmark-badge { font: var(--md-sys-typescale-label-large); color: var(--md-sys-color-on-secondary-container); }
+  .badge-private-inline { font: var(--md-sys-typescale-label-small); background: var(--md-sys-color-tertiary-container); color: var(--md-sys-color-on-tertiary-container); padding: 2px var(--space-2); border-radius: var(--md-sys-shape-corner-full); }
+  .bookmark-user-notes { font: var(--md-sys-typescale-body-medium); color: var(--md-sys-color-on-secondary-container); margin: 0; font-style: italic; }
+
+  .comments-section { margin-top: var(--space-10); border-top: 1px solid var(--md-sys-color-outline-variant); padding-top: var(--space-6); }
+  .comments-title { font: var(--md-sys-typescale-headline-medium); color: var(--md-sys-color-on-surface); margin: 0 0 var(--space-4); }
+
+  .comment-form { margin-bottom: var(--space-6); }
+  .comment-form-header { margin-bottom: var(--space-2); }
+  .reply-indicator { font: var(--md-sys-typescale-body-small); color: var(--md-sys-color-primary); background: var(--md-sys-color-primary-container); padding: var(--space-1) var(--space-2); border-radius: var(--md-sys-shape-corner-full); display: inline-flex; align-items: center; gap: var(--space-2); }
+  .cancel-reply-btn { background: none; border: none; color: var(--md-sys-color-on-primary-container); cursor: pointer; font-size: 14px; padding: 0 var(--space-1); }
+  .comment-textarea { width: 100%; font: var(--md-sys-typescale-body-large); background: var(--md-sys-color-surface-container); color: var(--md-sys-color-on-surface); border: 1px solid var(--md-sys-color-outline-variant); border-radius: var(--md-sys-shape-corner-medium); padding: var(--space-3); resize: vertical; }
+  .comment-textarea:focus { outline: none; border-color: var(--md-sys-color-primary); }
+  .login-prompt { font: var(--md-sys-typescale-body-large); color: var(--md-sys-color-outline); }
+  .login-prompt a { color: var(--md-sys-color-primary); }
+
+  .comments-thread { display: flex; flex-direction: column; gap: var(--space-4); }
+  .comment-item { background: var(--md-sys-color-surface-container); border-radius: var(--md-sys-shape-corner-medium); padding: var(--space-4); }
+  .comment-body { }
+  .comment-author { font: var(--md-sys-typescale-label-large); color: var(--md-sys-color-primary); }
+  .comment-date { font: var(--md-sys-typescale-body-small); color: var(--md-sys-color-outline); margin-left: var(--space-2); }
+  .comment-content { font: var(--md-sys-typescale-body-large); color: var(--md-sys-color-on-surface); line-height: 1.7; margin-top: var(--space-2); }
+  .comment-content p { margin: var(--space-1) 0; }
+  .reply-btn { font: var(--md-sys-typescale-label-medium); color: var(--md-sys-color-primary); background: none; border: none; cursor: pointer; margin-top: var(--space-2); padding: 0; }
+  .reply-btn:hover { text-decoration: underline; }
+  .comment-replies { margin-left: var(--space-6); margin-top: var(--space-3); display: flex; flex-direction: column; gap: var(--space-2); }
+  .comment-reply { background: var(--md-sys-color-surface-container-high); }
 
   .btn-primary { font: var(--md-sys-typescale-label-large); color: var(--md-sys-color-on-primary); background: var(--md-sys-color-primary); border: none; border-radius: var(--md-sys-shape-corner-full); padding: var(--space-3) var(--space-6); cursor: pointer; }
   .btn-secondary { font: var(--md-sys-typescale-label-large); color: var(--md-sys-color-primary); background: transparent; border: 1px solid var(--md-sys-color-outline); border-radius: var(--md-sys-shape-corner-full); padding: var(--space-3) var(--space-6); cursor: pointer; text-decoration: none; }
   .placeholder-text { font: var(--md-sys-typescale-body-large); color: var(--md-sys-color-outline); font-style: italic; }
 </style>
 
-<script define:vars={{ workId }}>
+<script define:vars={{ workId, chapterId, authed: !!authUser }}>
+  // Kudos
   const kudosBtn = document.getElementById('kudos-btn');
   if (kudosBtn) {
     kudosBtn.addEventListener('click', async () => {
@@ -182,6 +304,126 @@ const kudosCount = (await queryFirst<any>(db, `SELECT COUNT(*) as cnt FROM kudos
           kudosBtn.disabled = true;
         }
       } catch { /* silently fail */ }
+    });
+  }
+
+  if (!authed) return; // everything below requires auth
+
+  // Bookmark toggle
+  const bookmarkBtn = document.getElementById('bookmark-btn');
+  if (bookmarkBtn) {
+    bookmarkBtn.addEventListener('click', async () => {
+      const isBookmarked = bookmarkBtn.dataset.bookmarked === 'true';
+      try {
+        if (isBookmarked) {
+          const res = await fetch('/api/bookmarks', {
+            method: 'DELETE',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ work_id: workId }),
+          });
+          if (res.ok) {
+            bookmarkBtn.textContent = '🔖 Bookmark';
+            bookmarkBtn.dataset.bookmarked = 'false';
+          }
+        } else {
+          const res = await fetch('/api/bookmarks', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ work_id: workId }),
+          });
+          if (res.ok || res.status === 409) {
+            bookmarkBtn.textContent = '🔖 Bookmarked';
+            bookmarkBtn.dataset.bookmarked = 'true';
+          }
+        }
+      } catch { /* silently fail */ }
+    });
+  }
+
+  // Mark for Later toggle
+  const laterBtn = document.getElementById('mark-later-btn');
+  if (laterBtn) {
+    laterBtn.addEventListener('click', async () => {
+      const isForLater = laterBtn.dataset.forLater === 'true';
+      try {
+        const res = await fetch(`/api/works/${workId}/progress`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ for_later: !isForLater }),
+        });
+        if (res.ok) {
+          if (isForLater) {
+            laterBtn.textContent = '📋 Mark for Later';
+            laterBtn.dataset.forLater = 'false';
+          } else {
+            laterBtn.textContent = '📋 Marked for Later';
+            laterBtn.dataset.forLater = 'true';
+          }
+        }
+      } catch { /* silently fail */ }
+    });
+  }
+
+  // Reading progress — auto-send on page load
+  try {
+    fetch(`/api/works/${workId}/progress`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ last_chapter: chapterId }),
+    }).catch(() => {});
+  } catch { /* silently fail */ }
+
+  // Comment form
+  const commentForm = document.getElementById('comment-form');
+  if (commentForm) {
+    commentForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const content = document.getElementById('comment-content').value.trim();
+      const parentId = document.getElementById('reply-parent-id').value;
+      if (!content) return;
+
+      try {
+        const body = { content, work_id: workId };
+        if (parentId) body.parent_id = Number(parentId);
+        if (chapterId) body.chapter_id = chapterId;
+
+        const res = await fetch(`/api/works/${workId}/comments`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        });
+        if (res.ok) {
+          window.location.reload();
+        }
+      } catch { /* silently fail */ }
+    });
+  }
+
+  // Reply buttons
+  document.querySelectorAll('.reply-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const commentId = btn.dataset.commentId;
+      const pseudName = btn.dataset.pseudName;
+      const parentInput = document.getElementById('reply-parent-id');
+      const indicator = document.getElementById('reply-indicator');
+      const replyName = document.getElementById('reply-to-name');
+      if (parentInput && indicator && replyName) {
+        parentInput.value = commentId;
+        replyName.textContent = pseudName;
+        indicator.style.display = 'inline-flex';
+      }
+      document.getElementById('comment-content')?.focus();
+    });
+  });
+
+  // Cancel reply
+  const cancelReply = document.getElementById('cancel-reply');
+  if (cancelReply) {
+    cancelReply.addEventListener('click', () => {
+      const parentInput = document.getElementById('reply-parent-id');
+      const indicator = document.getElementById('reply-indicator');
+      if (parentInput) parentInput.value = '';
+      if (indicator) indicator.style.display = 'none';
     });
   }
 </script>
