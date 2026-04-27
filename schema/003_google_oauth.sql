@@ -1,6 +1,7 @@
 -- fanfiction.fyi — Google OAuth + Founder role
 -- Add 'founder' role to the users table CHECK constraint
 -- SQLite doesn't support ALTER TABLE ... ALTER CONSTRAINT, so we recreate.
+-- NOTE: D1 does not support datetime('now') as a DEFAULT — use CURRENT_TIMESTAMP.
 
 -- Step 1: Create new users table with expanded role
 CREATE TABLE IF NOT EXISTS users_new (
@@ -12,8 +13,8 @@ CREATE TABLE IF NOT EXISTS users_new (
   avatar_url    TEXT,  -- Google profile picture
   display_name  TEXT,  -- Google display name
   invite_code   TEXT,
-  created_at    TEXT NOT NULL DEFAULT (datetime('now')),
-  updated_at    TEXT NOT NULL DEFAULT (datetime('now'))
+  created_at    TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at    TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
 -- Step 2: Copy existing data
@@ -30,4 +31,4 @@ CREATE INDEX IF NOT EXISTS idx_users_google_id ON users (google_id);
 
 -- Step 5: Seed founder account (password_hash is NULL — OAuth-only)
 INSERT OR IGNORE INTO users (email, role, google_id, display_name, created_at, updated_at)
-  VALUES ('kaleb.bays@gmail.com', 'founder', NULL, 'Kaleb', datetime('now'), datetime('now'));
+  VALUES ('kaleb.bays@gmail.com', 'founder', NULL, 'Kaleb', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP);
