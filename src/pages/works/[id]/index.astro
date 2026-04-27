@@ -142,6 +142,10 @@ const commentsJson = JSON.stringify(allComments);
     <div class="work-actions">
       <button id="kudos-btn" class="btn-primary" data-work-id={work.id}>❤️ Leave Kudos ({kudosCount})</button>
 
+      {work.published_at && (
+        <a href={`/api/works/${work.id}/export?format=epub`} class="btn-secondary" download>📥 Export EPUB</a>
+      )}
+
       {authUser && (
         <div class="user-work-actions" data-authed="true">
           <button id="bookmark-btn" class="btn-secondary" data-bookmarked={existingBookmark ? 'true' : 'false'} data-work-id={work.id}>
