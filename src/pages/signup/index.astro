@@ -6,32 +6,40 @@ export const prerender = false;
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="description" content="Sign in to fanfiction.fyi" />
+    <meta name="description" content="Create an account on fanfiction.fyi" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
-    <title>Sign In — fanfiction.fyi</title>
+    <title>Sign Up — fanfiction.fyi</title>
   </head>
   <body>
     <div class="auth-container">
       <a href="/" class="auth-logo">fanfiction.fyi</a>
-      <h1 class="auth-title">Sign In</h1>
+      <h1 class="auth-title">Create Account</h1>
 
-      <form id="login-form" class="auth-form">
+      <form id="signup-form" class="auth-form">
+        <div class="form-field">
+          <label for="invite_code">Invite Code</label>
+          <input type="text" id="invite_code" name="invite_code" required placeholder="Enter your invite code" />
+        </div>
         <div class="form-field">
           <label for="email">Email</label>
           <input type="email" id="email" name="email" required autocomplete="email" placeholder="you@example.com" />
         </div>
         <div class="form-field">
           <label for="password">Password</label>
-          <input type="password" id="password" name="password" required autocomplete="current-password" placeholder="Your password" />
+          <input type="password" id="password" name="password" required autocomplete="new-password" placeholder="Choose a password (8+ characters)" minlength="8" />
         </div>
-        <div id="login-error" class="form-error" role="alert"></div>
-        <button type="submit" class="btn-primary">Sign In</button>
+        <div class="form-field">
+          <label for="display_name">Display Name</label>
+          <input type="text" id="display_name" name="display_name" required placeholder="Your pen name / pseudonym" />
+        </div>
+        <div id="signup-error" class="form-error" role="alert"></div>
+        <button type="submit" class="btn-primary">Create Account</button>
       </form>
 
-      <p class="auth-alt">Don't have an account? <a href="/signup">Request an invite</a></p>
+      <p class="auth-alt">Already have an account? <a href="/login">Sign in</a></p>
     </div>
   </body>
 </html>
@@ -81,9 +89,7 @@ export const prerender = false;
     color: var(--md-sys-color-on-surface-variant);
   }
 
-  .form-field input,
-  .form-field textarea,
-  .form-field select {
+  .form-field input {
     font: var(--md-sys-typescale-body-large);
     color: var(--md-sys-color-on-surface);
     background: var(--md-sys-color-surface-container);
@@ -94,9 +100,7 @@ export const prerender = false;
     transition: border-color var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard);
   }
 
-  .form-field input:focus,
-  .form-field textarea:focus,
-  .form-field select:focus {
+  .form-field input:focus {
     border-color: var(--md-sys-color-primary);
   }
 
@@ -139,8 +143,8 @@ export const prerender = false;
 </style>
 
 <script>
-  const form = document.getElementById('login-form') as HTMLFormElement;
-  const errorEl = document.getElementById('login-error')!;
+  const form = document.getElementById('signup-form') as HTMLFormElement;
+  const errorEl = document.getElementById('signup-error')!;
 
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
@@ -149,19 +153,21 @@ export const prerender = false;
     btn.disabled = true;
 
     try {
-      const res = await fetch('/api/auth/login', {
+      const res = await fetch('/api/auth/signup', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          invite_code: (document.getElementById('invite_code') as HTMLInputElement).value,
           email: (document.getElementById('email') as HTMLInputElement).value,
           password: (document.getElementById('password') as HTMLInputElement).value,
+          display_name: (document.getElementById('display_name') as HTMLInputElement).value,
         }),
       });
       if (res.ok) {
         window.location.href = '/';
       } else {
         const data = await res.json();
-        errorEl.textContent = data.error || 'Sign in failed';
+        errorEl.textContent = data.error || 'Sign up failed';
       }
     } catch {
       errorEl.textContent = 'Network error';

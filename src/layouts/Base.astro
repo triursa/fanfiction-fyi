@@ -1,17 +1,38 @@
 ---
 export const prerender = false;
+import { queryFirst, queryAll } from '../lib/db';
+
+// Check auth status from cookie
+const cookie = Astro.request.headers.get('cookie') ?? '';
+const sessionMatch = cookie.match(/session=([a-f0-9]+)/);
+let user: any = null;
+let pseuds: any[] = [];
+
+if (sessionMatch) {
+  const db = Astro.locals.runtime.env.DB as D1Database;
+  const session = await queryFirst<any>(db, `SELECT user_id FROM sessions WHERE token = ?1 AND expires_at > datetime('now')`, sessionMatch[1]);
+  if (session) {
+    user = await queryFirst<any>(db, `SELECT id, email, role FROM users WHERE id = ?1`, session.user_id);
+    if (user) {
+      pseuds = await queryAll<any>(db, `SELECT id, name FROM pseuds WHERE user_id = ?1 ORDER BY id`, user.id);
+    }
+  }
+}
+
+const title = Astro.props.title ?? 'fanfiction.fyi';
 ---
+
 <!doctype html>
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="description" content="fanfiction.fyi — A bespoke fanfiction archive" />
+    <meta name="description" content={title.includes('fanfiction.fyi') ? title : `${title} — fanfiction.fyi`} />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
-    <title>{Astro.props.title ?? 'fanfiction.fyi'}</title>
+    <title>{title}</title>
   </head>
   <body>
     <header class="app-bar">
@@ -23,7 +44,17 @@ export const prerender = false;
         <a href="/search">Search</a>
       </nav>
       <nav class="app-bar__actions">
-        <a href="/login">Sign In</a>
+        {user ? (
+          <div class="user-menu">
+            <span class="user-name">{pseuds[0]?.name || user.email}</span>
+            <a href="/works/new" class="btn-nav-accent">New Work</a>
+            <form action="/api/auth/logout" method="post" class="logout-form">
+              <button type="submit" class="btn-nav">Sign Out</button>
+            </form>
+          </div>
+        ) : (
+          <a href="/login" class="btn-nav-accent">Sign In</a>
+        )}
       </nav>
     </header>
     <main class="main-content">
@@ -63,18 +94,53 @@ export const prerender = false;
   }
 
   .app-bar__nav a,
-  .app-bar__actions a {
+  .btn-nav {
     font: var(--md-sys-typescale-label-large);
     color: var(--md-sys-color-on-surface-variant);
     padding: var(--space-2) var(--space-3);
     border-radius: var(--md-sys-shape-corner-full);
     transition: background var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard);
+    text-decoration: none;
+    background: none;
+    border: none;
+    cursor: pointer;
   }
 
   .app-bar__nav a:hover,
-  .app-bar__actions a:hover {
+  .btn-nav:hover {
     background: var(--md-sys-color-surface-container-highest);
     text-decoration: none;
+  }
+
+  .btn-nav-accent {
+    font: var(--md-sys-typescale-label-large);
+    color: var(--md-sys-color-on-primary);
+    background: var(--md-sys-color-primary);
+    padding: var(--space-2) var(--space-4);
+    border-radius: var(--md-sys-shape-corner-full);
+    text-decoration: none;
+    border: none;
+    cursor: pointer;
+  }
+
+  .btn-nav-accent:hover {
+    background: var(--md-sys-color-primary-container);
+    color: var(--md-sys-color-on-primary-container);
+  }
+
+  .user-menu {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+  }
+
+  .user-name {
+    font: var(--md-sys-typescale-label-large);
+    color: var(--md-sys-color-on-surface);
+  }
+
+  .logout-form {
+    display: inline;
   }
 
   .main-content {
@@ -90,5 +156,18 @@ export const prerender = false;
     font: var(--md-sys-typescale-body-small);
     color: var(--md-sys-color-outline);
     border-top: 1px solid var(--md-sys-color-outline-variant);
+  }
+
+  @media (max-width: 768px) {
+    .app-bar {
+      flex-wrap: wrap;
+      gap: var(--space-2);
+    }
+    .app-bar__nav {
+      order: 3;
+      width: 100%;
+      overflow-x: auto;
+      gap: var(--space-2);
+    }
   }
 </style>

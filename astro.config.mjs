@@ -20,5 +20,10 @@ export default defineConfig({
     ssr: {
       noExternal: ['@material/web'],
     },
+    resolve: {
+      alias: {
+        '@': new URL('./src', import.meta.url).pathname,
+      },
+    },
   },
 });

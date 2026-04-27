@@ -1,0 +1,96 @@
+export const prerender = false;
+
+import { queryFirst, run, queryAll } from '@/lib/db';
+import { getAuth } from '@/lib/auth';
+import { markdownToHtml } from '@/lib/markdown';
+import type { APIRoute } from 'astro';
+
+export const GET: APIRoute = async ({ url, locals }) => {
+  const db = locals.runtime.env.DB as D1Database;
+  const page = Number(url.searchParams.get('page')) || 1;
+  const limit = Math.min(Number(url.searchParams.get('limit')) || 20, 100);
+  const offset = (page - 1) * limit;
+  const tagType = url.searchParams.get('tag_type');
+  const tagName = url.searchParams.get('tag_name');
+
+  let sql = `SELECT w.* FROM works w`;
+  const bindings: any[] = [];
+
+  if (tagType || tagName) {
+    sql += ` JOIN taggings tg ON tg.work_id = w.id JOIN tags t ON t.id = tg.tag_id WHERE w.published_at IS NOT NULL`;
+    if (tagType) { sql += ` AND t.type = ?`; bindings.push(tagType); }
+    if (tagName) { sql += ` AND t.name LIKE ?`; bindings.push(`%${tagName}%`); }
+  } else {
+    sql += ` WHERE w.published_at IS NOT NULL`;
+  }
+
+  sql += ` ORDER BY w.updated_at DESC LIMIT ? OFFSET ?`;
+  bindings.push(limit, offset);
+
+  const works = await queryAll<any>(db, sql, ...bindings);
+
+  for (const w of works) {
+    w.tags = await queryAll<any>(db, `SELECT t.name, t.type FROM tags t JOIN taggings tg ON t.id = tg.tag_id WHERE tg.work_id = ?1`, w.id);
+    w.pseuds = await queryAll<any>(db, `SELECT p.name, c.role FROM pseuds p JOIN creatorships c ON p.id = c.pseud_id WHERE c.work_id = ?1`, w.id);
+  }
+
+  return new Response(JSON.stringify(works), { headers: { 'Content-Type': 'application/json' } });
+};
+
+export const POST: APIRoute = async ({ request, locals }) => {
+  const db = locals.runtime.env.DB as D1Database;
+  const auth = await getAuth(db, request);
+  if (!auth) return new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401, headers: { 'Content-Type': 'application/json' } });
+
+  let body: any;
+  try { body = await request.json(); } catch { return new Response(JSON.stringify({ error: 'Invalid JSON' }), { status: 400, headers: { 'Content-Type': 'application/json' } }); }
+
+  const { title, summary, notes, pseud_id, chapter_title, chapter_content, draft, tag_ids, rating, category, warning } = body || {};
+  if (!title) return new Response(JSON.stringify({ error: 'Title is required' }), { status: 400, headers: { 'Content-Type': 'application/json' } });
+
+  const pseudId = pseud_id || auth.pseuds[0]?.id;
+  if (!pseudId) return new Response(JSON.stringify({ error: 'No pseud available' }), { status: 400, headers: { 'Content-Type': 'application/json' } });
+
+  const isDraft = draft !== undefined ? (draft ? 1 : 0) : 1;
+  const contentMd = chapter_content || '';
+  const contentHtml = contentMd ? markdownToHtml(contentMd) : null;
+  const wordCount = contentMd ? contentMd.split(/\s+/).filter(Boolean).length : 0;
+
+  const workResult = await run(db, `INSERT INTO works (title, summary, notes, language, word_count, complete, published_at, updated_at, created_at) VALUES (?1, ?2, ?3, 'en', ?4, 0, ?, datetime('now'), datetime('now'))`,
+    title, summary || null, notes || null, wordCount, isDraft ? null : "datetime('now')");
+
+  const workId = workResult.meta.last_row_id;
+
+  await run(db, `INSERT INTO creatorships (pseud_id, work_id, role, created_at) VALUES (?1, ?2, 'author', datetime('now'))`, pseudId, workId);
+
+  const chapterResult = await run(db, `INSERT INTO chapters (work_id, position, title, content_md, content_html, draft, word_count, created_at, updated_at) VALUES (?1, 1, ?2, ?3, ?4, ?5, ?6, datetime('now'), datetime('now'))`,
+    workId, chapter_title || 'Chapter 1', contentMd, contentHtml, isDraft, wordCount);
+
+  if (Array.isArray(tag_ids)) {
+    for (const tagId of tag_ids) {
+      await run(db, `INSERT OR IGNORE INTO taggings (tag_id, work_id) VALUES (?1, ?2)`, tagId, workId);
+    }
+  }
+
+  // Auto-create rating/category/warning tags if provided
+  const autoTags = [
+    { type: 'rating', name: rating },
+    { type: 'category', name: category },
+    { type: 'warning', name: warning },
+  ].filter(t => t.name);
+
+  for (const t of autoTags) {
+    const existing = await queryFirst<any>(db, `SELECT id FROM tags WHERE name = ?1 AND type = ?2`, t.name, t.type);
+    if (existing) {
+      await run(db, `INSERT OR IGNORE INTO taggings (tag_id, work_id) VALUES (?1, ?2)`, existing.id, workId);
+    } else {
+      const tagResult = await run(db, `INSERT OR IGNORE INTO tags (name, type) VALUES (?1, ?2)`, t.name, t.type);
+      if (tagResult.meta.last_row_id) {
+        await run(db, `INSERT OR IGNORE INTO taggings (tag_id, work_id) VALUES (?1, ?2)`, tagResult.meta.last_row_id, workId);
+      }
+    }
+  }
+
+  const work = await queryFirst<any>(db, `SELECT * FROM works WHERE id = ?1`, workId);
+  return new Response(JSON.stringify({ work, chapter_id: chapterResult.meta.last_row_id }), { status: 201, headers: { 'Content-Type': 'application/json' } });
+};

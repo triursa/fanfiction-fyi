@@ -1,8 +1,399 @@
 ---
+export const prerender = false;
 import Base from '../../layouts/Base.astro';
+import Editor from '../../components/Editor';
 ---
 
 <Base title="New Work — fanfiction.fyi">
-  <h1>New Work</h1>
-  <p>Work creation + chapter editor — Phase 1</p>
+  <section class="new-work">
+    <h1 class="page-title">New Work</h1>
+
+    <form id="new-work-form" class="work-form">
+      <div class="form-field">
+        <label for="title">Title</label>
+        <input type="text" id="title" name="title" required placeholder="Work title" />
+      </div>
+
+      <div class="form-row">
+        <div class="form-field flex-1">
+          <label for="summary">Summary</label>
+          <textarea id="summary" name="summary" rows="3" placeholder="A brief summary of your work"></textarea>
+        </div>
+      </div>
+
+      <div class="form-row">
+        <div class="form-field flex-1">
+          <label for="notes">Author's Notes</label>
+          <textarea id="notes" name="notes" rows="3" placeholder="Notes displayed before chapter 1 (optional)"></textarea>
+        </div>
+      </div>
+
+      <fieldset class="tag-group">
+        <legend>Tags</legend>
+
+        <div class="form-field">
+          <label for="fandom-tags">Fandom</label>
+          <input type="text" id="fandom-tags" name="fandom" placeholder="e.g. Harry Potter, Marvel" data-tag-type="fandom" class="tag-input" />
+          <div id="fandom-suggestions" class="tag-suggestions"></div>
+          <div id="fandom-selected" class="tag-selected"></div>
+        </div>
+
+        <div class="form-field">
+          <label for="character-tags">Characters</label>
+          <input type="text" id="character-tags" name="characters" placeholder="e.g. Hermione Granger" data-tag-type="character" class="tag-input" />
+          <div id="character-suggestions" class="tag-suggestions"></div>
+          <div id="character-selected" class="tag-selected"></div>
+        </div>
+
+        <div class="form-field">
+          <label for="relationship-tags">Relationships</label>
+          <input type="text" id="relationship-tags" name="relationships" placeholder="e.g. Harry Potter/Ginny Weasley" data-tag-type="relationship" class="tag-input" />
+          <div id="relationship-suggestions" class="tag-suggestions"></div>
+          <div id="relationship-selected" class="tag-selected"></div>
+        </div>
+
+        <div class="form-field">
+          <label for="freeform-tags">Additional Tags</label>
+          <input type="text" id="freeform-tags" name="freeform" placeholder="e.g. Angst, Fluff, Slow Burn" data-tag-type="freeform" class="tag-input" />
+          <div id="freeform-suggestions" class="tag-suggestions"></div>
+          <div id="freeform-selected" class="tag-selected"></div>
+        </div>
+
+        <div class="form-row">
+          <div class="form-field">
+            <label for="rating">Rating</label>
+            <select id="rating" name="rating_tags">
+              <option value="">Not Rated</option>
+              <option value="General Audiences">General Audiences</option>
+              <option value="Teen And Up Audiences">Teen And Up Audiences</option>
+              <option value="Mature">Mature</option>
+              <option value="Explicit">Explicit</option>
+            </select>
+          </div>
+          <div class="form-field">
+            <label for="category">Category</label>
+            <select id="category" name="category_tags">
+              <option value="">None</option>
+              <option value="F/F">F/F</option>
+              <option value="F/M">F/M</option>
+              <option value="Gen">Gen</option>
+              <option value="M/M">M/M</option>
+              <option value="Multi">Multi</option>
+              <option value="Other">Other</option>
+            </select>
+          </div>
+          <div class="form-field">
+            <label for="warning">Warnings</label>
+            <select id="warning" name="warning_tags">
+              <option value="">No Archive Warnings Apply</option>
+              <option value="Choose Not To Use Archive Warnings">Choose Not To Use Archive Warnings</option>
+              <option value="Graphic Depictions Of Violence">Graphic Depictions Of Violence</option>
+              <option value="Major Character Death">Major Character Death</option>
+              <option value="Rape/Non-Con">Rape/Non-Con</option>
+              <option value="Underage">Underage</option>
+            </select>
+          </div>
+        </div>
+      </fieldset>
+
+      <fieldset class="chapter-group">
+        <legend>Chapter 1</legend>
+        <div class="form-field">
+          <label for="chapter-title">Chapter Title</label>
+          <input type="text" id="chapter-title" name="chapter_title" placeholder="Chapter 1" value="Chapter 1" />
+        </div>
+        <div class="form-field">
+          <label>Content</label>
+          <div id="editor-mount" data-placeholder="Start writing your story..."></div>
+        </div>
+      </fieldset>
+
+      <div class="form-field">
+        <label for="pseud">Post As</label>
+        <select id="pseud" name="pseud_id">
+          <!-- Populated by JS -->
+        </select>
+      </div>
+
+      <div class="form-actions">
+        <button type="submit" class="btn-primary" name="action" value="draft">Save as Draft</button>
+        <button type="submit" class="btn-secondary" name="action" value="publish">Save &amp; Publish</button>
+      </div>
+
+      <div id="form-error" class="form-error" role="alert"></div>
+    </form>
+  </section>
 </Base>
+
+<style is:global>
+  @import '../../styles/theme.css';
+
+  .new-work {
+    max-width: 800px;
+    margin: 0 auto;
+  }
+
+  .page-title {
+    font: var(--md-sys-typescale-headline-medium);
+    color: var(--md-sys-color-on-surface);
+    margin: 0 0 var(--space-6) 0;
+  }
+
+  .work-form {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-4);
+  }
+
+  .form-field {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+  }
+
+  .form-field label {
+    font: var(--md-sys-typescale-label-large);
+    color: var(--md-sys-color-on-surface-variant);
+  }
+
+  .form-field input,
+  .form-field textarea,
+  .form-field select {
+    font: var(--md-sys-typescale-body-large);
+    color: var(--md-sys-color-on-surface);
+    background: var(--md-sys-color-surface-container);
+    border: 1px solid var(--md-sys-color-outline-variant);
+    border-radius: var(--md-sys-shape-corner-small);
+    padding: var(--space-3) var(--space-4);
+    outline: none;
+    transition: border-color var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard);
+  }
+
+  .form-field input:focus,
+  .form-field textarea:focus,
+  .form-field select:focus {
+    border-color: var(--md-sys-color-primary);
+  }
+
+  .form-row {
+    display: flex;
+    gap: var(--space-4);
+  }
+
+  .flex-1 { flex: 1; }
+
+  .form-error {
+    font: var(--md-sys-typescale-body-small);
+    color: var(--md-sys-color-error);
+    min-height: 1.2em;
+  }
+
+  fieldset {
+    border: 1px solid var(--md-sys-color-outline-variant);
+    border-radius: var(--md-sys-shape-corner-medium);
+    padding: var(--space-4);
+  }
+
+  fieldset legend {
+    font: var(--md-sys-typescale-title-medium);
+    color: var(--md-sys-color-on-surface);
+    padding: 0 var(--space-2);
+  }
+
+  .tag-suggestions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-1);
+    min-height: 0;
+  }
+
+  .tag-selected {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-1);
+    min-height: 0;
+    margin-top: var(--space-1);
+  }
+
+  .tag-pill {
+    font: var(--md-sys-typescale-label-large);
+    background: var(--md-sys-color-secondary-container);
+    color: var(--md-sys-color-on-secondary-container);
+    padding: var(--space-1) var(--space-3);
+    border-radius: var(--md-sys-shape-corner-full);
+    cursor: pointer;
+  }
+
+  .tag-pill:hover {
+    background: var(--md-sys-color-secondary);
+    color: var(--md-sys-color-on-secondary);
+  }
+
+  .form-actions {
+    display: flex;
+    gap: var(--space-3);
+    margin-top: var(--space-4);
+  }
+
+  .btn-primary {
+    font: var(--md-sys-typescale-label-large);
+    color: var(--md-sys-color-on-primary);
+    background: var(--md-sys-color-primary);
+    border: none;
+    border-radius: var(--md-sys-shape-corner-full);
+    padding: var(--space-3) var(--space-6);
+    cursor: pointer;
+    transition: background var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard);
+  }
+
+  .btn-primary:hover { background: var(--md-sys-color-primary-container); color: var(--md-sys-color-on-primary-container); }
+  .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
+
+  .btn-secondary {
+    font: var(--md-sys-typescale-label-large);
+    color: var(--md-sys-color-primary);
+    background: transparent;
+    border: 1px solid var(--md-sys-color-outline);
+    border-radius: var(--md-sys-shape-corner-full);
+    padding: var(--space-3) var(--space-6);
+    cursor: pointer;
+    transition: background var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard);
+  }
+
+  .btn-secondary:hover { background: var(--md-sys-color-surface-container-high); }
+  .btn-secondary:disabled { opacity: 0.5; cursor: not-allowed; }
+</style>
+
+<script define:vars={{}}">
+  // Tag autocomplete logic
+  const tagInputFields = document.querySelectorAll('.tag-input');
+  const selectedTags: Record<string, number[]> = {};
+  let currentPseudId: number | null = null;
+
+  tagInputFields.forEach(input => {
+    const el = input as HTMLInputElement;
+    const type = el.dataset.tagType!;
+    const suggestionsEl = document.getElementById(`${type}-suggestions`)!;
+    selectedTags[type] = [];
+
+    let debounce: ReturnType<typeof setTimeout>;
+    el.addEventListener('input', () => {
+      clearTimeout(debounce);
+      const q = el.value.trim();
+      if (q.length < 2) { suggestionsEl.innerHTML = ''; return; }
+      debounce = setTimeout(async () => {
+        const res = await fetch(`/api/tags?type=${type}&name=${encodeURIComponent(q)}&limit=8`);
+        const tags = await res.json();
+        suggestionsEl.innerHTML = tags.map((t: any) =>
+          `<span class="tag-pill" data-id="${t.id}" data-name="${t.name}">${t.name}</span>`
+        ).join('');
+        suggestionsEl.querySelectorAll('.tag-pill').forEach(pill => {
+          pill.addEventListener('click', () => {
+            const id = Number((pill as HTMLElement).dataset.id);
+            const name = (pill as HTMLElement).dataset.name!;
+            if (!selectedTags[type].includes(id)) {
+              selectedTags[type].push(id);
+              updateSelectedDisplay(type);
+            }
+            el.value = '';
+            suggestionsEl.innerHTML = '';
+          });
+        });
+      }, 300);
+    });
+  });
+
+  function updateSelectedDisplay(type: string) {
+    const container = document.getElementById(`${type}-selected`)!;
+    // Tags are stored by ID; we'll reconstruct display on submit
+    container.innerHTML = selectedTags[type].map(id =>
+      `<span class="tag-pill" data-id="${id}" title="Click to remove">Tag #${id} ✕</span>`
+    ).join('');
+    container.querySelectorAll('.tag-pill').forEach(pill => {
+      pill.addEventListener('click', () => {
+        const id = Number((pill as HTMLElement).dataset.id);
+        selectedTags[type] = selectedTags[type].filter(i => i !== id);
+        updateSelectedDisplay(type);
+      });
+    });
+  }
+
+  // Load user's pseuds
+  (async () => {
+    try {
+      const res = await fetch('/api/auth/me');
+      if (res.ok) {
+        const data = await res.json();
+        const select = document.getElementById('pseud') as HTMLSelectElement;
+        data.pseuds.forEach((p: any) => {
+          const opt = document.createElement('option');
+          opt.value = p.id;
+          opt.textContent = p.name;
+          select.appendChild(opt);
+        });
+        if (data.pseuds.length > 0) currentPseudId = data.pseuds[0].id;
+      }
+    } catch { /* not logged in — form will fail with 401 */ }
+  })();
+
+  // Form submit
+  const form = document.getElementById('new-work-form') as HTMLFormElement;
+  const errorEl = document.getElementById('form-error')!;
+
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    errorEl.textContent = '';
+
+    const action = (document.activeElement as HTMLButtonElement)?.value || 'draft';
+    const title = (document.getElementById('title') as HTMLInputElement).value;
+    const summary = (document.getElementById('summary') as HTMLTextAreaElement).value;
+    const notes = (document.getElementById('notes') as HTMLTextAreaElement).value;
+    const chapterTitle = (document.getElementById('chapter-title') as HTMLInputElement).value;
+    const pseudId = Number((document.getElementById('pseud') as HTMLSelectElement).value);
+    const rating = (document.getElementById('rating') as HTMLSelectElement).value;
+    const category = (document.getElementById('category') as HTMLSelectElement).value;
+    const warning = (document.getElementById('warning') as HTMLSelectElement).value;
+
+    // Gather tag IDs (include dropdown tags)
+    const tagIds: number[] = [];
+    Object.values(selectedTags).flat().forEach(id => tagIds.push(id));
+    if (rating) { /* will need to find/resolve the tag ID for this */ }
+    // For simplicity, send tag names and let the API resolve them
+    const tagNames: { type: string; name: string }[] = [];
+    // Gather freeform text tags that were added
+    for (const [type, ids] of Object.entries(selectedTags)) {
+      for (const id of ids) {
+        // We'll need a way to look up tag names — for now, just send IDs
+      }
+    }
+
+    try {
+      const res = await fetch('/api/works', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          title,
+          summary: summary || null,
+          notes: notes || null,
+          pseud_id: pseudId,
+          chapter_title: chapterTitle,
+          chapter_content: (window as any).__editorContent || '',
+          draft: action === 'draft' ? 1 : 0,
+          tag_ids: Object.values(selectedTags).flat(),
+          rating: rating || null,
+          category: category || null,
+          warning: warning || null,
+        }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        window.location.href = `/works/${data.work.id}`;
+      } else {
+        const data = await res.json();
+        errorEl.textContent = data.error || 'Failed to create work';
+      }
+    } catch {
+      errorEl.textContent = 'Network error';
+    }
+  });
+</script>
