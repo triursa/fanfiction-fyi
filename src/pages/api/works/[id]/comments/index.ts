@@ -3,15 +3,21 @@ export const prerender = false;
 import { queryFirst, queryAll, run } from '@/lib/db';
 import { getAuth, requireAuth } from '@/lib/auth';
 import { markdownToHtml } from '@/lib/markdown';
+import { corsHeaders, handleCors } from '@/lib/cors';
 import type { APIRoute } from 'astro';
 
-export const GET: APIRoute = async ({ params, locals, url }) => {
+export const OPTIONS: APIRoute = async ({ request }) => {
+  return handleCors(request) ?? new Response(null, { status: 405 });
+};
+
+export const GET: APIRoute = async ({ params, locals, url, request }) => {
+  const cors = corsHeaders(request);
   const db = locals.runtime.env.DB as D1Database;
   const workId = Number(params.id);
-  if (!workId) return new Response(JSON.stringify({ error: 'Not found' }), { status: 404, headers: { 'Content-Type': 'application/json' } });
+  if (!workId) return new Response(JSON.stringify({ error: 'Not found' }), { status: 404, headers: { 'Content-Type': 'application/json', ...cors } });
 
   const work = await queryFirst<any>(db, `SELECT id FROM works WHERE id = ?1`, workId);
-  if (!work) return new Response(JSON.stringify({ error: 'Work not found' }), { status: 404, headers: { 'Content-Type': 'application/json' } });
+  if (!work) return new Response(JSON.stringify({ error: 'Work not found' }), { status: 404, headers: { 'Content-Type': 'application/json', ...cors } });
 
   const chapterId = url.searchParams.get('chapter_id');
   const parentId = url.searchParams.get('parent_id');
@@ -39,7 +45,7 @@ export const GET: APIRoute = async ({ params, locals, url }) => {
     }
   }
 
-  return new Response(JSON.stringify({ comments }), { headers: { 'Content-Type': 'application/json' } });
+  return new Response(JSON.stringify({ comments }), { headers: { 'Content-Type': 'application/json', ...cors } });
 };
 
 export const POST: APIRoute = async ({ params, request, locals }) => {

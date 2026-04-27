@@ -1,0 +1,132 @@
+---
+export const prerender = false;
+import Base from '../../layouts/Base.astro';
+import { THEMES } from '../../styles/themes';
+
+// Auth check via cookie
+const cookie = Astro.request.headers.get('cookie') ?? '';
+const sessionMatch = cookie.match(/session=([a-f0-9]+)/);
+let currentTheme = 'obsidian';
+let authed = false;
+
+if (sessionMatch) {
+  const db = Astro.locals.runtime.env.DB as D1Database;
+  const session = await db.prepare('SELECT user_id FROM sessions WHERE token = ? AND expires_at > CURRENT_TIMESTAMP').bind(sessionMatch[1]).first();
+  if (session) {
+    const user = await db.prepare('SELECT theme FROM users WHERE id = ?').bind(session.user_id).first();
+    if (user && user.theme) {
+      currentTheme = user.theme as string;
+    }
+    authed = true;
+  }
+}
+
+if (!authed) {
+  return Astro.redirect('/login');
+}
+
+const themeList = Object.values(THEMES);
+---
+
+<Base title="Settings — fanfiction.fyi">
+  <article class="settings-page">
+    <h1>Settings</h1>
+
+    <section class="settings-section">
+      <h2>Theme</h2>
+      <p class="settings-hint">Choose a color palette for the site.</p>
+      <div class="theme-grid">
+        {themeList.map((theme) => (
+          <button
+            class={`theme-swatch ${theme.name === currentTheme ? 'theme-swatch--active' : ''}`}
+            data-theme={theme.name}
+            style={`--swatch-primary: ${theme.colors['--md-sys-color-primary']}; --swatch-surface: ${theme.colors['--md-sys-color-surface']}; --swatch-on-surface: ${theme.colors['--md-sys-color-on-surface']}; --swatch-surface-container: ${theme.colors['--md-sys-color-surface-container']};`}
+          >
+            <div class="swatch-preview"></div>
+            <span class="swatch-label">{theme.label}</span>
+            {theme.name === currentTheme && <span class="swatch-check">✓</span>}
+          </button>
+        ))}
+      </div>
+    </section>
+  </article>
+</Base>
+
+<script>
+  document.querySelectorAll('.theme-swatch').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const theme = (btn as HTMLElement).dataset.theme;
+      if (!theme) return;
+      const res = await fetch('/api/user/theme', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ theme }),
+      });
+      if (res.ok) {
+        location.reload();
+      }
+    });
+  });
+</script>
+
+<style>
+  .settings-page {
+    max-width: var(--reading-width, 65ch);
+    margin: 0 auto;
+    padding: var(--space-4, 16px);
+  }
+  .settings-page h1 {
+    color: var(--md-sys-color-on-surface);
+    font-size: var(--md-sys-typescale-headline-large-size, 32px);
+  }
+  .settings-section {
+    margin-top: var(--space-6, 24px);
+  }
+  .settings-section h2 {
+    color: var(--md-sys-color-on-surface);
+    font-size: var(--md-sys-typescale-title-medium-size, 16px);
+    margin-bottom: var(--space-2, 8px);
+  }
+  .settings-hint {
+    color: var(--md-sys-color-on-surface-variant);
+    margin-bottom: var(--space-4, 16px);
+  }
+  .theme-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+    gap: var(--space-3, 12px);
+  }
+  .theme-swatch {
+    border: 2px solid var(--md-sys-color-outline-variant);
+    border-radius: var(--md-sys-shape-corner-medium, 12px);
+    padding: var(--space-3, 12px);
+    cursor: pointer;
+    background: var(--md-sys-color-surface-container);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: var(--space-2, 8px);
+    transition: border-color 200ms, box-shadow 200ms;
+  }
+  .theme-swatch:hover {
+    border-color: var(--md-sys-color-primary);
+  }
+  .theme-swatch--active {
+    border-color: var(--md-sys-color-primary);
+    box-shadow: 0 0 0 1px var(--md-sys-color-primary);
+  }
+  .swatch-preview {
+    width: 48px;
+    height: 48px;
+    border-radius: 50%;
+    background: var(--swatch-primary, var(--md-sys-color-primary));
+  }
+  .swatch-label {
+    color: var(--md-sys-color-on-surface);
+    font-size: var(--md-sys-typescale-label-large-size, 14px);
+  }
+  .swatch-check {
+    color: var(--md-sys-color-primary);
+    font-weight: bold;
+  }
+</style>

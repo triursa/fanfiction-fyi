@@ -1,16 +1,22 @@
 export const prerender = false;
 
 import { queryAll } from '@/lib/db';
+import { corsHeaders, handleCors } from '@/lib/cors';
 import type { APIRoute } from 'astro';
 
-export const GET: APIRoute = async ({ url, locals }) => {
+export const OPTIONS: APIRoute = async ({ request }) => {
+  return handleCors(request) ?? new Response(null, { status: 405 });
+};
+
+export const GET: APIRoute = async ({ url, locals, request }) => {
+  const cors = corsHeaders(request);
   const db = locals.runtime.env.DB as D1Database;
 
   const q = url.searchParams.get('q')?.trim();
   if (!q) {
     return new Response(JSON.stringify({ error: 'Query parameter "q" is required' }), {
       status: 400,
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...cors },
     });
   }
 
@@ -52,6 +58,6 @@ export const GET: APIRoute = async ({ url, locals }) => {
 
   return new Response(
     JSON.stringify({ results, total, page }),
-    { headers: { 'Content-Type': 'application/json' } }
+    { headers: { 'Content-Type': 'application/json', ...cors } }
   );
 };

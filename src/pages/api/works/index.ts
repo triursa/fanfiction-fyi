@@ -3,9 +3,15 @@ export const prerender = false;
 import { queryFirst, run, queryAll } from '@/lib/db';
 import { getAuth } from '@/lib/auth';
 import { markdownToHtml } from '@/lib/markdown';
+import { corsHeaders, handleCors } from '@/lib/cors';
 import type { APIRoute } from 'astro';
 
-export const GET: APIRoute = async ({ url, locals }) => {
+export const OPTIONS: APIRoute = async ({ request }) => {
+  return handleCors(request) ?? new Response(null, { status: 405 });
+};
+
+export const GET: APIRoute = async ({ url, locals, request }) => {
+  const cors = corsHeaders(request);
   const db = locals.runtime.env.DB as D1Database;
   const page = Number(url.searchParams.get('page')) || 1;
   const limit = Math.min(Number(url.searchParams.get('limit')) || 20, 100);
@@ -34,7 +40,7 @@ export const GET: APIRoute = async ({ url, locals }) => {
     w.pseuds = await queryAll<any>(db, `SELECT p.name, c.role FROM pseuds p JOIN creatorships c ON p.id = c.pseud_id WHERE c.work_id = ?1`, w.id);
   }
 
-  return new Response(JSON.stringify(works), { headers: { 'Content-Type': 'application/json' } });
+  return new Response(JSON.stringify(works), { headers: { 'Content-Type': 'application/json', ...cors } });
 };
 
 export const POST: APIRoute = async ({ request, locals }) => {

@@ -1,9 +1,15 @@
 export const prerender = false;
 
 import { queryAll } from '@/lib/db';
+import { corsHeaders, handleCors } from '@/lib/cors';
 import type { APIRoute } from 'astro';
 
-export const GET: APIRoute = async ({ locals }) => {
+export const OPTIONS: APIRoute = async ({ request }) => {
+  return handleCors(request) ?? new Response(null, { status: 405 });
+};
+
+export const GET: APIRoute = async ({ locals, request }) => {
+  const cors = corsHeaders(request);
   const db = locals.runtime.env.DB as D1Database;
 
   const collections = await queryAll<any>(db,
@@ -17,6 +23,6 @@ export const GET: APIRoute = async ({ locals }) => {
   );
 
   return new Response(JSON.stringify({ collections }), {
-    headers: { 'Content-Type': 'application/json' }
+    headers: { 'Content-Type': 'application/json', ...cors }
   });
 };

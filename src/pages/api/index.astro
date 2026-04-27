@@ -1,0 +1,372 @@
+---
+export const prerender = false;
+import Base from '../../layouts/Base.astro';
+---
+
+<Base title="API Documentation — fanfiction.fyi">
+  <article class="api-docs">
+    <h1>API Documentation</h1>
+    <p class="api-docs__intro">
+      The fanfiction.fyi read-only API provides JSON access to works, tags,
+      search, collections, and comments. All public endpoints support
+      <code>GET</code> and <code>OPTIONS</code> (CORS preflight). Cross-origin
+      requests are accepted from any origin.
+    </p>
+
+    <!-- Works -->
+    <section class="api-docs__group">
+      <h2>Works</h2>
+
+      <div class="api-docs__endpoint">
+        <div class="api-docs__header">
+          <span class="api-docs__method method--get">GET</span>
+          <code class="api-docs__url">/api/works</code>
+          <span class="api-docs__badge badge--public">Public</span>
+        </div>
+        <p>List published works, ordered by update time.</p>
+        <table class="api-docs__params">
+          <thead><tr><th>Parameter</th><th>Type</th><th>Default</th><th>Description</th></tr></thead>
+          <tbody>
+            <tr><td><code>page</code></td><td>number</td><td>1</td><td>Page number</td></tr>
+            <tr><td><code>limit</code></td><td>number</td><td>20</td><td>Results per page (max 100)</td></tr>
+            <tr><td><code>tag_type</code></td><td>string</td><td>—</td><td>Filter by tag type (fandom, character, etc.)</td></tr>
+            <tr><td><code>tag_name</code></td><td>string</td><td>—</td><td>Filter by tag name (substring match)</td></tr>
+          </tbody>
+        </table>
+        <pre class="api-docs__response"><code>[
+  &#123;
+    "id": 1,
+    "title": "…",
+    "summary": "…",
+    "word_count": 5000,
+    "published_at": "2026-01-15T00:00:00Z",
+    "updated_at": "2026-01-15T00:00:00Z",
+    "language": "en",
+    "complete": 0,
+    "tags": [&#123; "name": "…", "type": "fandom" &#125;],
+    "pseuds": [&#123; "name": "…", "role": "author" &#125;]
+  &#125;
+]</code></pre>
+      </div>
+
+      <div class="api-docs__endpoint">
+        <div class="api-docs__header">
+          <span class="api-docs__method method--get">GET</span>
+          <code class="api-docs__url">/api/works/:id</code>
+          <span class="api-docs__badge badge--public">Public</span>
+        </div>
+        <p>Get a single work with its chapters and tags.</p>
+        <pre class="api-docs__response"><code>&#123;
+  "id": 1,
+  "title": "…",
+  "summary": "…",
+  "chapters": [&#123; "id": 1, "position": 1, "title": "…", "word_count": 5000 &#125;]
+&#125;</code></pre>
+      </div>
+
+      <div class="api-docs__endpoint">
+        <div class="api-docs__header">
+          <span class="api-docs__method method--get">GET</span>
+          <code class="api-docs__url">/api/works/:id/progress</code>
+          <span class="api-docs__badge badge--auth">Authentication required</span>
+        </div>
+        <p>Get reading progress for a work.</p>
+      </div>
+
+      <div class="api-docs__endpoint">
+        <div class="api-docs__header">
+          <span class="api-docs__method method--get">GET</span>
+          <code class="api-docs__url">/api/bookmarks</code>
+          <span class="api-docs__badge badge--auth">Authentication required</span>
+        </div>
+        <p>List the authenticated user's bookmarks.</p>
+      </div>
+    </section>
+
+    <!-- Tags -->
+    <section class="api-docs__group">
+      <h2>Tags</h2>
+
+      <div class="api-docs__endpoint">
+        <div class="api-docs__header">
+          <span class="api-docs__method method--get">GET</span>
+          <code class="api-docs__url">/api/tags/browse</code>
+          <span class="api-docs__badge badge--public">Public</span>
+        </div>
+        <p>Browse tags with optional type and name filtering, sorted by work count.</p>
+        <table class="api-docs__params">
+          <thead><tr><th>Parameter</th><th>Type</th><th>Default</th><th>Description</th></tr></thead>
+          <tbody>
+            <tr><td><code>type</code></td><td>string</td><td>—</td><td>Tag type: rating, warning, category, fandom, character, relationship, freeform</td></tr>
+            <tr><td><code>q</code></td><td>string</td><td>—</td><td>Search term for tag name</td></tr>
+          </tbody>
+        </table>
+        <pre class="api-docs__response"><code>[
+  &#123; "id": 1, "name": "…", "type": "fandom", "work_count": 42 &#125;
+]</code></pre>
+      </div>
+
+      <div class="api-docs__endpoint">
+        <div class="api-docs__header">
+          <span class="api-docs__method method--get">GET</span>
+          <code class="api-docs__url">/api/tags</code>
+          <span class="api-docs__badge badge--public">Public</span>
+        </div>
+        <p>List all tags.</p>
+      </div>
+    </section>
+
+    <!-- Search -->
+    <section class="api-docs__group">
+      <h2>Search</h2>
+
+      <div class="api-docs__endpoint">
+        <div class="api-docs__header">
+          <span class="api-docs__method method--get">GET</span>
+          <code class="api-docs__url">/api/search</code>
+          <span class="api-docs__badge badge--public">Public</span>
+        </div>
+        <p>Full-text search across published works.</p>
+        <table class="api-docs__params">
+          <thead><tr><th>Parameter</th><th>Type</th><th>Default</th><th>Description</th></tr></thead>
+          <tbody>
+            <tr><td><code>q</code></td><td>string</td><td><em>required</em></td><td>Search query</td></tr>
+            <tr><td><code>type</code></td><td>string</td><td>—</td><td>Filter by tag type</td></tr>
+            <tr><td><code>page</code></td><td>number</td><td>1</td><td>Page number</td></tr>
+            <tr><td><code>limit</code></td><td>number</td><td>20</td><td>Results per page (max 100)</td></tr>
+          </tbody>
+        </table>
+        <pre class="api-docs__response"><code>&#123;
+  "results": [
+    &#123; "id": 1, "title": "…", "summary": "…", "word_count": 5000, "published_at": "…", "pseud_name": "…" &#125;
+  ],
+  "total": 127,
+  "page": 1
+&#125;</code></pre>
+      </div>
+    </section>
+
+    <!-- Collections -->
+    <section class="api-docs__group">
+      <h2>Collections</h2>
+
+      <div class="api-docs__endpoint">
+        <div class="api-docs__header">
+          <span class="api-docs__method method--get">GET</span>
+          <code class="api-docs__url">/api/collections</code>
+          <span class="api-docs__badge badge--public">Public</span>
+        </div>
+        <p>List public and unrevealed collections.</p>
+        <pre class="api-docs__response"><code>&#123;
+  "collections": [
+    &#123; "id": 1, "name": "…", "description": "…", "privacy": "public", "item_count": 5, "created_at": "…" &#125;
+  ]
+&#125;</code></pre>
+      </div>
+
+      <div class="api-docs__endpoint">
+        <div class="api-docs__header">
+          <span class="api-docs__method method--get">GET</span>
+          <code class="api-docs__url">/api/collections/:id</code>
+          <span class="api-docs__badge badge--public">Public</span>
+        </div>
+        <p>Get a single collection with its items.</p>
+      </div>
+    </section>
+
+    <!-- Comments -->
+    <section class="api-docs__group">
+      <h2>Comments</h2>
+
+      <div class="api-docs__endpoint">
+        <div class="api-docs__header">
+          <span class="api-docs__method method--get">GET</span>
+          <code class="api-docs__url">/api/works/:id/comments</code>
+          <span class="api-docs__badge badge--public">Public</span>
+        </div>
+        <p>List comments for a work, optionally filtered by chapter or parent.</p>
+        <table class="api-docs__params">
+          <thead><tr><th>Parameter</th><th>Type</th><th>Default</th><th>Description</th></tr></thead>
+          <tbody>
+            <tr><td><code>chapter_id</code></td><td>number</td><td>—</td><td>Filter by chapter</td></tr>
+            <tr><td><code>parent_id</code></td><td>number</td><td>—</td><td>Filter by parent comment (thread replies)</td></tr>
+          </tbody>
+        </table>
+        <pre class="api-docs__response"><code>&#123;
+  "comments": [
+    &#123; "id": 1, "content": "…", "content_html": "…", "pseud_name": "…", "created_at": "…" &#125;
+  ]
+&#125;</code></pre>
+      </div>
+    </section>
+
+    <hr class="api-docs__divider" />
+
+    <p class="api-docs__rss">
+      An RSS feed is also available at <a href="/feed.xml">/feed.xml</a>.
+    </p>
+  </article>
+</Base>
+
+<style>
+  .api-docs {
+    max-width: 80ch;
+  }
+
+  .api-docs h1 {
+    font: var(--md-sys-typescale-headline-large);
+    color: var(--md-sys-color-on-surface);
+    margin: 0 0 var(--space-4);
+  }
+
+  .api-docs__intro {
+    font: var(--md-sys-typescale-body-large);
+    color: var(--md-sys-color-on-surface-variant);
+    margin-bottom: var(--space-8);
+  }
+
+  .api-docs__intro code {
+    font-family: var(--font-mono);
+    background: var(--md-sys-color-surface-container-high);
+    padding: 2px 6px;
+    border-radius: var(--md-sys-shape-corner-extra-small);
+    font-size: 0.875em;
+  }
+
+  .api-docs__group {
+    margin-bottom: var(--space-10);
+  }
+
+  .api-docs__group h2 {
+    font: var(--md-sys-typescale-title-large);
+    color: var(--md-sys-color-primary);
+    margin: 0 0 var(--space-4);
+    padding-bottom: var(--space-2);
+    border-bottom: 1px solid var(--md-sys-color-outline-variant);
+  }
+
+  .api-docs__endpoint {
+    background: var(--md-sys-color-surface-container);
+    border: 1px solid var(--md-sys-color-outline-variant);
+    border-radius: var(--md-sys-shape-corner-medium);
+    padding: var(--space-4) var(--space-5);
+    margin-bottom: var(--space-4);
+  }
+
+  .api-docs__header {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    flex-wrap: wrap;
+    margin-bottom: var(--space-2);
+  }
+
+  .api-docs__method {
+    font: var(--md-sys-typescale-label-large);
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    padding: 2px 8px;
+    border-radius: var(--md-sys-shape-corner-extra-small);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+
+  .method--get {
+    background: #1b4332;
+    color: #95d5b2;
+  }
+
+  .api-docs__url {
+    font: var(--md-sys-typescale-body-medium);
+    font-family: var(--font-mono);
+    color: var(--md-sys-color-on-surface);
+  }
+
+  .api-docs__url em {
+    font-style: italic;
+    color: var(--md-sys-color-secondary);
+  }
+
+  .api-docs__badge {
+    font: var(--md-sys-typescale-label-large);
+    font-size: 0.6875rem;
+    padding: 2px 8px;
+    border-radius: var(--md-sys-shape-corner-full);
+  }
+
+  .badge--public {
+    background: var(--md-sys-color-primary-container);
+    color: var(--md-sys-color-on-primary-container);
+  }
+
+  .badge--auth {
+    background: #4a3000;
+    color: #fbbf24;
+  }
+
+  .api-docs__endpoint p {
+    font: var(--md-sys-typescale-body-medium);
+    color: var(--md-sys-color-on-surface-variant);
+    margin: 0 0 var(--space-3);
+  }
+
+  .api-docs__params {
+    width: 100%;
+    border-collapse: collapse;
+    margin-bottom: var(--space-3);
+    font: var(--md-sys-typescale-body-small);
+  }
+
+  .api-docs__params th {
+    text-align: left;
+    color: var(--md-sys-color-on-surface-variant);
+    font-weight: 500;
+    padding: var(--space-1) var(--space-2);
+    border-bottom: 1px solid var(--md-sys-color-outline-variant);
+  }
+
+  .api-docs__params td {
+    padding: var(--space-1) var(--space-2);
+    color: var(--md-sys-color-on-surface);
+    border-bottom: 1px solid var(--md-sys-color-outline-variant);
+  }
+
+  .api-docs__params code {
+    font-family: var(--font-mono);
+    background: var(--md-sys-color-surface-container-high);
+    padding: 1px 4px;
+    border-radius: 2px;
+    font-size: 0.8em;
+  }
+
+  .api-docs__response {
+    background: var(--md-sys-color-surface-container-lowest);
+    border: 1px solid var(--md-sys-color-outline-variant);
+    border-radius: var(--md-sys-shape-corner-small);
+    padding: var(--space-3) var(--space-4);
+    overflow-x: auto;
+    margin: 0;
+  }
+
+  .api-docs__response code {
+    font: var(--md-sys-typescale-body-small);
+    font-family: var(--font-mono);
+    color: var(--md-sys-color-on-surface);
+    white-space: pre;
+  }
+
+  .api-docs__divider {
+    border: none;
+    border-top: 1px solid var(--md-sys-color-outline-variant);
+    margin: var(--space-8) 0 var(--space-4);
+  }
+
+  .api-docs__rss {
+    font: var(--md-sys-typescale-body-large);
+    color: var(--md-sys-color-on-surface-variant);
+  }
+
+  .api-docs__rss a {
+    color: var(--md-sys-color-primary);
+  }
+</style>
