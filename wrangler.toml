@@ -6,4 +6,4 @@ pages_build_output_dir = "./dist"
 [[d1_databases]]
 binding = "DB"
 database_name = "fanfiction-fyi-db"
-database_id = "TBD"
+database_id = "d4a29888-6e20-4391-8aa0-c131b4c36d88"
