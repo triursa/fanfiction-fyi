@@ -1,8 +1,411 @@
 ---
+export const prerender = false;
 import Base from '../../layouts/Base.astro';
+import { queryAll } from '../../lib/db';
+
+const db = Astro.locals.runtime.env.DB as D1Database;
+
+const query = Astro.url.searchParams.get('q')?.trim() || '';
+const type = Astro.url.searchParams.get('type')?.trim() || '';
+const page = Math.max(Number(Astro.url.searchParams.get('page')) || 1, 1);
+const limit = 20;
+const offset = (page - 1) * limit;
+
+let results: any[] = [];
+let total = 0;
+
+if (query) {
+  let countSql = `SELECT COUNT(*) as total FROM works_fts f JOIN works w ON f.rowid = w.id WHERE works_fts MATCH ? AND w.published_at IS NOT NULL`;
+  let dataSql = `SELECT w.id, w.title, w.summary, w.word_count, w.published_at FROM works_fts f JOIN works w ON f.rowid = w.id WHERE works_fts MATCH ? AND w.published_at IS NOT NULL`;
+  const bindings: any[] = [query];
+  const countBindings: any[] = [query];
+
+  if (type) {
+    dataSql += ` AND w.id IN (SELECT tg.work_id FROM taggings tg JOIN tags t ON t.id = tg.tag_id WHERE t.type = ?)`;
+    countSql += ` AND w.id IN (SELECT tg.work_id FROM taggings tg JOIN tags t ON t.id = tg.tag_id WHERE t.type = ?)`;
+    bindings.push(type);
+    countBindings.push(type);
+  }
+
+  dataSql += ` ORDER BY rank LIMIT ? OFFSET ?`;
+  bindings.push(limit, offset);
+
+  results = await queryAll<any>(db, dataSql, ...bindings);
+  const totalRow = await db.prepare(countSql).bind(...countBindings).first<{ total: number }>();
+  total = totalRow?.total ?? 0;
+
+  for (const w of results) {
+    const pseud = await queryAll<any>(db, `SELECT p.name FROM pseuds p JOIN creatorships c ON p.id = c.pseud_id WHERE c.work_id = ?1 LIMIT 1`, w.id);
+    w.pseud_name = pseud[0]?.name ?? null;
+  }
+}
+
+const tagTypes = ['fandom', 'character', 'relationship', 'freeform', 'rating', 'warning', 'category'];
 ---
 
-<Base title="Search — fanfiction.fyi">
-  <h1>Search</h1>
-  <p>Full-text search interface — Phase 2</p>
+<Base title={query ? `Search: ${query} — fanfiction.fyi` : 'Search — fanfiction.fyi'}>
+  <section class="search-page">
+    <h1 class="page-title">Search Works</h1>
+
+    <form id="search-form" class="search-bar">
+      <div class="search-input-wrapper">
+        <svg class="search-icon" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="11" cy="11" r="8"></circle>
+          <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+        </svg>
+        <input
+          type="text"
+          name="q"
+          id="search-input"
+          class="search-input"
+          placeholder="Search for works…"
+          value={query}
+          autocomplete="off"
+        />
+      </div>
+      <div class="search-controls">
+        <select name="type" id="type-filter" class="type-filter">
+          <option value="" selected={!type}>All tags</option>
+          {tagTypes.map(t => (
+            <option value={t} selected={type === t}>{t.charAt(0).toUpperCase() + t.slice(1)}</option>
+          ))}
+        </select>
+        <button type="submit" class="search-btn">Search</button>
+      </div>
+    </form>
+
+    <div id="search-results">
+      {query === '' && (
+        <p class="placeholder-text">Search for works…</p>
+      )}
+
+      {query !== '' && results.length === 0 && (
+        <p class="no-results">No works found for "<span class="query-highlight">{query}</span>"</p>
+      )}
+
+      {results.length > 0 && (
+        <div class="results-meta">
+          <span>{total.toLocaleString()} result{total !== 1 ? 's' : ''}</span>
+        </div>
+      )}
+
+      <div class="results-list">
+        {results.map(w => (
+          <article class="result-card">
+            <a href={`/works/${w.id}`} class="result-card__title">{w.title}</a>
+            {w.pseud_name && <p class="result-card__author">by {w.pseud_name}</p>}
+            {w.summary && <p class="result-card__summary">{w.summary.length > 250 ? w.summary.slice(0, 250) + '…' : w.summary}</p>}
+            <div class="result-card__meta">
+              <span>{w.word_count?.toLocaleString() ?? 0} words</span>
+              <span>·</span>
+              <span>{w.published_at ? new Date(w.published_at + 'Z').toLocaleDateString() : 'Unpublished'}</span>
+            </div>
+          </article>
+        ))}
+      </div>
+
+      {total > limit && (
+        <nav class="pagination">
+          {page > 1 && (
+            <button class="fab-btn" id="prev-btn" data-page={page - 1} aria-label="Previous page">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"></polyline></svg>
+            </button>
+          )}
+          <span class="page-indicator">Page {page}</span>
+          {results.length === limit && (
+            <button class="fab-btn" id="next-btn" data-page={page + 1} aria-label="Next page">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"></polyline></svg>
+            </button>
+          )}
+        </nav>
+      )}
+    </div>
+  </section>
 </Base>
+
+<script is:inline>
+  function updateFromAPI(q, type, page) {
+    var params = new URLSearchParams();
+    if (q) params.set('q', q);
+    if (type) params.set('type', type);
+    if (page > 1) params.set('page', String(page));
+
+    var url = '/api/search?' + params.toString();
+
+    fetch(url)
+      .then(function(r) { return r.json(); })
+      .then(function(data) {
+        if (data.error && !data.results) {
+          document.getElementById('search-results').innerHTML =
+            '<p class="no-results">Search query is required.</p>';
+          return;
+        }
+
+        var results = data.results || [];
+        var total = data.total || 0;
+        var currentPage = data.page || page;
+        var limit = 20;
+
+        var html = '';
+        if (results.length === 0) {
+          html = '<p class="no-results">No works found for "<span class="query-highlight">' + escapeHtml(q) + '</span>"</p>';
+        } else {
+          html += '<div class="results-meta"><span>' + total.toLocaleString() + ' result' + (total !== 1 ? 's' : '') + '</span></div>';
+          html += '<div class="results-list">';
+          for (var i = 0; i < results.length; i++) {
+            var w = results[i];
+            html += '<article class="result-card">';
+            html += '<a href="/works/' + w.id + '" class="result-card__title">' + escapeHtml(w.title) + '</a>';
+            if (w.pseud_name) html += '<p class="result-card__author">by ' + escapeHtml(w.pseud_name) + '</p>';
+            if (w.summary) {
+              var truncated = w.summary.length > 250 ? w.summary.slice(0, 250) + '\u2026' : w.summary;
+              html += '<p class="result-card__summary">' + escapeHtml(truncated) + '</p>';
+            }
+            html += '<div class="result-card__meta">';
+            html += '<span>' + (w.word_count || 0).toLocaleString() + ' words</span>';
+            html += '<span>\u00b7</span>';
+            html += '<span>' + (w.published_at ? new Date(w.published_at + 'Z').toLocaleDateString() : 'Unpublished') + '</span>';
+            html += '</div></article>';
+          }
+          html += '</div>';
+
+          if (total > limit) {
+            html += '<nav class="pagination">';
+            if (currentPage > 1) {
+              html += '<button class="fab-btn" aria-label="Previous page" onclick="navigateToPage(' + (currentPage - 1) + ')"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"></polyline></svg></button>';
+            }
+            html += '<span class="page-indicator">Page ' + currentPage + '</span>';
+            if (results.length === limit) {
+              html += '<button class="fab-btn" aria-label="Next page" onclick="navigateToPage(' + (currentPage + 1) + ')"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"></polyline></svg></button>';
+            }
+            html += '</nav>';
+          }
+        }
+
+        document.getElementById('search-results').innerHTML = html;
+        window.history.replaceState(null, '', '/search?' + params.toString());
+      })
+      .catch(function() {
+        document.getElementById('search-results').innerHTML =
+          '<p class="no-results">An error occurred while searching.</p>';
+      });
+  }
+
+  function escapeHtml(str) {
+    var d = document.createElement('div');
+    d.textContent = str;
+    return d.innerHTML;
+  }
+
+  document.getElementById('search-form').addEventListener('submit', function(e) {
+    e.preventDefault();
+    var q = document.getElementById('search-input').value.trim();
+    var type = document.getElementById('type-filter').value;
+    if (q) updateFromAPI(q, type, 1);
+  });
+
+  document.getElementById('type-filter').addEventListener('change', function() {
+    var q = document.getElementById('search-input').value.trim();
+    var type = this.value;
+    if (q) updateFromAPI(q, type, 1);
+  });
+
+  window.navigateToPage = function(p) {
+    var q = document.getElementById('search-input').value.trim();
+    var type = document.getElementById('type-filter').value;
+    updateFromAPI(q, type, p);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+</script>
+
+<style is:global>
+  @import '../../styles/theme.css';
+
+  .search-page { max-width: 900px; margin: 0 auto; }
+  .page-title { font: var(--md-sys-typescale-headline-medium); color: var(--md-sys-color-on-surface); margin: 0 0 var(--space-6); }
+
+  /* ── Search Bar ── */
+  .search-bar { margin-bottom: var(--space-8); }
+
+  .search-input-wrapper {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    background: var(--md-sys-color-surface-container-high);
+    border: 1px solid var(--md-sys-color-outline-variant);
+    border-radius: var(--md-sys-shape-corner-extra-large);
+    padding: var(--space-4) var(--space-6);
+    transition: border-color var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard);
+  }
+  .search-input-wrapper:focus-within {
+    border-color: var(--md-sys-color-primary);
+  }
+
+  .search-icon {
+    color: var(--md-sys-color-on-surface-variant);
+    flex-shrink: 0;
+  }
+
+  .search-input {
+    flex: 1;
+    font: var(--md-sys-typescale-headline-medium);
+    color: var(--md-sys-color-on-surface);
+    background: transparent;
+    border: none;
+    outline: none;
+    min-width: 0;
+  }
+  .search-input::placeholder { color: var(--md-sys-color-outline); }
+
+  .search-controls {
+    display: flex;
+    gap: var(--space-3);
+    margin-top: var(--space-3);
+    align-items: center;
+  }
+
+  .type-filter {
+    font: var(--md-sys-typescale-label-large);
+    color: var(--md-sys-color-on-surface);
+    background: var(--md-sys-color-surface-container-high);
+    border: 1px solid var(--md-sys-color-outline-variant);
+    border-radius: var(--md-sys-shape-corner-full);
+    padding: var(--space-2) var(--space-4);
+    outline: none;
+    cursor: pointer;
+    appearance: none;
+    -webkit-appearance: none;
+    background-image: url("data:image/svg+xml,%3Csvg width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%238C9199' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 12px center;
+    padding-right: var(--space-8);
+  }
+
+  .search-btn {
+    font: var(--md-sys-typescale-label-large);
+    color: var(--md-sys-color-on-primary);
+    background: var(--md-sys-color-primary);
+    border: none;
+    border-radius: var(--md-sys-shape-corner-full);
+    padding: var(--space-2) var(--space-6);
+    cursor: pointer;
+    transition: background var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard);
+  }
+  .search-btn:hover {
+    background: var(--md-sys-color-primary-container);
+    color: var(--md-sys-color-on-primary-container);
+  }
+
+  /* ── Results ── */
+  .placeholder-text {
+    font: var(--md-sys-typescale-body-large);
+    color: var(--md-sys-color-outline);
+    font-style: italic;
+    text-align: center;
+    padding: var(--space-16) 0;
+  }
+
+  .no-results {
+    font: var(--md-sys-typescale-body-large);
+    color: var(--md-sys-color-on-surface-variant);
+    text-align: center;
+    padding: var(--space-16) 0;
+  }
+
+  .query-highlight {
+    color: var(--md-sys-color-primary);
+    font-style: italic;
+  }
+
+  .results-meta {
+    font: var(--md-sys-typescale-body-medium);
+    color: var(--md-sys-color-outline);
+    margin-bottom: var(--space-4);
+  }
+
+  .results-list {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-4);
+  }
+
+  .result-card {
+    padding: var(--space-4) var(--space-6);
+    background: var(--md-sys-color-surface-container);
+    border: 1px solid var(--md-sys-color-outline-variant);
+    border-radius: var(--md-sys-shape-corner-large);
+    transition: background var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard),
+                border-color var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard);
+  }
+  .result-card:hover {
+    background: var(--md-sys-color-surface-container-high);
+    border-color: var(--md-sys-color-outline);
+  }
+
+  .result-card__title {
+    font: var(--md-sys-typescale-title-large);
+    color: var(--md-sys-color-primary);
+    text-decoration: none;
+    display: block;
+    margin: 0 0 var(--space-1);
+  }
+  .result-card__title:hover {
+    text-decoration: underline;
+  }
+
+  .result-card__author {
+    font: var(--md-sys-typescale-body-medium);
+    color: var(--md-sys-color-on-surface-variant);
+    margin: 0 0 var(--space-2);
+  }
+
+  .result-card__summary {
+    font: var(--md-sys-typescale-body-medium);
+    color: var(--md-sys-color-on-surface-variant);
+    margin: 0 0 var(--space-2);
+  }
+
+  .result-card__meta {
+    font: var(--md-sys-typescale-body-small);
+    color: var(--md-sys-color-outline);
+    display: flex;
+    gap: var(--space-2);
+    flex-wrap: wrap;
+  }
+
+  /* ── Pagination ── */
+  .pagination {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: var(--space-4);
+    margin-top: var(--space-8);
+    padding-bottom: var(--space-4);
+  }
+
+  .fab-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 48px;
+    height: 48px;
+    border-radius: var(--md-sys-shape-corner-large);
+    background: var(--md-sys-color-primary-container);
+    color: var(--md-sys-color-on-primary-container);
+    border: none;
+    cursor: pointer;
+    box-shadow: var(--md-sys-elevation-1);
+    transition: background var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard),
+                box-shadow var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard);
+  }
+  .fab-btn:hover {
+    background: var(--md-sys-color-primary);
+    color: var(--md-sys-color-on-primary);
+    box-shadow: var(--md-sys-elevation-2);
+  }
+
+  .page-indicator {
+    font: var(--md-sys-typescale-label-large);
+    color: var(--md-sys-color-on-surface-variant);
+  }
+</style>
