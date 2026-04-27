@@ -1,0 +1,94 @@
+---
+export const prerender = false;
+---
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="fanfiction.fyi — A bespoke fanfiction archive" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+    <title>{Astro.props.title ?? 'fanfiction.fyi'}</title>
+  </head>
+  <body>
+    <header class="app-bar">
+      <a href="/" class="app-bar__title">fanfiction.fyi</a>
+      <nav class="app-bar__nav">
+        <a href="/works">Works</a>
+        <a href="/tags">Tags</a>
+        <a href="/collections">Collections</a>
+        <a href="/search">Search</a>
+      </nav>
+      <nav class="app-bar__actions">
+        <a href="/login">Sign In</a>
+      </nav>
+    </header>
+    <main class="main-content">
+      <slot />
+    </main>
+    <footer class="app-footer">
+      <p>&copy; 2026 fanfiction.fyi &mdash; bespoke archive for a small circle</p>
+    </footer>
+  </body>
+</html>
+
+<style is:global>
+  @import '../styles/theme.css';
+
+  .app-bar {
+    display: flex;
+    align-items: center;
+    gap: var(--space-4);
+    padding: var(--space-3) var(--space-6);
+    background: var(--md-sys-color-surface-container);
+    border-bottom: 1px solid var(--md-sys-color-outline-variant);
+    position: sticky;
+    top: 0;
+    z-index: 100;
+  }
+
+  .app-bar__title {
+    font: var(--md-sys-typescale-title-large);
+    color: var(--md-sys-color-primary);
+    text-decoration: none;
+    margin-right: auto;
+  }
+
+  .app-bar__nav {
+    display: flex;
+    gap: var(--space-4);
+  }
+
+  .app-bar__nav a,
+  .app-bar__actions a {
+    font: var(--md-sys-typescale-label-large);
+    color: var(--md-sys-color-on-surface-variant);
+    padding: var(--space-2) var(--space-3);
+    border-radius: var(--md-sys-shape-corner-full);
+    transition: background var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard);
+  }
+
+  .app-bar__nav a:hover,
+  .app-bar__actions a:hover {
+    background: var(--md-sys-color-surface-container-highest);
+    text-decoration: none;
+  }
+
+  .main-content {
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: var(--space-6);
+    min-height: calc(100vh - 120px);
+  }
+
+  .app-footer {
+    text-align: center;
+    padding: var(--space-6);
+    font: var(--md-sys-typescale-body-small);
+    color: var(--md-sys-color-outline);
+    border-top: 1px solid var(--md-sys-color-outline-variant);
+  }
+</style>

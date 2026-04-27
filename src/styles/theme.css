@@ -1,0 +1,153 @@
+/* ─── fanfiction.fyi — M3 Obsidian Theme ─── */
+/* Seed: #7B8FA8  |  Palette: Obsidian */
+
+:root {
+  /* ── Primary ── */
+  --md-sys-color-primary: #B0C4D8;
+  --md-sys-color-on-primary: #1C2F3F;
+  --md-sys-color-primary-container: #374A5C;
+  --md-sys-color-on-primary-container: #D3E4F6;
+
+  /* ── Secondary ── */
+  --md-sys-color-secondary: #A3B8CC;
+  --md-sys-color-on-secondary: #0D1F30;
+  --md-sys-color-secondary-container: #2A3E52;
+  --md-sys-color-on-secondary-container: #C2D6EB;
+
+  /* ── Tertiary ── */
+  --md-sys-color-tertiary: #8FA8BF;
+  --md-sys-color-on-tertiary: #182A3C;
+  --md-sys-color-tertiary-container: #354A5E;
+  --md-sys-color-on-tertiary-container: #B8D1E9;
+
+  /* ── Error ── */
+  --md-sys-color-error: #FFB4AB;
+  --md-sys-color-on-error: #690005;
+  --md-sys-color-error-container: #93000A;
+  --md-sys-color-on-error-container: #FFDAD6;
+
+  /* ── Surface ── */
+  --md-sys-color-surface: #111418;
+  --md-sys-color-on-surface: #E1E2E6;
+  --md-sys-color-surface-variant: #42474E;
+  --md-sys-color-on-surface-variant: #C2C7CE;
+  --md-sys-color-surface-container-lowest: #0C0F13;
+  --md-sys-color-surface-container-low: #191C20;
+  --md-sys-color-surface-container: #1D2024;
+  --md-sys-color-surface-container-high: #282A2F;
+  --md-sys-color-surface-container-highest: #33353A;
+
+  /* ── Outline ── */
+  --md-sys-color-outline: #8C9199;
+  --md-sys-color-outline-variant: #42474E;
+
+  /* ── Inverse ── */
+  --md-sys-color-inverse-surface: #E1E2E6;
+  --md-sys-color-inverse-on-surface: #2E3035;
+  --md-sys-color-inverse-primary: #516375;
+
+  /* ── Elevation (dark = tonal overlay) ── */
+  --md-sys-elevation-1: 0 1px 3px 1px rgba(0,0,0,0.15), 0 1px 2px rgba(0,0,0,0.3);
+  --md-sys-elevation-2: 0 2px 6px 2px rgba(0,0,0,0.15), 0 1px 2px rgba(0,0,0,0.3);
+  --md-sys-elevation-3: 0 4px 8px 3px rgba(0,0,0,0.15), 0 1px 3px rgba(0,0,0,0.3);
+
+  /* ── Typography ── */
+  --md-sys-typescale-display-large: 500 3.5625rem/4rem 'Inter', sans-serif;
+  --md-sys-typescale-headline-large: 400 2rem/2.5rem 'Inter', sans-serif;
+  --md-sys-typescale-headline-medium: 400 1.75rem/2.25rem 'Inter', sans-serif;
+  --md-sys-typescale-title-large: 500 1.375rem/1.75rem 'Inter', sans-serif;
+  --md-sys-typescale-title-medium: 500 1rem/1.5rem 'Inter', sans-serif;
+  --md-sys-typescale-body-large: 400 1rem/1.5rem 'Inter', sans-serif;
+  --md-sys-typescale-body-medium: 400 0.875rem/1.25rem 'Inter', sans-serif;
+  --md-sys-typescale-body-small: 400 0.75rem/1rem 'Inter', sans-serif;
+  --md-sys-typescale-label-large: 500 0.875rem/1.25rem 'Inter', sans-serif;
+
+  /* ── Shape ── */
+  --md-sys-shape-corner-none: 0;
+  --md-sys-shape-corner-extra-small: 4px;
+  --md-sys-shape-corner-small: 8px;
+  --md-sys-shape-corner-medium: 12px;
+  --md-sys-shape-corner-large: 16px;
+  --md-sys-shape-corner-extra-large: 28px;
+  --md-sys-shape-corner-full: 9999px;
+
+  /* ── Motion ── */
+  --md-sys-motion-easing-standard: cubic-bezier(0.2, 0, 0, 1);
+  --md-sys-motion-easing-emphasized: cubic-bezier(0.2, 0, 0, 1);
+  --md-sys-motion-duration-short1: 50ms;
+  --md-sys-motion-duration-short2: 100ms;
+  --md-sys-motion-duration-short3: 150ms;
+  --md-sys-motion-duration-short4: 200ms;
+  --md-sys-motion-duration-medium1: 250ms;
+  --md-sys-motion-duration-medium2: 300ms;
+  --md-sys-motion-duration-medium3: 350ms;
+  --md-sys-motion-duration-medium4: 400ms;
+  --md-sys-motion-duration-long1: 450ms;
+  --md-sys-motion-duration-long2: 500ms;
+
+  /* ── Spacing (4px grid) ── */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-10: 40px;
+  --space-12: 48px;
+  --space-16: 64px;
+
+  /* ── Prose reading width ── */
+  --reading-width: 65ch;
+
+  /* ── Monospace ── */
+  --font-mono: 'JetBrains Mono', monospace;
+}
+
+/* ── Base ── */
+*, *::before, *::after {
+  box-sizing: border-box;
+}
+
+html {
+  font: var(--md-sys-typescale-body-large);
+  color: var(--md-sys-color-on-surface);
+  background: var(--md-sys-color-surface);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+}
+
+a {
+  color: var(--md-sys-color-primary);
+  text-decoration: none;
+}
+a:hover {
+  text-decoration: underline;
+}
+
+/* ── Scrollbar ── */
+::-webkit-scrollbar {
+  width: 8px;
+}
+::-webkit-scrollbar-track {
+  background: var(--md-sys-color-surface-container);
+}
+::-webkit-scrollbar-thumb {
+  background: var(--md-sys-color-outline-variant);
+  border-radius: var(--md-sys-shape-corner-full);
+}
+
+/* ── Utility ── */
+.sr-only {
+  position: absolute;
+  width: 1px; height: 1px;
+  padding: 0; margin: -1px;
+  overflow: hidden;
+  clip: rect(0,0,0,0);
+  border: 0;
+}

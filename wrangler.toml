@@ -1,0 +1,9 @@
+name = "fanfiction-fyi"
+compatibility_date = "2026-04-27"
+compatibility_flags = ["nodejs_compat"]
+pages_build_output_dir = "./dist"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "fanfiction-fyi-db"
+database_id = "TBD"

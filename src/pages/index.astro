@@ -1,0 +1,114 @@
+---
+import Base from '../layouts/Base.astro';
+---
+
+<Base title="fanfiction.fyi">
+  <section class="hero">
+    <h1 class="hero__title">fanfiction.fyi</h1>
+    <p class="hero__subtitle">A bespoke archive for a small circle of storytellers</p>
+  </section>
+
+  <section class="home-grid">
+    <a href="/works" class="home-card">
+      <h2>Browse Works</h2>
+      <p>Explore the archive — filtered by fandom, character, or tag</p>
+    </a>
+    <a href="/works/new" class="home-card home-card--accent">
+      <h2>Post a Work</h2>
+      <p>Draft, import Markdown, and publish your stories</p>
+    </a>
+    <a href="/tags" class="home-card">
+      <h2>Tags</h2>
+      <p>Navigate by fandom, character, relationship, and more</p>
+    </a>
+    <a href="/collections" class="home-card">
+      <h2>Collections</h2>
+      <p>Curated groupings — themed, moderated, or private</p>
+    </a>
+  </section>
+
+  <section class="recent-works">
+    <h2 class="section-title">Recently Updated</h2>
+    <p class="placeholder-text">Works will appear here once the archive is seeded.</p>
+  </section>
+</Base>
+
+<style>
+  .hero {
+    text-align: center;
+    padding: var(--space-16) 0 var(--space-10);
+  }
+
+  .hero__title {
+    font: var(--md-sys-typescale-display-large);
+    color: var(--md-sys-color-primary);
+    margin: 0 0 var(--space-4) 0;
+  }
+
+  .hero__subtitle {
+    font: var(--md-sys-typescale-title-medium);
+    color: var(--md-sys-color-on-surface-variant);
+    margin: 0;
+  }
+
+  .home-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+    gap: var(--space-4);
+    margin-bottom: var(--space-12);
+  }
+
+  .home-card {
+    display: block;
+    padding: var(--space-6);
+    background: var(--md-sys-color-surface-container);
+    border: 1px solid var(--md-sys-color-outline-variant);
+    border-radius: var(--md-sys-shape-corner-large);
+    text-decoration: none;
+    color: var(--md-sys-color-on-surface);
+    transition: background var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard),
+                border-color var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard);
+  }
+
+  .home-card:hover {
+    background: var(--md-sys-color-surface-container-high);
+    border-color: var(--md-sys-color-outline);
+    text-decoration: none;
+  }
+
+  .home-card h2 {
+    font: var(--md-sys-typescale-title-large);
+    color: var(--md-sys-color-primary);
+    margin: 0 0 var(--space-2) 0;
+  }
+
+  .home-card p {
+    font: var(--md-sys-typescale-body-medium);
+    color: var(--md-sys-color-on-surface-variant);
+    margin: 0;
+  }
+
+  .home-card--accent {
+    border-color: var(--md-sys-color-primary);
+    background: var(--md-sys-color-primary-container);
+  }
+
+  .home-card--accent h2 {
+    color: var(--md-sys-color-on-primary-container);
+  }
+
+  .home-card--accent p {
+    color: var(--md-sys-color-on-primary-container);
+  }
+
+  .section-title {
+    font: var(--md-sys-typescale-headline-medium);
+    margin: 0 0 var(--space-4) 0;
+  }
+
+  .placeholder-text {
+    font: var(--md-sys-typescale-body-large);
+    color: var(--md-sys-color-outline);
+    font-style: italic;
+  }
+</style>
