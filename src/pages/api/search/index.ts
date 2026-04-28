@@ -20,7 +20,17 @@ export const GET: APIRoute = async ({ url, locals, request }) => {
     });
   }
   // Sanitize FTS5 query — strip special operators that cause SQL errors
-  const q = rawQ.replace(/["()*]/g, '').replace(/\b(AND|OR|NOT|NEAR)\b/gi, '').trim() || rawQ;
+  const sanitizedQ = rawQ.replace(/["()*]/g, '').replace(/\b(AND|OR|NOT|NEAR)\b/gi, '').trim();
+  if (!sanitizedQ) {
+    return new Response(
+      JSON.stringify({ error: 'Query parameter "q" must contain searchable terms' }),
+      {
+        status: 400,
+        headers: { 'Content-Type': 'application/json', ...cors },
+      }
+    );
+  }
+  const q = sanitizedQ;
 
   const type = url.searchParams.get('type')?.trim() || undefined;
   const page = Math.max(Number(url.searchParams.get('page')) || 1, 1);
