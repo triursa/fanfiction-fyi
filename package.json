@@ -26,10 +26,10 @@
     "@tiptap/starter-kit": "^2.0.0",
     "astro": "^5.0.0",
     "epub-gen-memory": "^1.1.2",
-    "isomorphic-dompurify": "^3.10.0",
     "jose": "^6.2.3",
     "marked": "^15.0.0",
     "preact": "^10.0.0",
+    "sanitize-html": "^2.13.0",
     "tiptap": "^1.0.0",
     "turndown": "^7.0.0"
   },
