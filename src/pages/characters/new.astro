@@ -1,0 +1,295 @@
+---
+export const prerender = false;
+import Base from '../../layouts/Base.astro';
+
+// Auth gate — redirect if not logged in
+const cookie = Astro.request.headers.get('cookie') ?? '';
+const sessionMatch = cookie.match(/session=([a-f0-9]+)/);
+if (!sessionMatch) return Astro.redirect('/login');
+
+const db = Astro.locals.runtime.env.DB as D1Database;
+const session = await queryFirst<any>(db, `SELECT user_id FROM sessions WHERE token = ?1 AND expires_at > datetime('now')`, sessionMatch[1]);
+if (!session) return Astro.redirect('/login');
+
+import { queryFirst, queryAll } from '../../lib/db';
+
+const user = await queryFirst<any>(db, `SELECT id, role FROM users WHERE id = ?1`, session.user_id);
+const pseuds = await queryAll<any>(db, `SELECT id, name FROM pseuds WHERE user_id = ?1 ORDER BY id`, user.id);
+
+// Fetch character groups for dropdown
+const groups = await queryAll<{ id: number; name: string }>(db, `SELECT id, name FROM character_groups ORDER BY name`);
+
+// Fetch existing fandoms for autocomplete
+const fandomRows = await queryAll<{ fandom: string }>(db, `SELECT DISTINCT fandom FROM characters WHERE fandom IS NOT NULL ORDER BY fandom`);
+const fandoms = fandomRows.map(r => r.fandom);
+
+// If editing (query param ?edit=ID), load character data
+const editId = Number(Astro.url.searchParams.get('edit'));
+let editChar: any = null;
+if (editId) {
+  editChar = await queryFirst<any>(db, `SELECT * FROM characters WHERE id = ?1`, editId);
+  // Permission check
+  const isCreator = editChar?.created_by && pseuds.some(p => p.id === editChar.created_by);
+  const isPrivileged = ['admin', 'mod', 'founder'].includes(user.role);
+  if (!editChar || (!isCreator && !isPrivileged)) return Astro.redirect('/characters');
+}
+---
+
+<Base title={editChar ? `Edit: ${editChar.name} — Character Library` : 'New Character — Character Library'}>
+  <div class="char-form-page">
+    <h1 class="form-title">{editChar ? `Edit: ${editChar.name}` : 'Create New Character'}</h1>
+
+    <form id="char-form" class="char-form">
+      <input type="hidden" id="char-id" value={editChar?.id || ''} />
+
+      <div class="form-group">
+        <label for="char-name">Name <span class="required">*</span></label>
+        <input
+          type="text"
+          id="char-name"
+          name="name"
+          required
+          value={editChar?.name || ''}
+          placeholder="e.g., Harry Potter"
+        />
+      </div>
+
+      <div class="form-group">
+        <label for="char-fandom">Fandom</label>
+        <input
+          type="text"
+          id="char-fandom"
+          name="fandom"
+          value={editChar?.fandom || ''}
+          placeholder="e.g., Harry Potter - J. K. Rowling"
+          list="fandom-list"
+        />
+        <datalist id="fandom-list">
+          {fandoms.map(f => <option value={f} />)}
+        </datalist>
+      </div>
+
+      <div class="form-group">
+        <label for="char-short-desc">Short Description</label>
+        <input
+          type="text"
+          id="char-short-desc"
+          name="short_desc"
+          value={editChar?.short_desc || ''}
+          placeholder="One-liner for character cards"
+          maxlength="200"
+        />
+      </div>
+
+      <div class="form-group">
+        <label for="char-aliases">Aliases</label>
+        <input
+          type="text"
+          id="char-aliases"
+          name="aliases"
+          value={editChar?.aliases ? JSON.parse(editChar.aliases).join(', ') : ''}
+          placeholder="Comma-separated, e.g., The Boy Who Lived, HP"
+        />
+        <span class="form-hint">Separate multiple aliases with commas</span>
+      </div>
+
+      <div class="form-group">
+        <label for="char-group">Character Group</label>
+        <select id="char-group" name="group_id">
+          <option value="">— None —</option>
+          {groups.map(g => (
+            <option value={g.id} selected={editChar?.group_id === g.id}>{g.name}</option>
+          ))}
+        </select>
+        <span class="form-hint">Group characters that are the same person across different fandoms</span>
+      </div>
+
+      <div class="form-group">
+        <label for="char-description">Full Description</label>
+        <textarea
+          id="char-description"
+          name="description"
+          rows="10"
+          placeholder="Wiki-style description (Markdown supported)…"
+        >{editChar?.description || ''}</textarea>
+      </div>
+
+      <div class="form-actions">
+        <button type="submit" class="btn-submit">{editChar ? 'Save Changes' : 'Create Character'}</button>
+        <a href={editChar ? `/characters/${editChar.id}` : '/characters'} class="btn-cancel">Cancel</a>
+      </div>
+
+      <div id="form-error" class="form-error" style="display:none;"></div>
+    </form>
+  </div>
+</Base>
+
+<style is:global>
+  @import '../../styles/theme.css';
+
+  .char-form-page {
+    max-width: 640px;
+    padding: var(--space-4) 0;
+  }
+
+  .form-title {
+    font: var(--md-sys-typescale-headline-large);
+    color: var(--md-sys-color-on-surface);
+    margin: 0 0 var(--space-6);
+  }
+
+  .char-form {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-5);
+  }
+
+  .form-group {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+  }
+
+  .form-group label {
+    font: var(--md-sys-typescale-label-large);
+    color: var(--md-sys-color-on-surface);
+  }
+
+  .required {
+    color: var(--md-sys-color-error);
+  }
+
+  .form-group input,
+  .form-group select,
+  .form-group textarea {
+    font: var(--md-sys-typescale-body-large);
+    color: var(--md-sys-color-on-surface);
+    background: var(--md-sys-color-surface-container-high);
+    border: 1px solid var(--md-sys-color-outline-variant);
+    border-radius: var(--md-sys-shape-corner-medium);
+    padding: var(--space-3) var(--space-4);
+    outline: none;
+    transition: border-color var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard);
+  }
+
+  .form-group input:focus,
+  .form-group select:focus,
+  .form-group textarea:focus {
+    border-color: var(--md-sys-color-primary);
+  }
+
+  .form-group input::placeholder,
+  .form-group textarea::placeholder {
+    color: var(--md-sys-color-outline);
+  }
+
+  .form-group textarea {
+    resize: vertical;
+    min-height: 200px;
+    font-family: 'JetBrains Mono', monospace;
+  }
+
+  .form-hint {
+    font: var(--md-sys-typescale-body-small);
+    color: var(--md-sys-color-outline);
+  }
+
+  .form-actions {
+    display: flex;
+    gap: var(--space-3);
+  }
+
+  .btn-submit {
+    font: var(--md-sys-typescale-label-large);
+    color: var(--md-sys-color-on-primary);
+    background: var(--md-sys-color-primary);
+    padding: var(--space-3) var(--space-6);
+    border-radius: var(--md-sys-shape-corner-full);
+    border: none;
+    cursor: pointer;
+  }
+
+  .btn-submit:hover {
+    background: var(--md-sys-color-primary-container);
+    color: var(--md-sys-color-on-primary-container);
+  }
+
+  .btn-cancel {
+    font: var(--md-sys-typescale-label-large);
+    color: var(--md-sys-color-on-surface-variant);
+    background: transparent;
+    border: 1px solid var(--md-sys-color-outline-variant);
+    padding: var(--space-3) var(--space-6);
+    border-radius: var(--md-sys-shape-corner-full);
+    text-decoration: none;
+  }
+
+  .btn-cancel:hover {
+    background: var(--md-sys-color-surface-container-high);
+  }
+
+  .form-error {
+    font: var(--md-sys-typescale-body-medium);
+    color: var(--md-sys-color-error);
+    background: var(--md-sys-color-error-container);
+    padding: var(--space-3) var(--space-4);
+    border-radius: var(--md-sys-shape-corner-medium);
+  }
+</style>
+
+<script is:inline>
+  const form = document.getElementById('char-form');
+  const errorEl = document.getElementById('form-error');
+  const charId = document.getElementById('char-id').value;
+
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    errorEl.style.display = 'none';
+
+    const name = document.getElementById('char-name').value.trim();
+    if (!name) {
+      errorEl.textContent = 'Name is required.';
+      errorEl.style.display = '';
+      return;
+    }
+
+    const fandom = document.getElementById('char-fandom').value.trim();
+    const short_desc = document.getElementById('char-short-desc').value.trim();
+    const aliasesRaw = document.getElementById('char-aliases').value.trim();
+    const group_id = document.getElementById('char-group').value;
+    const description = document.getElementById('char-description').value;
+
+    const aliases = aliasesRaw ? aliasesRaw.split(',').map(a => a.trim()).filter(a => a) : [];
+
+    const body = { name, fandom: fandom || null, short_desc: short_desc || null, aliases, group_id: group_id || null, description: description || null };
+
+    try {
+      let res;
+      if (charId) {
+        res = await fetch(`/api/characters/${charId}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        });
+      } else {
+        res = await fetch('/api/characters/create', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        });
+      }
+
+      if (res.ok) {
+        const char = await res.json();
+        window.location.href = `/characters/${char.id}`;
+      } else {
+        const err = await res.json();
+        errorEl.textContent = err.error || 'Something went wrong.';
+        errorEl.style.display = '';
+      }
+    } catch (err) {
+      errorEl.textContent = 'Network error. Please try again.';
+      errorEl.style.display = '';
+    }
+  });
+</script>
