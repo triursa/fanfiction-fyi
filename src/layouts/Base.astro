@@ -30,8 +30,8 @@ if (sessionMatch) {
         const colors = THEMES[userTheme].colors;
         const rules = Object.entries(colors)
           .map(([token, value]) => `  ${token}: ${value};`)
-          .join('\n');
-        themeOverrideCSS = `:root {\n${rules}\n}`;
+          .join('\\n');
+        themeOverrideCSS = `:root {\\n${rules}\\n}`;
       }
     }
   }
@@ -122,6 +122,7 @@ const title = Astro.props.title ?? 'fanfiction.fyi';
     </main>
     <footer class="app-footer">
       <p>&copy; 2026 fanfiction.fyi &mdash; bespoke archive for a small circle</p>
+      <p class="app-footer__links"><a href="/privacy">Privacy Policy</a></p>
     </footer>
     <BugReport client:load />
   </body>
@@ -222,6 +223,19 @@ const title = Astro.props.title ?? 'fanfiction.fyi';
     font: var(--md-sys-typescale-body-small);
     color: var(--md-sys-color-outline);
     border-top: 1px solid var(--md-sys-color-outline-variant);
+  }
+
+  .app-footer__links {
+    margin-top: var(--space-2);
+  }
+
+  .app-footer__links a {
+    color: var(--md-sys-color-outline);
+    text-decoration: none;
+  }
+
+  .app-footer__links a:hover {
+    color: var(--md-sys-color-primary);
   }
 
   @media (max-width: 768px) {
