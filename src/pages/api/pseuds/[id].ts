@@ -37,9 +37,10 @@ export const PUT: APIRoute = async ({ request, locals, params }) => {
     return new Response(JSON.stringify({ error: 'Invalid JSON' }), { status: 400, headers: { 'Content-Type': 'application/json' } });
   }
 
-  const { name, description } = body || {};
+  const { name, description, icon_key } = body || {};
   const newName = (typeof name === 'string' ? name.trim() : existing.name);
   const newDesc = (description !== undefined ? (typeof description === 'string' ? description : null) : existing.description);
+  const newIconKey = (icon_key !== undefined ? (typeof icon_key === 'string' ? icon_key : null) : existing.icon_key);
 
   // Name validation
   if (!newName || newName.length === 0) {
@@ -57,7 +58,7 @@ export const PUT: APIRoute = async ({ request, locals, params }) => {
     }
   }
 
-  await run(db, `UPDATE pseuds SET name = ?1, description = ?2 WHERE id = ?3 AND user_id = ?4`, newName, newDesc, pseudId, auth.user.id);
+  await run(db, `UPDATE pseuds SET name = ?1, description = ?2, icon_key = ?3 WHERE id = ?4 AND user_id = ?5`, newName, newDesc, newIconKey, pseudId, auth.user.id);
 
   const updated = await queryFirst<any>(db, `SELECT * FROM pseuds WHERE id = ?1`, pseudId);
   return new Response(JSON.stringify(updated), { headers: { 'Content-Type': 'application/json' } });
@@ -99,6 +100,14 @@ export const DELETE: APIRoute = async ({ request, locals, params }) => {
   await run(db, `DELETE FROM kudos WHERE pseud_id = ?1`, pseudId);
   await run(db, `DELETE FROM bookmarks WHERE pseud_id = ?1`, pseudId);
   await run(db, `DELETE FROM readings WHERE pseud_id = ?1`, pseudId);
+
+  // Clean up R2 icon if present
+  if (existing.icon_key) {
+    try {
+      const bucket = locals.runtime.env.MEDIA as R2Bucket | undefined;
+      if (bucket) await bucket.delete(existing.icon_key);
+    } catch { /* non-critical */ }
+  }
 
   // Delete the pseud itself
   await run(db, `DELETE FROM pseuds WHERE id = ?1 AND user_id = ?2`, pseudId, auth.user.id);

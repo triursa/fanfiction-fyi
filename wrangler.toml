@@ -7,3 +7,7 @@ pages_build_output_dir = "./dist"
 binding = "DB"
 database_name = "fanfiction-fyi-db"
 database_id = "d4a29888-6e20-4391-8aa0-c131b4c36d88"
+
+[[r2_buckets]]
+binding = "MEDIA"
+bucket_name = "fanfiction-fyi-media"

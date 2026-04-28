@@ -23,6 +23,7 @@ export const GET: APIRoute = async ({ request, locals }) => {
       role: user.role,
       google_linked: !!user.google_id,
       avatar_url: user.avatar_url ?? null,
+      avatar_key: (user as any).avatar_key ?? null,
       display_name: user.display_name ?? null,
       bio: user.bio ?? '',
       email_visibility: user.email_visibility ?? 'private',

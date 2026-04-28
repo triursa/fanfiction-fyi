@@ -1,0 +1,14 @@
+export const prerender = false;
+
+import type { APIRoute } from 'astro';
+
+/**
+ * GET /storage/[key] — redirect to /api/storage/[key]
+ * Backwards-compatible: character pages already use /storage/ URLs.
+ * This redirects to the R2 proxy route.
+ */
+export const GET: APIRoute = async ({ params, redirect }) => {
+  const key = params.key;
+  if (!key) return new Response('Not found', { status: 404 });
+  return redirect('/api/storage/' + key, 301);
+};

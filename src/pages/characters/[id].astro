@@ -115,7 +115,7 @@ const ROLE_COLORS: Record<string, string> = {
     <div class="char-profile-header">
       <div class="char-profile-avatar">
         {character.avatar_key
-          ? <img src={`/storage/${character.avatar_key}`} alt={character.name} />
+          ? <img src={`/api/storage/${character.avatar_key}`} alt={character.name} />
           : <div class="char-avatar-lg">{character.name.charAt(0).toUpperCase()}</div>
         }
       </div>
