@@ -1,5 +1,6 @@
 ---
 export const prerender = false;
+import Base from '@/layouts/Base.astro';
 import { queryFirst, queryAll } from '@/lib/db';
 import { UserRole, ROLE_LEVEL } from '@/lib/types';
 
@@ -25,45 +26,47 @@ const commentCount = await queryFirst<{ cnt: number }>(db, `SELECT COUNT(*) as c
 const tagCount = await queryFirst<{ cnt: number }>(db, `SELECT COUNT(*) as cnt FROM tags`);
 ---
 
-<h1 class="admin-heading">Admin Dashboard</h1>
+<Base title="Admin Dashboard">
+  <h1 class="admin-heading">Admin Dashboard</h1>
 
-<div class="stats-grid">
-  <div class="stat-card">
-    <span class="stat-number">{userCount?.cnt ?? 0}</span>
-    <span class="stat-label">Users</span>
-    <a href="/admin/users" class="stat-link">Manage users →</a>
+  <div class="stats-grid">
+    <div class="stat-card">
+      <span class="stat-number">{userCount?.cnt ?? 0}</span>
+      <span class="stat-label">Users</span>
+      <a href="/admin/users" class="stat-link">Manage users &rarr;</a>
+    </div>
+    <div class="stat-card">
+      <span class="stat-number">{workCount?.cnt ?? 0}</span>
+      <span class="stat-label">Works</span>
+      <a href="/admin/content" class="stat-link">Moderate content &rarr;</a>
+    </div>
+    <div class="stat-card">
+      <span class="stat-number">{commentCount?.cnt ?? 0}</span>
+      <span class="stat-label">Comments</span>
+      <a href="/admin/content" class="stat-link">Moderate content &rarr;</a>
+    </div>
+    <div class="stat-card">
+      <span class="stat-number">{tagCount?.cnt ?? 0}</span>
+      <span class="stat-label">Tags</span>
+      <a href="/admin/tags" class="stat-link">Manage tags &rarr;</a>
+    </div>
   </div>
-  <div class="stat-card">
-    <span class="stat-number">{workCount?.cnt ?? 0}</span>
-    <span class="stat-label">Works</span>
-    <a href="/admin/content" class="stat-link">Moderate content →</a>
-  </div>
-  <div class="stat-card">
-    <span class="stat-number">{commentCount?.cnt ?? 0}</span>
-    <span class="stat-label">Comments</span>
-    <a href="/admin/content" class="stat-link">Moderate content →</a>
-  </div>
-  <div class="stat-card">
-    <span class="stat-number">{tagCount?.cnt ?? 0}</span>
-    <span class="stat-label">Tags</span>
-    <a href="/admin/tags" class="stat-link">Manage tags →</a>
-  </div>
-</div>
 
-<div class="admin-links">
-  <a href="/admin/users" class="admin-link-card">
-    <h2>User Management</h2>
-    <p>View all users, change roles, ban/activate accounts.</p>
-  </a>
-  <a href="/admin/content" class="admin-link-card">
-    <h2>Content Moderation</h2>
-    <p>Review recent comments and works. Delete inappropriate comments.</p>
-  </a>
-  <a href="/admin/tags" class="admin-link-card">
-    <h2>Tag Management</h2>
-    <p>View all tags, see usage counts, merge duplicate tags.</p>
-  </a>
-</div>
+  <div class="admin-links">
+    <a href="/admin/users" class="admin-link-card">
+      <h2>User Management</h2>
+      <p>View all users, change roles, ban/activate accounts.</p>
+    </a>
+    <a href="/admin/content" class="admin-link-card">
+      <h2>Content Moderation</h2>
+      <p>Review recent comments and works. Delete inappropriate comments.</p>
+    </a>
+    <a href="/admin/tags" class="admin-link-card">
+      <h2>Tag Management</h2>
+      <p>View all tags, see usage counts, merge duplicate tags.</p>
+    </a>
+  </div>
+</Base>
 
 <style>
   .admin-heading {
