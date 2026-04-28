@@ -51,7 +51,7 @@ export const POST: APIRoute = async ({ request, locals }) => {
   let body: any;
   try { body = await request.json(); } catch { return new Response(JSON.stringify({ error: 'Invalid JSON' }), { status: 400, headers: { 'Content-Type': 'application/json' } }); }
 
-  const { title, summary, notes, pseud_id, chapter_title, chapter_content, draft, tag_ids, rating, category, warning } = body || {};
+  const { title, summary, notes, pseud_id, chapter_title, chapter_content, chapter_images, draft, tag_ids, rating, category, warning } = body || {};
   if (!title) return new Response(JSON.stringify({ error: 'Title is required' }), { status: 400, headers: { 'Content-Type': 'application/json' } });
 
   const pseudId = pseud_id || auth.pseuds[0]?.id;
@@ -61,6 +61,12 @@ export const POST: APIRoute = async ({ request, locals }) => {
   const contentMd = chapter_content || '';
   const contentHtml = contentMd ? markdownToHtml(contentMd) : null;
   const wordCount = contentMd ? contentMd.split(/\s+/).filter(Boolean).length : 0;
+  
+  // Validate chapter_images: must be an array of strings starting with 'chapters/'
+  const validImages: string[] = Array.isArray(chapter_images) 
+    ? chapter_images.filter((img: string) => typeof img === 'string' && img.startsWith('chapters/') && !img.includes('..'))
+    : [];
+  const imagesJson = JSON.stringify(validImages);
 
   const workResult = await run(db, `INSERT INTO works (title, summary, notes, language, word_count, complete, published_at, updated_at, created_at) VALUES (?1, ?2, ?3, 'en', ?4, 0, ${isDraft ? 'NULL' : "CURRENT_TIMESTAMP"}, datetime('now'), datetime('now'))`,
     title, summary || null, notes || null, wordCount);
@@ -69,8 +75,8 @@ export const POST: APIRoute = async ({ request, locals }) => {
 
   await run(db, `INSERT INTO creatorships (pseud_id, work_id, role, created_at) VALUES (?1, ?2, 'author', datetime('now'))`, pseudId, workId);
 
-  const chapterResult = await run(db, `INSERT INTO chapters (work_id, position, title, content_md, content_html, draft, word_count, created_at, updated_at) VALUES (?1, 1, ?2, ?3, ?4, ?5, ?6, datetime('now'), datetime('now'))`,
-    workId, chapter_title || 'Chapter 1', contentMd, contentHtml, isDraft, wordCount);
+  const chapterResult = await run(db, `INSERT INTO chapters (work_id, position, title, content_md, content_html, draft, word_count, images, created_at, updated_at) VALUES (?1, 1, ?2, ?3, ?4, ?5, ?6, ?7, datetime('now'), datetime('now'))`,
+    workId, chapter_title || 'Chapter 1', contentMd, contentHtml, isDraft, wordCount, imagesJson);
 
   if (Array.isArray(tag_ids)) {
     for (const tagId of tag_ids) {

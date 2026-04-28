@@ -6,15 +6,40 @@ import Link from '@tiptap/extension-link';
 import Heading from '@tiptap/extension-heading';
 import Placeholder from '@tiptap/extension-placeholder';
 import CodeBlockLowlight from '@tiptap/extension-code-block-lowlight';
+import Image from '@tiptap/extension-image';
 import { common, createLowlight } from 'lowlight';
 import { markdownToHtml, htmlToMarkdown } from '@/lib/markdown';
 
 const lowlight = createLowlight(common);
 
+/** Upload an image file to the server and return the URL */
+async function uploadImageFile(file: File): Promise<{ key: string; url: string }> {
+  const formData = new FormData();
+  formData.append('file', file);
+  formData.append('type', 'chapter');
+  // workId will be set by the parent page via a global or we extract from URL
+  const workIdMatch = window.location.pathname.match(/\/works\/(\d+)/);
+  const workId = workIdMatch ? workIdMatch[1] : '0';
+  formData.append('id', workId);
+
+  const res = await fetch('/api/upload', {
+    method: 'POST',
+    body: formData,
+  });
+
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({ error: 'Upload failed' }));
+    throw new Error(data.error || 'Upload failed');
+  }
+
+  return res.json();
+}
+
 interface EditorProps {
   content?: string;
   onContentChange?: (markdown: string) => void;
   placeholder?: string;
+  workId?: number;
 }
 
 interface ToolbarBtn {
@@ -45,12 +70,28 @@ export default function TipTapEditor({
   content = '',
   onContentChange,
   placeholder = 'Start writing…',
+  workId,
 }: EditorProps) {
   const editorRef = useRef<Editor | null>(null);
   const mountRef = useRef<HTMLDivElement | null>(null);
   const [isEditorReady, setIsEditorReady] = useState(false);
+  const [isUploading, setIsUploading] = useState(false);
   const onContentChangeRef = useRef(onContentChange);
   onContentChangeRef.current = onContentChange;
+
+  // Expose workId globally for upload function
+  useEffect(() => {
+    if (workId) {
+      (window as any).__editorWorkId = workId;
+    }
+  }, [workId]);
+
+  // Initialize image key tracking
+  useEffect(() => {
+    if (!(window as any).__editorImageKeys) {
+      (window as any).__editorImageKeys = [];
+    }
+  }, []);
 
   useEffect(() => {
     if (!mountRef.current) return;
@@ -70,6 +111,13 @@ export default function TipTapEditor({
         }),
         Placeholder.configure({ placeholder }),
         CodeBlockLowlight.configure({ lowlight }),
+        Image.configure({
+          inline: false,
+          allowBase64: false,
+          HTMLAttributes: {
+            class: 'chapter-image',
+          },
+        }),
       ],
       content: content || '',
       onUpdate: ({ editor: e }) => {
@@ -110,6 +158,114 @@ export default function TipTapEditor({
       editorRef.current.setOptions({ extensions: [Placeholder.configure({ placeholder })] });
     }
   }, [placeholder]);
+
+  // ── Image Upload Handler ──
+  const handleImageUpload = useCallback(async (file: File) => {
+    if (!editorRef.current) return;
+
+    // Validate file type
+    const allowedTypes = ['image/gif', 'image/png', 'image/jpeg', 'image/webp'];
+    if (!allowedTypes.includes(file.type)) {
+      alert('Invalid file type. Allowed: GIF, PNG, JPEG, WebP');
+      return;
+    }
+
+    // Validate file size (25MB max)
+    if (file.size > 25 * 1024 * 1024) {
+      alert('File too large. Maximum size: 25MB');
+      return;
+    }
+
+    setIsUploading(true);
+    try {
+      const result = await uploadImageFile(file);
+      // Insert image into editor at current position
+      editorRef.current.chain().focus().setImage({
+        src: result.url,
+        alt: file.name.replace(/\.[^.]+$/, ''),
+      }).run();
+      // Track the image key for form submission
+      const imageKeys = (window as any).__editorImageKeys || [];
+      if (!imageKeys.includes(result.key)) {
+        imageKeys.push(result.key);
+        (window as any).__editorImageKeys = imageKeys;
+      }
+    } catch (e: any) {
+      alert(e.message || 'Image upload failed');
+    } finally {
+      setIsUploading(false);
+    }
+  }, []);
+
+  // ── File input for image upload button ──
+  const handleImageButtonClick = useCallback(() => {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = 'image/gif,image/png,image/jpeg,image/webp';
+    input.onchange = async () => {
+      const file = input.files?.[0];
+      if (file) {
+        await handleImageUpload(file);
+      }
+    };
+    input.click();
+  }, [handleImageUpload]);
+
+  // ── Drag & drop + paste handlers ──
+  useEffect(() => {
+    const editorEl = mountRef.current;
+    if (!editorEl) return;
+
+    const handleDrop = (e: DragEvent) => {
+      // Only handle if there are image files
+      if (!e.dataTransfer?.files?.length) return;
+      const imageFiles = Array.from(e.dataTransfer.files).filter(f => f.type.startsWith('image/'));
+      if (imageFiles.length === 0) return;
+
+      e.preventDefault();
+      e.stopPropagation();
+
+      // Upload each image sequentially
+      (async () => {
+        for (const file of imageFiles) {
+          await handleImageUpload(file);
+        }
+      })();
+    };
+
+    const handlePaste = (e: ClipboardEvent) => {
+      if (!e.clipboardData?.files?.length) return;
+      const imageFiles = Array.from(e.clipboardData.files).filter(f => f.type.startsWith('image/'));
+      if (imageFiles.length === 0) return;
+
+      e.preventDefault();
+      // Don't stop propagation — let TipTap handle text too
+
+      // Upload pasted images
+      (async () => {
+        for (const file of imageFiles) {
+          await handleImageUpload(file);
+        }
+      })();
+    };
+
+    // Prevent browser default drag behavior on the editor area
+    const handleDragOver = (e: DragEvent) => {
+      if (e.dataTransfer?.types?.includes('Files')) {
+        e.preventDefault();
+      }
+    };
+
+    editorEl.addEventListener('drop', handleDrop);
+    editorEl.addEventListener('paste', handlePaste);
+    editorEl.addEventListener('dragover', handleDragOver);
+
+    return () => {
+      editorEl.removeEventListener('drop', handleDrop);
+      editorEl.removeEventListener('paste', handlePaste);
+      editorEl.removeEventListener('dragover', handleDragOver);
+    };
+  }, [handleImageUpload]);
 
   // ── Markdown Import / Export ──
   const handleImport = useCallback(() => {
@@ -192,6 +348,11 @@ export default function TipTapEditor({
       isActive: (e) => e.isActive('link'),
     },
     {
+      label: '🖼️',
+      title: 'Insert Image',
+      action: () => handleImageButtonClick(),
+    },
+    {
       label: '""',
       title: 'Blockquote',
       action: (e) => e.chain().focus().toggleBlockquote().run(),
@@ -258,6 +419,12 @@ export default function TipTapEditor({
 
       <div class="tiptap-editor-area" ref={mountRef}>
       </div>
+
+      {isUploading && (
+        <div class="tiptap-upload-overlay">
+          <span class="tiptap-upload-status">Uploading image…</span>
+        </div>
+      )}
 
       <div class="tiptap-footer">
         <span class="tiptap-wordcount">

@@ -4,8 +4,11 @@ import type { APIRoute } from 'astro';
 
 /**
  * GET /api/storage/[...key] — proxy R2 object reads
- * Serves uploaded images (avatars, pseud icons) from R2 with proper caching.
- * Key format: avatars/{userId}/{timestamp}-{random}.{ext} or pseuds/{pseudId}/...
+ * Serves uploaded images (avatars, pseud icons, chapter images) from R2 with proper caching.
+ * Key format: 
+ *   avatars/{userId}/{timestamp}-{random}.{ext}
+ *   pseuds/{pseudId}/{timestamp}-{random}.{ext}
+ *   chapters/{workId}/{timestamp}-{random}.{ext}
  * Uses rest params to handle keys that contain slashes.
  */
 export const GET: APIRoute = async ({ locals, params }) => {
@@ -18,7 +21,7 @@ export const GET: APIRoute = async ({ locals, params }) => {
   }
 
   // Security: only allow known prefixes
-  if (!key.startsWith('avatars/') && !key.startsWith('pseuds/')) {
+  if (!key.startsWith('avatars/') && !key.startsWith('pseuds/') && !key.startsWith('chapters/')) {
     return new Response('Forbidden', { status: 403 });
   }
 

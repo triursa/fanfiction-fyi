@@ -279,6 +279,9 @@ const commentsJson = JSON.stringify(allComments);
   .prose-content { font: var(--md-sys-typescale-body-large); line-height: 1.8; color: var(--md-sys-color-on-surface); }
   .prose-content p { margin: var(--space-2) 0; }
   .prose-content h1, .prose-content h2, .prose-content h3 { margin: var(--space-6) 0 var(--space-2); color: var(--md-sys-color-on-surface); }
+  .prose-content img.chapter-image, .prose-content img { max-width: 100%; height: auto; border-radius: var(--md-sys-shape-corner-medium); margin: var(--space-4) 0; display: block; }
+  .prose-content figure { margin: var(--space-4) 0; text-align: center; }
+  .prose-content figcaption { font: var(--md-sys-typescale-body-small); color: var(--md-sys-color-on-surface-variant); margin-top: var(--space-1); }
 
   .work-actions { margin-top: var(--space-8); display: flex; gap: var(--space-3); align-items: center; flex-wrap: wrap; }
   .user-work-actions { display: flex; gap: var(--space-3); }

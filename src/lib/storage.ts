@@ -1,6 +1,6 @@
 /**
  * R2 Storage utilities for fanfiction.fyi
- * Handles image upload, validation, resizing, and deletion for avatars/icons.
+ * Handles image upload, validation, resizing, and deletion for avatars, pseud icons, and chapter images.
  * 
  * Bucket: fanfiction-fyi-media (Cloudflare R2)
  * Binding: MEDIA (configured in wrangler.toml)
@@ -8,8 +8,9 @@
  * Key convention:
  *   - User avatars:  avatars/{userId}/{timestamp}-{random}.{ext}
  *   - Pseud icons:   pseuds/{pseudId}/{timestamp}-{random}.{ext}
+ *   - Chapter images: chapters/{workId}/{timestamp}-{random}.{ext}
  * 
- * Images are resized to max 256x256px for avatars, stored as WebP for efficiency.
+ * Images are resized to max dimensions for avatars, stored as-is for chapter content.
  */
 
 export interface R2Env {
@@ -17,9 +18,9 @@ export interface R2Env {
 }
 
 const ALLOWED_TYPES = ['image/gif', 'image/png', 'image/jpeg', 'image/webp'] as const;
-const MAX_FILE_SIZE = 5 * 1024 * 1024; // 5 MB
+const MAX_FILE_SIZE = 5 * 1024 * 1024; // 5 MB for avatars
+const MAX_CHAPTER_IMAGE_SIZE = 25 * 1024 * 1024; // 25 MB for chapter images (larger allowance)
 const AVATAR_MAX_DIM = 256; // max width/height in pixels
-const AVATAR_QUALITY = 0.85;
 
 export class UploadError extends Error {
   constructor(public status: number, message: string) {
@@ -27,25 +28,28 @@ export class UploadError extends Error {
   }
 }
 
+type ImagePrefix = 'avatars' | 'pseuds' | 'chapters';
+
 /**
  * Validate an uploaded file's content type and size.
  * Returns the validated content type.
  */
-export function validateImageUpload(contentType: string | null, contentLength: number): string {
+export function validateImageUpload(contentType: string | null, contentLength: number, maxSize?: number): string {
   if (!contentType || !ALLOWED_TYPES.includes(contentType as any)) {
     throw new UploadError(400, `Invalid file type. Allowed: ${ALLOWED_TYPES.join(', ')}`);
   }
-  if (contentLength > MAX_FILE_SIZE) {
-    throw new UploadError(413, `File too large. Maximum size: ${MAX_FILE_SIZE / 1024 / 1024}MB`);
+  const limit = maxSize ?? MAX_FILE_SIZE;
+  if (contentLength > limit) {
+    throw new UploadError(413, `File too large. Maximum size: ${limit / 1024 / 1024}MB`);
   }
   return contentType;
 }
 
 /**
- * Generate a unique R2 object key for an avatar/icon.
+ * Generate a unique R2 object key for an image.
  * Pattern: {prefix}/{id}/{timestamp}-{random8}.{ext}
  */
-export function generateKey(prefix: 'avatars' | 'pseuds', id: number, ext: string): string {
+export function generateKey(prefix: ImagePrefix, id: number, ext: string): string {
   const ts = Date.now();
   const rand = crypto.randomUUID().slice(0, 8);
   return `${prefix}/${id}/${ts}-${rand}.${ext}`;
@@ -71,14 +75,17 @@ export async function resizeImage(arrayBuffer: ArrayBuffer, maxDim: number, cont
 
 /**
  * Upload an image to R2, returning the storage key and content type.
+ * For avatars/pseuds: resizes to max 256x256.
+ * For chapters: stores as-is (no resize).
  */
 export async function uploadImage(
   bucket: R2Bucket,
-  prefix: 'avatars' | 'pseuds',
+  prefix: 'avatars' | 'pseuds' | 'chapters',
   id: number,
   file: { arrayBuffer: () => Promise<ArrayBuffer>; type: string; size: number }
 ): Promise<{ key: string; contentType: string }> {
-  const validatedType = validateImageUpload(file.type, file.size);
+  const maxSize = prefix === 'chapters' ? MAX_CHAPTER_IMAGE_SIZE : MAX_FILE_SIZE;
+  const validatedType = validateImageUpload(file.type, file.size, maxSize);
   const arrayBuffer = await file.arrayBuffer();
 
   // Determine extension
@@ -91,7 +98,14 @@ export async function uploadImage(
   const ext = extMap[validatedType] || 'bin';
 
   const key = generateKey(prefix, id, ext);
-  const processed = await resizeImage(arrayBuffer, AVATAR_MAX_DIM, validatedType);
+
+  // For avatars/pseuds, try to resize. For chapters, store as-is.
+  let processed: { data: ArrayBuffer; contentType: string };
+  if (prefix === 'chapters') {
+    processed = { data: arrayBuffer, contentType: validatedType };
+  } else {
+    processed = await resizeImage(arrayBuffer, AVATAR_MAX_DIM, validatedType);
+  }
 
   await bucket.put(key, processed.data, {
     httpMetadata: {
@@ -116,11 +130,18 @@ export async function deleteImage(bucket: R2Bucket, key: string | null): Promise
 }
 
 /**
- * Get a signed URL for reading an R2 object (valid for 1 hour).
- * Falls back to direct key path if createSignedUrl isn't available.
+ * Delete multiple images from R2 by keys.
+ */
+export async function deleteImages(bucket: R2Bucket, keys: string[]): Promise<void> {
+  if (!keys.length) return;
+  await bucket.delete(keys);
+}
+
+/**
+ * Get a URL for displaying an R2 object.
+ * R2 objects are accessed via our /api/storage/[key] proxy route.
  */
 export function getImageUrl(key: string): string {
-  // R2 objects are accessed via our /api/storage/[key] proxy route
   return `/api/storage/${encodeURIComponent(key)}`;
 }
 

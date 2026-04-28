@@ -17,6 +17,8 @@ export function markdownToHtml(md: string): string {
       '*': ['class', 'id'],
     },
     allowedSchemes: ['http', 'https', 'mailto'],
+    // Allow data URIs for images only (base64 inline images from editor paste)
+    allowedSchemesAppliedToAttributes: ['href', 'src'],
     transformTags: {
       // Enforce rel="noopener noreferrer" whenever target="_blank" is present
       'a': (tagName, attribs) => ({
@@ -26,10 +28,25 @@ export function markdownToHtml(md: string): string {
           : attribs,
       }),
     },
+    // Validate img src — allow /api/storage/ paths and absolute https URLs
+    exclusiveFilter: (frame) => {
+      // For img tags, ensure src is a safe URL
+      if (frame.tag === 'img') {
+        const src = frame.attribs.src || '';
+        // Allow /api/storage/ relative paths (our R2 proxy)
+        if (src.startsWith('/api/storage/')) return true;
+        // Allow absolute https URLs
+        if (src.startsWith('https://')) return true;
+        // Reject everything else (data: URIs, javascript:, etc.)
+        return false;
+      }
+      return true;
+    },
   });
 }
 
 export function htmlToMarkdown(html: string): string {
   const td = new TurndownService({ headingStyle: 'atx' });
+  // Preserve img tags as markdown image syntax
   return td.turndown(html);
 }

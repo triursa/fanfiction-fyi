@@ -3,15 +3,22 @@ export const prerender = false;
 import type { APIRoute } from 'astro';
 import { requireAuth } from '@/lib/auth';
 import { queryFirst, run } from '@/lib/db';
-import { uploadImage, deleteImage, parseMultipart, UploadError } from '@/lib/storage';
+import { uploadImage, deleteImage, deleteImages, parseMultipart, UploadError } from '@/lib/storage';
 
 /**
- * POST /api/upload — upload an image for user avatar or pseud icon
+ * POST /api/upload — upload an image for user avatar, pseud icon, or chapter content
  * 
  * Accepts multipart/form-data with:
- *   - file: the image file (gif/png/jpg/webp, max 5MB)
- *   - type: "avatar" | "pseud"
- *   - id: (for pseud type) the pseud ID
+ *   - file: the image file (gif/png/jpg/webp)
+ *   - type: "avatar" | "pseud" | "chapter"
+ *   - id: (for pseud/chapter type) the pseud ID or work ID
+ *   - chapterId: (for chapter type) the chapter ID (for tracking images on the chapter)
+ * 
+ * For chapter images:
+ *   - type=chapter, id={workId}, chapterId={chapterId} optional for tracking
+ *   - Max file size: 25MB (vs 5MB for avatars)
+ *   - Images are stored under chapters/{workId}/ prefix in R2
+ *   - Returns: { key, url } — url can be embedded in markdown as ![alt](url)
  * 
  * Returns: { key: string, url: string }
  */
@@ -50,17 +57,74 @@ export const POST: APIRoute = async ({ locals, request }) => {
   }
 
   const type = fields.get('type');
-  if (!type || (type !== 'avatar' && type !== 'pseud')) {
-    return new Response(JSON.stringify({ error: 'Invalid type. Must be "avatar" or "pseud".' }), {
+  if (!type || (type !== 'avatar' && type !== 'pseud' && type !== 'chapter')) {
+    return new Response(JSON.stringify({ error: 'Invalid type. Must be "avatar", "pseud", or "chapter".' }), {
       status: 400,
       headers: { 'Content-Type': 'application/json' },
     });
   }
 
   try {
+    if (type === 'chapter') {
+      const workIdStr = fields.get('id');
+      if (!workIdStr) {
+        return new Response(JSON.stringify({ error: 'Work ID required for chapter uploads. Use "id" field.' }), {
+          status: 400,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+      const workId = parseInt(workIdStr, 10);
+      if (isNaN(workId) || workId < 0) {
+        return new Response(JSON.stringify({ error: 'Invalid work ID.' }), {
+          status: 400,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+
+      // For workId=0 (new work drafts), skip ownership check — no work exists yet
+      // For workId>0, verify the user owns this work
+      if (workId > 0) {
+        const creatorship = await queryFirst<any>(db, 
+          'SELECT * FROM creatorships WHERE work_id = ?1 AND pseud_id IN (SELECT id FROM pseuds WHERE user_id = ?2)', 
+          workId, auth.user.id
+        );
+        if (!creatorship) {
+          return new Response(JSON.stringify({ error: 'You do not have permission to upload images for this work.' }), {
+            status: 403,
+            headers: { 'Content-Type': 'application/json' },
+          });
+        }
+      }
+
+      const result = await uploadImage(bucket, 'chapters', workId, {
+        arrayBuffer: async () => file.data,
+        type: file.type,
+        size: file.size,
+      });
+
+      // If chapterId is provided, track this image on the chapter row
+      const chapterIdStr = fields.get('chapterId');
+      if (chapterIdStr) {
+        const chapterId = parseInt(chapterIdStr, 10);
+        if (!isNaN(chapterId)) {
+          const chapter = await queryFirst<any>(db, 'SELECT images FROM chapters WHERE id = ?1', chapterId);
+          if (chapter) {
+            const images: string[] = chapter.images ? JSON.parse(chapter.images) : [];
+            images.push(result.key);
+            await run(db, "UPDATE chapters SET images = ? WHERE id = ?", JSON.stringify(images), chapterId);
+          }
+        }
+      }
+
+      const url = `/api/storage/${result.key}`;
+      return new Response(JSON.stringify({ key: result.key, url }), {
+        status: 201,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
+
     if (type === 'avatar') {
       // Upload user avatar
-      // Get old avatar_key to clean up
       const user = await queryFirst<any>(db, 'SELECT avatar_key FROM users WHERE id = ?', auth.user.id);
       const oldKey = user?.avatar_key;
 
@@ -75,7 +139,6 @@ export const POST: APIRoute = async ({ locals, request }) => {
 
       // Clean up old avatar from R2 (async, don't block response)
       if (oldKey) {
-        // Use waitUntil pattern would be ideal, but for simplicity delete inline
         await deleteImage(bucket, oldKey).catch(() => {});
       }
 
@@ -145,8 +208,11 @@ export const POST: APIRoute = async ({ locals, request }) => {
 };
 
 /**
- * DELETE /api/upload — remove an avatar/icon
- * Body: { type: "avatar" | "pseud", id?: number }
+ * DELETE /api/upload — remove an avatar/icon/chapter image
+ * Body: { type: "avatar" | "pseud" | "chapter", id?: number, key?: string }
+ * 
+ * For chapter type: { type: "chapter", key: "chapters/{workId}/..." } 
+ * Removes from R2 and removes from the chapter's images array if chapterId provided.
  */
 export const DELETE: APIRoute = async ({ locals, request }) => {
   const db = locals.runtime.env.DB as D1Database;
@@ -167,7 +233,7 @@ export const DELETE: APIRoute = async ({ locals, request }) => {
     });
   }
 
-  const { type, id: pseudId } = body || {};
+  const { type, id: pseudId, key, chapterId } = body || {};
 
   if (type === 'avatar') {
     const user = await queryFirst<any>(db, 'SELECT avatar_key FROM users WHERE id = ?', auth.user.id);
@@ -203,7 +269,70 @@ export const DELETE: APIRoute = async ({ locals, request }) => {
     });
   }
 
-  return new Response(JSON.stringify({ error: 'Invalid type. Must be "avatar" or "pseud".' }), {
+  if (type === 'chapter') {
+    if (!key) {
+      return new Response(JSON.stringify({ error: 'Image key required for chapter image deletion.' }), {
+        status: 400,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
+
+    // Security: verify key starts with expected prefix and user owns the work
+    if (!key.startsWith('chapters/')) {
+      return new Response(JSON.stringify({ error: 'Invalid key for chapter image.' }), {
+        status: 400,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
+
+    if (key.includes('..')) {
+      return new Response(JSON.stringify({ error: 'Invalid key.' }), {
+        status: 400,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
+
+    // Extract workId from key (format: chapters/{workId}/{timestamp}-{random}.{ext})
+    const parts = key.split('/');
+    const workId = parseInt(parts[1], 10);
+    if (isNaN(workId)) {
+      return new Response(JSON.stringify({ error: 'Invalid work ID in key.' }), {
+        status: 400,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
+
+    // Verify ownership
+    const creatorship = await queryFirst<any>(db, 
+      'SELECT * FROM creatorships WHERE work_id = ?1 AND pseud_id IN (SELECT id FROM pseuds WHERE user_id = ?2)', 
+      workId, auth.user.id
+    );
+    if (!creatorship) {
+      return new Response(JSON.stringify({ error: 'You do not have permission to delete images for this work.' }), {
+        status: 403,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
+
+    // Delete from R2
+    await deleteImage(bucket, key);
+
+    // Remove from chapter's images array if chapterId provided
+    if (chapterId) {
+      const chapter = await queryFirst<any>(db, 'SELECT images FROM chapters WHERE id = ?', chapterId);
+      if (chapter?.images) {
+        const images: string[] = JSON.parse(chapter.images);
+        const filtered = images.filter((k: string) => k !== key);
+        await run(db, "UPDATE chapters SET images = ? WHERE id = ?", JSON.stringify(filtered), chapterId);
+      }
+    }
+
+    return new Response(JSON.stringify({ success: true }), {
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+
+  return new Response(JSON.stringify({ error: 'Invalid type. Must be "avatar", "pseud", or "chapter".' }), {
     status: 400,
     headers: { 'Content-Type': 'application/json' },
   });

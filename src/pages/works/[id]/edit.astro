@@ -423,6 +423,148 @@ const initialTagsJson = JSON.stringify(initialTagState);
   }
 
   .btn-danger:hover { background: var(--md-sys-color-error-container); color: var(--md-sys-color-on-error-container); }
+
+  /* TipTap editor styles (for when editor replaces chapter textarea) */
+  .tiptap-wrapper {
+    border: 1px solid var(--md-sys-color-outline-variant);
+    border-radius: var(--md-sys-shape-corner-small);
+    overflow: hidden;
+    transition: border-color var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard);
+  }
+
+  .tiptap-wrapper--focused {
+    border-color: var(--md-sys-color-primary);
+  }
+
+  .tiptap-toolbar {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 2px;
+    padding: var(--space-2) var(--space-3);
+    background: var(--md-sys-color-surface-container);
+    border-bottom: 1px solid var(--md-sys-color-outline-variant);
+  }
+
+  .tiptap-toolbar-btn {
+    font: var(--md-sys-typescale-label-large);
+    color: var(--md-sys-color-on-surface);
+    background: transparent;
+    border: none;
+    border-radius: var(--md-sys-shape-corner-small);
+    padding: var(--space-1) var(--space-2);
+    cursor: pointer;
+    min-width: 28px;
+    text-align: center;
+  }
+
+  .tiptap-toolbar-btn:hover {
+    background: var(--md-sys-color-surface-container-high);
+  }
+
+  .tiptap-toolbar-btn--active {
+    background: var(--md-sys-color-primary-container);
+    color: var(--md-sys-color-on-primary-container);
+  }
+
+  .tiptap-toolbar-btn--secondary {
+    font-size: 0.75rem;
+  }
+
+  .tiptap-toolbar-separator {
+    width: 1px;
+    height: 20px;
+    background: var(--md-sys-color-outline-variant);
+    margin: 0 var(--space-1);
+  }
+
+  .tiptap-toolbar-spacer {
+    flex: 1;
+  }
+
+  .tiptap-editor-area {
+    min-height: 200px;
+    padding: var(--space-3) var(--space-4);
+  }
+
+  .tiptap-editor-area .tiptap {
+    outline: none;
+    min-height: 180px;
+    font: var(--md-sys-typescale-body-large);
+    color: var(--md-sys-color-on-surface);
+    line-height: 1.7;
+  }
+
+  .tiptap-editor-area .tiptap p.is-editor-empty:first-child::before {
+    content: attr(data-placeholder);
+    float: left;
+    color: var(--md-sys-color-on-surface-variant);
+    pointer-events: none;
+    height: 0;
+  }
+
+  .tiptap-editor-area .tiptap h1,
+  .tiptap-editor-area .tiptap h2,
+  .tiptap-editor-area .tiptap h3 {
+    margin: 0.5em 0 0.25em;
+  }
+
+  .tiptap-editor-area .tiptap blockquote {
+    border-left: 3px solid var(--md-sys-color-outline-variant);
+    padding-left: var(--space-3);
+    margin: var(--space-2) 0;
+    color: var(--md-sys-color-on-surface-variant);
+  }
+
+  .tiptap-editor-area .tiptap pre {
+    background: var(--md-sys-color-surface-container-high);
+    border-radius: var(--md-sys-shape-corner-small);
+    padding: var(--space-3);
+    overflow-x: auto;
+  }
+
+  .tiptap-editor-area .tiptap a {
+    color: var(--md-sys-color-primary);
+    text-decoration: underline;
+  }
+
+  .tiptap-editor-area .tiptap img.chapter-image {
+    max-width: 100%;
+    height: auto;
+    border-radius: var(--md-sys-shape-corner-medium);
+    margin: var(--space-3) 0;
+    display: block;
+  }
+
+  .tiptap-editor-area .tiptap img.ProseMirror-selectednode {
+    outline: 2px solid var(--md-sys-color-primary);
+    outline-offset: 2px;
+  }
+
+  .tiptap-footer {
+    display: flex;
+    padding: var(--space-1) var(--space-3);
+    border-top: 1px solid var(--md-sys-color-outline-variant);
+  }
+
+  .tiptap-wordcount {
+    font: var(--md-sys-typescale-body-small);
+    color: var(--md-sys-color-on-surface-variant);
+  }
+
+  .tiptap-upload-overlay {
+    display: flex;
+    justify-content: center;
+    padding: var(--space-2);
+  }
+
+  .tiptap-upload-status {
+    font: var(--md-sys-typescale-label-large);
+    color: var(--md-sys-color-primary);
+    background: var(--md-sys-color-primary-container);
+    padding: var(--space-1) var(--space-3);
+    border-radius: var(--md-sys-shape-corner-full);
+  }
 </style>
 
 <script define:vars={{ workId, workData, initialTagsJson }}>

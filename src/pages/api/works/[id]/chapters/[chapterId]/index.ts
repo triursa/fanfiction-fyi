@@ -35,6 +35,15 @@ export const PUT: APIRoute = async ({ params, request, locals }) => {
     fields.push('word_count = ?'); values.push(body.content_md.split(/\s+/).filter(Boolean).length);
   }
   if (body.position !== undefined) { fields.push('position = ?'); values.push(body.position); }
+  if (body.draft !== undefined) { fields.push('draft = ?'); values.push(body.draft ? 1 : 0); }
+
+  // Handle images array — JSON array of R2 keys
+  if (body.images !== undefined) {
+    // Validate: must be an array of strings starting with 'chapters/'
+    const images: string[] = Array.isArray(body.images) ? body.images : [];
+    const validImages = images.filter((img: string) => typeof img === 'string' && img.startsWith('chapters/') && !img.includes('..'));
+    fields.push('images = ?'); values.push(JSON.stringify(validImages));
+  }
 
   if (fields.length === 0) return new Response(JSON.stringify(chapter), { headers: { 'Content-Type': 'application/json' } });
 

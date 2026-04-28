@@ -116,7 +116,7 @@ const defaultPseudId = pseuds.find(p => p.name === user.display_name)?.id ?? pse
         </div>
         <div class="form-field">
           <label>Content</label>
-          <Editor client:load placeholder="Start writing your story..." />
+          <Editor client:load placeholder="Start writing your story..." workId={0} />
         </div>
       </fieldset>
 
@@ -391,6 +391,34 @@ const defaultPseudId = pseuds.find(p => p.name === user.display_name)?.id ?? pse
     font: var(--md-sys-typescale-body-small);
     color: var(--md-sys-color-on-surface-variant);
   }
+
+  /* Chapter image styles in editor */
+  .tiptap-editor-area .tiptap img.chapter-image {
+    max-width: 100%;
+    height: auto;
+    border-radius: var(--md-sys-shape-corner-medium);
+    margin: var(--space-3) 0;
+    display: block;
+  }
+
+  .tiptap-editor-area .tiptap img.ProseMirror-selectednode {
+    outline: 2px solid var(--md-sys-color-primary);
+    outline-offset: 2px;
+  }
+
+  .tiptap-upload-overlay {
+    display: flex;
+    justify-content: center;
+    padding: var(--space-2);
+  }
+
+  .tiptap-upload-status {
+    font: var(--md-sys-typescale-label-large);
+    color: var(--md-sys-color-primary);
+    background: var(--md-sys-color-primary-container);
+    padding: var(--space-1) var(--space-3);
+    border-radius: var(--md-sys-shape-corner-full);
+  }
 </style>
 
 <script define:vars={{}}">
@@ -468,6 +496,9 @@ const defaultPseudId = pseuds.find(p => p.name === user.display_name)?.id ?? pse
     // Get markdown content from the editor (exposed as markdown by Editor.tsx)
     const chapterContent = (window as any).__editorMarkdown || (window as any).__editorContent || '';
 
+    // Get uploaded image keys from the editor (exposed by Editor.tsx on image upload)
+    const uploadedImages: string[] = (window as any).__editorImageKeys || [];
+
     // Gather tag IDs
     const tagIds: number[] = [];
     Object.values(selectedTags).flat().forEach((t: any) => tagIds.push(t.id));
@@ -489,6 +520,7 @@ const defaultPseudId = pseuds.find(p => p.name === user.display_name)?.id ?? pse
           pseud_id: pseudId,
           chapter_title: chapterTitle,
           chapter_content: chapterContent,
+          chapter_images: uploadedImages,
           draft: action === 'draft' ? 1 : 0,
           tag_ids: tagIds,
           rating: rating || null,
