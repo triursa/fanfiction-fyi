@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, useCallback } from 'preact/hooks';
 import { h } from 'preact';
-import { Editor, EditorContent } from '@tiptap/core';
+import { Editor } from '@tiptap/core';
 import StarterKit from '@tiptap/starter-kit';
 import Link from '@tiptap/extension-link';
 import Heading from '@tiptap/extension-heading';
@@ -13,7 +13,7 @@ const lowlight = createLowlight(common);
 
 interface EditorProps {
   content?: string;
-  onContentChange?: (html: string) => void;
+  onContentChange?: (markdown: string) => void;
   placeholder?: string;
 }
 
@@ -45,17 +45,20 @@ export default function TipTapEditor({
   placeholder = 'Start writing…',
 }: EditorProps) {
   const editorRef = useRef<Editor | null>(null);
+  const mountRef = useRef<HTMLDivElement | null>(null);
   const [isEditorReady, setIsEditorReady] = useState(false);
   const onContentChangeRef = useRef(onContentChange);
   onContentChangeRef.current = onContentChange;
 
   useEffect(() => {
+    if (!mountRef.current) return;
+
     const editor = new Editor({
-      element: document.createElement('div'), // temporary; will be replaced by EditorContent
+      element: mountRef.current,
       extensions: [
         StarterKit.configure({
-          heading: false, // we add our own heading config below
-          codeBlock: false, // replaced by CodeBlockLowlight
+          heading: false,
+          codeBlock: false,
         }),
         Heading.configure({ levels: [1, 2, 3] }),
         Link.configure({
@@ -69,9 +72,11 @@ export default function TipTapEditor({
       content: content || '',
       onUpdate: ({ editor: e }) => {
         const html = e.getHTML();
-        // Expose to global for form submission (backward compat)
-        (window as any).__editorContent = html;
-        onContentChangeRef.current?.(html);
+        const md = htmlToMarkdown(html);
+        // Expose markdown to global for form submission
+        (window as any).__editorMarkdown = md;
+        (window as any).__editorContent = md;
+        onContentChangeRef.current?.(md);
       },
       onFocus: ({ editor: e }) => {
         const el = e.options.element?.closest('.tiptap-wrapper');
@@ -84,7 +89,10 @@ export default function TipTapEditor({
     });
 
     editorRef.current = editor;
-    (window as any).__editorContent = content || '';
+    // Set initial markdown content on global
+    const initialMd = content ? htmlToMarkdown(editor.getHTML()) : '';
+    (window as any).__editorMarkdown = initialMd;
+    (window as any).__editorContent = initialMd;
     setIsEditorReady(true);
 
     return () => {
@@ -92,7 +100,7 @@ export default function TipTapEditor({
       editorRef.current = null;
       setIsEditorReady(false);
     };
-  }, []); //_mount only
+  }, []);
 
   // Sync placeholder if it changes
   useEffect(() => {
@@ -100,15 +108,6 @@ export default function TipTapEditor({
       editorRef.current.setOptions({ extensions: [Placeholder.configure({ placeholder })] });
     }
   }, [placeholder]);
-
-  // Sync external content changes (only if editor is not focused)
-  useEffect(() => {
-    const editor = editorRef.current;
-    if (!editor || !isEditorReady) return;
-    if (!editor.isFocused && content !== editor.getHTML()) {
-      editor.commands.setContent(content || '');
-    }
-  }, [content, isEditorReady]);
 
   // ── Markdown Import / Export ──
   const handleImport = useCallback(() => {
@@ -255,8 +254,7 @@ export default function TipTapEditor({
         </button>
       </div>
 
-      <div class="tiptap-editor-area">
-        {editor && <EditorContent editor={editor} />}
+      <div class="tiptap-editor-area" ref={mountRef}>
       </div>
 
       <div class="tiptap-footer">
