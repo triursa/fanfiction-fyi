@@ -65,7 +65,7 @@ const fandoms = fandomRows.map(r => r.fandom);
         <a href={`/characters/${c.id}`} class="char-card" data-fandom={c.fandom || ''}>
           <div class="char-card-avatar">
             {c.avatar_key
-              ? <img src={`/storage/${c.avatar_key}`} alt={c.name} />
+              ? <img src={`/api/storage/${c.avatar_key}`} alt={c.name} />
               : <div class="char-avatar-placeholder">{c.name.charAt(0).toUpperCase()}</div>
             }
           </div>
@@ -323,7 +323,7 @@ const fandoms = fandomRows.map(r => r.fandom);
       <a href="/characters/${encodeURIComponent(c.id)}" class="char-card" data-fandom="${escapeHtml(c.fandom || '')}">
         <div class="char-card-avatar">
           ${c.avatar_key
-            ? `<img src="/storage/${encodeURIComponent(c.avatar_key)}" alt="${escapeHtml(c.name)}" />`
+            ? `<img src="/api/storage/${encodeURIComponent(c.avatar_key)}" alt="${escapeHtml(c.name)}" />`
             : `<div class="char-avatar-placeholder">${escapeHtml(c.name.charAt(0).toUpperCase())}</div>`
           }
         </div>

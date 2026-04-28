@@ -29,6 +29,7 @@ export interface User {
   password_hash?: string | null;
   google_id?: string | null;
   avatar_url?: string | null;
+  avatar_key?: string | null;
   display_name?: string | null;
   bio?: string | null;
   email_visibility?: string | null;

@@ -46,7 +46,8 @@ export const POST: APIRoute = async ({ request, locals }) => {
   }
 
   const desc = (description !== undefined && description !== null) ? String(description) : null;
-  const result = await run(db, `INSERT INTO pseuds (user_id, name, description, created_at) VALUES (?1, ?2, ?3, datetime('now'))`, auth.user.id, trimmedName, desc);
+  const iconKey = (body.icon_key !== undefined && body.icon_key !== null) ? String(body.icon_key) : null;
+  const result = await run(db, `INSERT INTO pseuds (user_id, name, description, icon_key, created_at) VALUES (?1, ?2, ?3, ?4, datetime('now'))`, auth.user.id, trimmedName, desc, iconKey);
   const pseud = await queryAll<any>(db, `SELECT *, 0 as work_count FROM pseuds WHERE id = ?1`, result.meta.last_row_id);
 
   return new Response(JSON.stringify(pseud[0]), { status: 201, headers: { 'Content-Type': 'application/json' } });

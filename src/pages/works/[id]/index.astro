@@ -82,7 +82,13 @@ const commentsJson = JSON.stringify(allComments);
       <div class="work-meta">
         <p class="work-authors">
           By {pseuds.map((p, i) => (
-            <Fragment>{i > 0 ? ', ' : ''}<a href={`/pseuds/${p.id}`} class="pseud-link">{p.name}</a></Fragment>
+            <Fragment>
+              {i > 0 ? ', ' : ''}
+              <a href={`/pseuds/${p.id}`} class="pseud-link">
+                {p.icon_key && <img class="pseud-icon-sm" src={`/api/storage/${p.icon_key}`} alt="" />}
+                {p.name}
+              </a>
+            </Fragment>
           ))}
         </p>
         {work.summary && <p class="work-summary">{work.summary}</p>}
@@ -242,6 +248,7 @@ const commentsJson = JSON.stringify(allComments);
 
   .work-authors { font: var(--md-sys-typescale-title-medium); color: var(--md-sys-color-on-surface-variant); margin: 0 0 var(--space-2); }
   .work-authors a, .pseud-link { color: var(--md-sys-color-primary); }
+  .pseud-icon-sm { width: 20px; height: 20px; border-radius: 50%; object-fit: cover; vertical-align: middle; margin-right: 4px; }
   .work-summary { font: var(--md-sys-typescale-body-large); color: var(--md-sys-color-on-surface-variant); font-style: italic; margin: var(--space-2) 0; }
   .work-stats { font: var(--md-sys-typescale-body-medium); color: var(--md-sys-color-outline); display: flex; gap: var(--space-2); flex-wrap: wrap; }
 

@@ -13,7 +13,7 @@ const works = await queryAll<any>(db, `SELECT w.*, COUNT(c.id) as chapter_count 
 
 for (const w of works) {
   w.tags = await queryAll<any>(db, `SELECT t.name, t.type FROM tags t JOIN taggings tg ON t.id = tg.tag_id WHERE tg.work_id = ?1`, w.id);
-  w.pseuds = await queryAll<any>(db, `SELECT p.name FROM pseuds p JOIN creatorships c ON p.id = c.pseud_id WHERE c.work_id = ?1`, w.id);
+  w.pseuds = await queryAll<any>(db, `SELECT p.name, p.icon_key FROM pseuds p JOIN creatorships c ON p.id = c.pseud_id WHERE c.work_id = ?1`, w.id);
 }
 ---
 
@@ -32,7 +32,13 @@ for (const w of works) {
       {works.map(w => (
         <a href={`/works/${w.id}`} class="work-card">
           <h2 class="work-card__title">{w.title}</h2>
-          <p class="work-card__author">By {w.pseuds.map((p: any) => p.name).join(', ')}</p>
+          <p class="work-card__author">By {w.pseuds.map((p: any, i: number) => (
+            <Fragment>
+              {i > 0 ? ', ' : ''}
+              {p.icon_key && <img class="pseud-icon-sm" src={`/api/storage/${p.icon_key}`} alt="" />}
+              {p.name}
+            </Fragment>
+          ))}</p>
           {w.summary && <p class="work-card__summary">{w.summary.length > 200 ? w.summary.slice(0, 200) + '…' : w.summary}</p>}
           <div class="work-card__meta">
             <span>{w.word_count.toLocaleString()} words</span>
@@ -89,6 +95,7 @@ for (const w of works) {
 
   .work-card__title { font: var(--md-sys-typescale-title-large); color: var(--md-sys-color-primary); margin: 0 0 var(--space-1); }
   .work-card__author { font: var(--md-sys-typescale-body-medium); color: var(--md-sys-color-on-surface-variant); margin: 0 0 var(--space-2); }
+  .pseud-icon-sm { width: 20px; height: 20px; border-radius: 50%; object-fit: cover; vertical-align: middle; margin-right: 4px; }
   .work-card__summary { font: var(--md-sys-typescale-body-medium); color: var(--md-sys-color-on-surface-variant); margin: 0 0 var(--space-2); }
   .work-card__meta { font: var(--md-sys-typescale-body-small); color: var(--md-sys-color-outline); display: flex; gap: var(--space-2); flex-wrap: wrap; margin-bottom: var(--space-2); }
   .work-card__tags { display: flex; flex-wrap: wrap; gap: var(--space-1); }

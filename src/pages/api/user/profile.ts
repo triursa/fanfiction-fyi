@@ -76,6 +76,11 @@ export const PUT: APIRoute = async ({ locals, request }) => {
     values.push(typeof body.avatar_url === 'string' ? body.avatar_url : null);
   }
 
+  if ('avatar_key' in body) {
+    sets.push('avatar_key = ?');
+    values.push(typeof body.avatar_key === 'string' ? body.avatar_key : null);
+  }
+
   if (sets.length === 0) {
     return new Response(JSON.stringify({ error: 'No fields to update' }), {
       status: 400,
@@ -99,6 +104,7 @@ export const PUT: APIRoute = async ({ locals, request }) => {
         role: updated.role,
         display_name: updated.display_name,
         avatar_url: updated.avatar_url,
+        avatar_key: updated.avatar_key,
         bio: updated.bio,
         email_visibility: updated.email_visibility,
         reading_font_size: updated.reading_font_size,

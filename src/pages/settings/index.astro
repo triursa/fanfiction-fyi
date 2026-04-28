@@ -58,14 +58,25 @@ const themesJSON = JSON.stringify(
       </div>
 
       <div class="form-group">
-        <label for="avatar-url" class="form-label">Avatar URL</label>
-        <div class="avatar-input-row">
-          <input type="text" id="avatar-url" class="form-input" placeholder="https://example.com/avatar.png" />
+        <label class="form-label">Avatar</label>
+        <div class="avatar-upload-area">
           <div class="avatar-preview" id="avatar-preview">
             <img id="avatar-preview-img" src="" alt="Avatar preview" />
             <span id="avatar-preview-fallback" class="avatar-fallback">?</span>
           </div>
+          <div class="avatar-upload-actions">
+            <label for="avatar-file" class="btn-outlined avatar-upload-btn">Upload Image</label>
+            <input type="file" id="avatar-file" accept="image/gif,image/png,image/jpeg,image/webp" style="display:none" />
+            <button type="button" class="btn-text btn-text--danger" id="avatar-remove-btn" style="display:none">Remove</button>
+            <span class="form-hint">GIF, PNG, JPG, or WebP. Max 5 MB.</span>
+          </div>
         </div>
+        <details class="avatar-url-details">
+          <summary class="avatar-url-summary">Use a URL instead</summary>
+          <div class="avatar-input-row">
+            <input type="text" id="avatar-url" class="form-input" placeholder="https://example.com/avatar.png" />
+          </div>
+        </details>
       </div>
 
       <div class="form-group">
@@ -243,6 +254,20 @@ const themesJSON = JSON.stringify(
     <h3 class="modal-title">Edit Alias</h3>
     <input type="hidden" id="edit-pseud-id" />
     <div class="form-group">
+      <label class="form-label">Icon</label>
+      <div class="pseud-icon-upload">
+        <div class="pseud-icon-preview" id="edit-pseud-icon-preview">
+          <img id="edit-pseud-icon-img" src="" alt="Pseud icon" />
+          <span id="edit-pseud-icon-fallback" class="avatar-fallback">?</span>
+        </div>
+        <div class="pseud-icon-actions">
+          <label for="edit-pseud-icon-file" class="btn-outlined pseud-icon-btn">Upload</label>
+          <input type="file" id="edit-pseud-icon-file" accept="image/gif,image/png,image/jpeg,image/webp" style="display:none" />
+          <button type="button" class="btn-text btn-text--danger" id="edit-pseud-icon-remove" style="display:none">Remove</button>
+        </div>
+      </div>
+    </div>
+    <div class="form-group">
       <label for="edit-pseud-name" class="form-label">Name</label>
       <input type="text" id="edit-pseud-name" class="form-input" maxlength="100" />
     </div>
@@ -357,7 +382,7 @@ const themesJSON = JSON.stringify(
   var avatarPreviewFallback = document.getElementById('avatar-preview-fallback');
 
   function updateAvatarPreview(url) {
-    if (url && url.match(/^https?:\/\/.+/)) {
+    if (url) {
       avatarPreviewImg.src = url;
       avatarPreviewImg.style.display = 'block';
       avatarPreviewFallback.style.display = 'none';
@@ -373,6 +398,74 @@ const themesJSON = JSON.stringify(
 
   avatarInput.addEventListener('input', function() {
     updateAvatarPreview(avatarInput.value.trim());
+  });
+
+  // ─── Avatar file upload ───────────────────────────────────
+  var avatarFileInput = document.getElementById('avatar-file');
+  var avatarRemoveBtn = document.getElementById('avatar-remove-btn');
+  var currentAvatarKey = null; // tracks R2 key if uploaded
+
+  function resolveAvatarUrl(user) {
+    // R2-uploaded avatar takes precedence, then avatar_url (Google/manual), then fallback
+    if (user.avatar_key) return '/api/storage/' + encodeURIComponent(user.avatar_key);
+    if (user.avatar_url) return user.avatar_url;
+    return null;
+  }
+
+  avatarFileInput.addEventListener('change', function() {
+    var file = avatarFileInput.files[0];
+    if (!file) return;
+
+    // Validate type
+    var allowedTypes = ['image/gif', 'image/png', 'image/jpeg', 'image/webp'];
+    if (allowedTypes.indexOf(file.type) === -1) {
+      showToast('Invalid file type. Use GIF, PNG, JPG, or WebP.', 'error');
+      return;
+    }
+    // Validate size (5MB)
+    if (file.size > 5 * 1024 * 1024) {
+      showToast('File too large. Maximum 5 MB.', 'error');
+      return;
+    }
+
+    var formData = new FormData();
+    formData.append('file', file);
+    formData.append('type', 'avatar');
+
+    fetch('/api/upload', { method: 'POST', body: formData })
+      .then(function(res) { return res.json().then(function(d) { return { ok: res.ok, data: d }; }); })
+      .then(function(result) {
+        if (result.ok) {
+          currentAvatarKey = result.data.key;
+          updateAvatarPreview(result.data.url);
+          avatarRemoveBtn.style.display = '';
+          showToast('Avatar uploaded!');
+        } else {
+          showToast(result.data.error || 'Upload failed.', 'error');
+        }
+      })
+      .catch(function() { showToast('Network error during upload.', 'error'); });
+  });
+
+  avatarRemoveBtn.addEventListener('click', function() {
+    fetch('/api/upload', {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ type: 'avatar' }),
+    })
+    .then(function(res) { return res.json().then(function(d) { return { ok: res.ok, data: d }; }); })
+    .then(function(result) {
+      if (result.ok) {
+        currentAvatarKey = null;
+        updateAvatarPreview(null);
+        avatarRemoveBtn.style.display = 'none';
+        avatarFileInput.value = '';
+        showToast('Avatar removed.');
+      } else {
+        showToast(result.data.error || 'Failed to remove avatar.', 'error');
+      }
+    })
+    .catch(function() { showToast('Network error.', 'error'); });
   });
 
   // ─── Segmented button (font size) ───────────────────────
@@ -415,6 +508,7 @@ const themesJSON = JSON.stringify(
         display_name: displayName || null,
         bio: bio,
         avatar_url: avatarUrl || null,
+        avatar_key: currentAvatarKey || null,
         email_visibility: emailVisibility,
         reading_font_size: currentFontSize,
       }),
@@ -594,8 +688,12 @@ const themesJSON = JSON.stringify(
     }
     var html = '';
     pseudsData.forEach(function(p) {
+      var iconUrl = p.icon_key ? '/api/storage/' + encodeURIComponent(p.icon_key) : null;
       html += '<div class="pseud-card" data-pseud-id="' + p.id + '">';
       html += '  <div class="pseud-info">';
+      if (iconUrl) {
+        html += '    <img class="pseud-icon" src="' + escapeHtml(iconUrl) + '" alt="" />';
+      }
       html += '    <span class="pseud-name">' + escapeHtml(p.name) + '</span>';
       if (p.description) {
         html += '    <span class="pseud-desc">' + escapeHtml(p.description) + '</span>';
@@ -691,10 +789,29 @@ const themesJSON = JSON.stringify(
   var cancelPseudBtn = document.getElementById('cancel-pseud-btn');
   var editPseudFeedback = document.getElementById('edit-pseud-feedback');
 
+  var editingPseudIconKey = null; // tracks current R2 key for pseud icon being edited
+
   function openEditModal(pseud) {
     document.getElementById('edit-pseud-id').value = pseud.id;
     document.getElementById('edit-pseud-name').value = pseud.name || '';
     document.getElementById('edit-pseud-desc').value = pseud.description || '';
+    editingPseudIconKey = pseud.icon_key || null;
+
+    // Update icon preview
+    var iconImg = document.getElementById('edit-pseud-icon-img');
+    var iconFallback = document.getElementById('edit-pseud-icon-fallback');
+    var iconRemoveBtn = document.getElementById('edit-pseud-icon-remove');
+    if (pseud.icon_key) {
+      iconImg.src = '/api/storage/' + encodeURIComponent(pseud.icon_key);
+      iconImg.style.display = 'block';
+      iconFallback.style.display = 'none';
+      iconRemoveBtn.style.display = '';
+    } else {
+      iconImg.style.display = 'none';
+      iconFallback.style.display = '';
+      iconRemoveBtn.style.display = 'none';
+    }
+
     editPseudFeedback.textContent = '';
     editPseudFeedback.className = 'inline-feedback';
     editModal.style.display = '';
@@ -706,6 +823,79 @@ const themesJSON = JSON.stringify(
   }
 
   cancelPseudBtn.addEventListener('click', closeEditModal);
+
+  // ─── Pseud icon upload ──────────────────────────────────────
+  var pseudIconFileInput = document.getElementById('edit-pseud-icon-file');
+
+  pseudIconFileInput.addEventListener('change', function() {
+    var file = pseudIconFileInput.files[0];
+    if (!file) return;
+
+    var allowedTypes = ['image/gif', 'image/png', 'image/jpeg', 'image/webp'];
+    if (allowedTypes.indexOf(file.type) === -1) {
+      showToast('Invalid file type. Use GIF, PNG, JPG, or WebP.', 'error');
+      return;
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      showToast('File too large. Maximum 5 MB.', 'error');
+      return;
+    }
+
+    var pseudId = document.getElementById('edit-pseud-id').value;
+    if (!pseudId) return;
+
+    var formData = new FormData();
+    formData.append('file', file);
+    formData.append('type', 'pseud');
+    formData.append('id', pseudId);
+
+    fetch('/api/upload', { method: 'POST', body: formData })
+      .then(function(res) { return res.json().then(function(d) { return { ok: res.ok, data: d }; }); })
+      .then(function(result) {
+        if (result.ok) {
+          editingPseudIconKey = result.data.key;
+          var iconImg = document.getElementById('edit-pseud-icon-img');
+          var iconFallback = document.getElementById('edit-pseud-icon-fallback');
+          var iconRemoveBtn = document.getElementById('edit-pseud-icon-remove');
+          iconImg.src = result.data.url;
+          iconImg.style.display = 'block';
+          iconFallback.style.display = 'none';
+          iconRemoveBtn.style.display = '';
+          showToast('Icon uploaded!');
+        } else {
+          showToast(result.data.error || 'Upload failed.', 'error');
+        }
+      })
+      .catch(function() { showToast('Network error during upload.', 'error'); });
+  });
+
+  document.getElementById('edit-pseud-icon-remove').addEventListener('click', function() {
+    var pseudId = document.getElementById('edit-pseud-id').value;
+    if (!pseudId) return;
+
+    fetch('/api/upload', {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ type: 'pseud', id: parseInt(pseudId, 10) }),
+    })
+    .then(function(res) { return res.json().then(function(d) { return { ok: res.ok, data: d }; }); })
+    .then(function(result) {
+      if (result.ok) {
+        editingPseudIconKey = null;
+        var iconImg = document.getElementById('edit-pseud-icon-img');
+        var iconFallback = document.getElementById('edit-pseud-icon-fallback');
+        var iconRemoveBtn = document.getElementById('edit-pseud-icon-remove');
+        iconImg.style.display = 'none';
+        iconFallback.style.display = '';
+        iconRemoveBtn.style.display = 'none';
+        pseudIconFileInput.value = '';
+        showToast('Icon removed.');
+      } else {
+        showToast(result.data.error || 'Failed to remove icon.', 'error');
+      }
+    })
+    .catch(function() { showToast('Network error.', 'error'); });
+  });
 
   // Close modal on overlay click
   editModal.addEventListener('click', function(e) {
@@ -788,7 +978,12 @@ const themesJSON = JSON.stringify(
       // Trigger counter
       bioCounter.textContent = (userData.bio || '').length + ' / 500';
       document.getElementById('avatar-url').value = userData.avatar_url || '';
-      updateAvatarPreview(userData.avatar_url);
+      var avatarUrl = resolveAvatarUrl(userData);
+      updateAvatarPreview(avatarUrl);
+      currentAvatarKey = userData.avatar_key || null;
+      if (userData.avatar_key || userData.avatar_url) {
+        avatarRemoveBtn.style.display = '';
+      }
 
       // Font size
       setFontSize(userData.reading_font_size || 'default');
@@ -992,6 +1187,101 @@ const themesJSON = JSON.stringify(
     color: var(--md-sys-color-on-surface-variant);
     font-size: 20px;
     font-weight: 600;
+  }
+
+  .avatar-upload-area {
+    display: flex;
+    gap: var(--space-3, 12px);
+    align-items: flex-start;
+  }
+
+  .avatar-upload-actions {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1, 4px);
+  }
+
+  .avatar-upload-btn {
+    cursor: pointer;
+    font-size: var(--md-sys-typescale-label-medium-size, 12px);
+  }
+
+  .avatar-url-details {
+    margin-top: var(--space-2, 8px);
+  }
+
+  .avatar-url-summary {
+    color: var(--md-sys-color-primary);
+    font-size: var(--md-sys-typescale-body-small-size, 12px);
+    cursor: pointer;
+    user-select: none;
+  }
+
+  .avatar-url-summary:hover {
+    text-decoration: underline;
+  }
+
+  .pseud-icon-upload {
+    display: flex;
+    gap: var(--space-3, 12px);
+    align-items: flex-start;
+    margin-bottom: var(--space-2, 8px);
+  }
+
+  .pseud-icon-preview {
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    flex-shrink: 0;
+    overflow: hidden;
+    background: var(--md-sys-color-surface-container-highest);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .pseud-icon-preview img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
+
+  .pseud-icon-actions {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2, 8px);
+  }
+
+  .pseud-icon-btn {
+    cursor: pointer;
+    font-size: var(--md-sys-typescale-label-medium-size, 12px);
+  }
+
+  .pseud-icon {
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    object-fit: cover;
+    flex-shrink: 0;
+    margin-right: var(--space-2, 8px);
+  }
+
+  .btn-text {
+    background: none;
+    border: none;
+    color: var(--md-sys-color-primary);
+    font-size: var(--md-sys-typescale-label-medium-size, 12px);
+    cursor: pointer;
+    padding: 0;
+    font-family: 'Inter', sans-serif;
+  }
+
+  .btn-text:hover {
+    text-decoration: underline;
+  }
+
+  .btn-text--danger {
+    color: var(--md-sys-color-error);
   }
 
   /* ═══════════════════════════════════════════════════════ */
