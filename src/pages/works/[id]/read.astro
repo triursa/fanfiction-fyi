@@ -22,7 +22,7 @@ const sessionMatch = cookie.match(/session=([a-f0-9]+)/);
 if (sessionMatch) {
   const session = await queryFirst<any>(db, `SELECT user_id FROM sessions WHERE token = ?1 AND expires_at > datetime('now')`, sessionMatch[1]);
   if (session) {
-    authUser = await queryFirst<any>(db, `SELECT id, theme, reading_font_size FROM users WHERE id = ?1`, session.user_id);
+    authUser = await queryFirst<any>(db, `SELECT id, theme, reading_font_size, mood_disabled FROM users WHERE id = ?1`, session.user_id);
     if (authUser) {
       const userPseud = await queryFirst<any>(db, `SELECT id FROM pseuds WHERE user_id = ?1 ORDER BY id LIMIT 1`, authUser.id);
       userPseudId = userPseud?.id ?? null;
@@ -77,6 +77,25 @@ const authorNames = pseuds.map((p: any) => p.name).join(', ');
 
 // User font size preference
 const fontSizeClass = authUser?.reading_font_size || 'default';
+
+// Mood engine — map chapter mood to CSS custom properties
+const moodDisabled = authUser?.mood_disabled || false;
+const currentMood = currentChapterData?.mood || null;
+
+const MOOD_PALETTES: Record<string, Record<string, string>> = {
+  cozy:       { '--mood-surface': '#1a1714', '--mood-accent': '#d4a574', '--mood-glow': 'rgba(212,165,116,0.06)' },
+  tense:      { '--mood-surface': '#14161a', '--mood-accent': '#8fa8bf', '--mood-glow': 'rgba(143,168,191,0.05)' },
+  melancholy:  { '--mood-surface': '#141417', '--mood-accent': '#8b7ea0', '--mood-glow': 'rgba(139,126,160,0.06)' },
+  triumphant:  { '--mood-surface': '#181614', '--mood-accent': '#c9a84c', '--mood-glow': 'rgba(201,168,76,0.07)' },
+  romantic:    { '--mood-surface': '#191416', '--mood-accent': '#c47a8a', '--mood-glow': 'rgba(196,122,138,0.06)' },
+  horror:     { '--mood-surface': '#110e0e', '--mood-accent': '#8b3a3a', '--mood-glow': 'rgba(139,58,58,0.06)' },
+  flashback:   { '--mood-surface': '#1a1814', '--mood-accent': '#a89570', '--mood-glow': 'rgba(168,149,112,0.06)' },
+  action:      { '--mood-surface': '#161414', '--mood-accent': '#b87333', '--mood-glow': 'rgba(184,115,51,0.07)' },
+};
+
+const moodCSS = (!moodDisabled && currentMood && MOOD_PALETTES[currentMood])
+  ? Object.entries(MOOD_PALETTES[currentMood]).map(([k, v]) => `${k}: ${v};`).join('\n  ')
+  : '';
 ---
 
 <!doctype html>
@@ -254,6 +273,17 @@ const fontSizeClass = authUser?.reading_font_size || 'default';
     .reading-chapter-meta {
       font: var(--md-sys-typescale-body-small);
       color: var(--md-sys-color-outline);
+    }
+
+    /* Mood badge in chapter header */
+    .mood-badge {
+      font: var(--md-sys-typescale-label-medium);
+      background: var(--mood-accent, var(--md-sys-color-secondary-container));
+      color: var(--md-sys-color-on-secondary-container);
+      padding: 2px var(--space-3);
+      border-radius: var(--md-sys-shape-corner-full);
+      margin-left: var(--space-2);
+      text-transform: capitalize;
     }
 
     /* ── Prose Content (reading-optimized) ── */
@@ -534,11 +564,50 @@ const fontSizeClass = authUser?.reading_font_size || 'default';
         transition: none !important;
       }
     }
+
+    /* ── Mood Engine — Ambient Atmosphere ── */
+    /* Mood CSS vars are injected via <style> tag from server-side MOOD_PALETTES */
+    /* This section wires those vars to the visual elements */
+
+    .reading-container[data-mood]:not([data-mood="none"]):not([data-mood="off"]) {
+      background: var(--mood-surface, var(--md-sys-color-surface));
+      transition: background 2s ease, color 2s ease;
+    }
+    .reading-container[data-mood]:not([data-mood="none"]):not([data-mood="off"]) .reading-prose {
+      transition: color 2s ease;
+    }
+    .reading-container[data-mood]:not([data-mood="none"]):not([data-mood="off"]) .reading-chapter-title {
+      transition: color 2s ease;
+    }
+    .reading-container[data-mood]:not([data-mood="none"]):not([data-mood="off"]) .reading-chapter-number {
+      color: var(--mood-accent, var(--md-sys-color-primary));
+    }
+    .reading-progress-bar[data-mood]:not([data-mood="none"]):not([data-mood="off"]) {
+      background: var(--mood-accent, var(--md-sys-color-primary));
+    }
+    /* Subtle ambient glow overlay at the top of the chapter */
+    .mood-glow {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      height: 40vh;
+      pointer-events: none;
+      z-index: -1;
+      background: var(--mood-glow, transparent);
+      opacity: 0;
+      transition: opacity 2s ease;
+    }
+    .mood-glow.active { opacity: 1; }
   </style>
 </head>
-<body data-theme={authUser?.theme || 'obsidian'}>
+<body data-theme={authUser?.theme || 'obsidian'} data-mood={moodDisabled ? 'off' : currentMood || 'none'}>
+  {moodCSS && <style>{`:root { ${moodCSS} }`}</style>}
+
+  <!-- Mood Ambient Glow -->
+  {moodCSS && <div class={`mood-glow active`}></div>}
   <!-- Reading Progress Bar -->
-  <div class="reading-progress-bar" id="reading-progress"></div>
+  <div class="reading-progress-bar" id="reading-progress" data-mood={moodDisabled ? 'off' : currentMood || 'none'}></div>
 
   <!-- Ambient Header (shows on scroll up) -->
   <header class="reading-header" id="reading-header">
@@ -566,7 +635,7 @@ const fontSizeClass = authUser?.reading_font_size || 'default';
   </nav>
 
   <!-- Main Reading Area -->
-  <main class="reading-container" data-font-size={fontSizeClass}>
+  <main class="reading-container" data-font-size={fontSizeClass} data-mood={moodDisabled ? 'off' : currentMood || 'none'}>
     <!-- Work Metadata -->
     <div class="reading-work-meta">
       <h1 class="reading-work-title">{work.title}</h1>
@@ -611,6 +680,7 @@ const fontSizeClass = authUser?.reading_font_size || 'default';
         <h2 class="reading-chapter-title">{currentChapter.title}</h2>
         <div class="reading-chapter-meta">
           {currentChapter.word_count?.toLocaleString() || '?'} words · ~{Math.max(1, Math.ceil((currentChapter.word_count || 0) / 230))} min
+          {currentMood && !moodDisabled && <span class="mood-badge" data-mood={currentMood}>{currentMood}</span>}
         </div>
       </div>
 

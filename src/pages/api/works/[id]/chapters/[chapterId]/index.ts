@@ -37,6 +37,16 @@ export const PUT: APIRoute = async ({ params, request, locals }) => {
   if (body.position !== undefined) { fields.push('position = ?'); values.push(body.position); }
   if (body.draft !== undefined) { fields.push('draft = ?'); values.push(body.draft ? 1 : 0); }
 
+  // Mood engine: accept mood field (nullable, validated against known moods)
+  const VALID_MOODS = ['cozy', 'tense', 'melancholy', 'triumphant', 'romantic', 'horror', 'flashback', 'action'];
+  if ('mood' in body) {
+    const mood = body.mood === null ? null : String(body.mood);
+    if (mood !== null && !VALID_MOODS.includes(mood)) {
+      return new Response(JSON.stringify({ error: 'Invalid mood value', valid: VALID_MOODS }), { status: 400, headers: { 'Content-Type': 'application/json' } });
+    }
+    fields.push('mood = ?'); values.push(mood);
+  }
+
   // Handle images array — JSON array of R2 keys
   if (body.images !== undefined) {
     // Validate: must be an array of strings starting with 'chapters/'

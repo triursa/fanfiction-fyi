@@ -68,6 +68,7 @@ const workData = JSON.stringify({
     title: c.title,
     content_md: c.content_md || '',
     draft: c.draft,
+    mood: c.mood || null,
   })),
 });
 
@@ -196,6 +197,20 @@ const initialTagsJson = JSON.stringify(initialTagState);
         <div class="form-field">
           <label for="chapter-title-edit">Chapter Title</label>
           <input type="text" id="chapter-title-edit" name="chapter_title_edit" placeholder="Chapter title" />
+        </div>
+        <div class="form-field">
+          <label for="chapter-mood-edit">Mood</label>
+          <select id="chapter-mood-edit" name="chapter_mood_edit">
+            <option value="">None</option>
+            <option value="cozy">Cozy</option>
+            <option value="tense">Tense</option>
+            <option value="melancholy">Melancholy</option>
+            <option value="triumphant">Triumphant</option>
+            <option value="romantic">Romantic</option>
+            <option value="horror">Horror</option>
+            <option value="flashback">Flashback</option>
+            <option value="action">Action</option>
+          </select>
         </div>
         <div class="form-field">
           <label for="chapter-content-edit">Content (Markdown)</label>
@@ -637,6 +652,7 @@ const initialTagsJson = JSON.stringify(initialTagState);
   const chapterEditLegend = document.getElementById('chapter-edit-legend')!;
   const editingChapterIdInput = document.getElementById('editing-chapter-id') as HTMLInputElement;
   const chapterTitleInput = document.getElementById('chapter-title-edit') as HTMLInputElement;
+  const chapterMoodSelect = document.getElementById('chapter-mood-edit') as HTMLSelectElement;
   const chapterContentInput = document.getElementById('chapter-content-edit') as HTMLTextAreaElement;
   const saveChapterBtn = document.getElementById('save-chapter-btn')!;
   const cancelChapterBtn = document.getElementById('cancel-chapter-btn')!;
@@ -650,6 +666,7 @@ const initialTagsJson = JSON.stringify(initialTagState);
 
       editingChapterIdInput.value = String(chapterId);
       chapterTitleInput.value = chapter.title;
+      chapterMoodSelect.value = chapter.mood || '';
       chapterContentInput.value = chapter.content_md;
       chapterEditLegend.textContent = `Edit Chapter ${chapter.position}: ${chapter.title}`;
       chapterEditPanel.style.display = '';
@@ -673,6 +690,7 @@ const initialTagsJson = JSON.stringify(initialTagState);
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           title: chapterTitleInput.value,
+          mood: chapterMoodSelect.value || null,
           content_md: chapterContentInput.value,
         }),
       });
@@ -683,6 +701,7 @@ const initialTagsJson = JSON.stringify(initialTagState);
         const ch = work.chapters.find((c: any) => c.id === chapterId);
         if (ch) {
           ch.title = chapterTitleInput.value;
+          ch.mood = chapterMoodSelect.value || null;
           ch.content_md = chapterContentInput.value;
         }
         // Update chapter list display

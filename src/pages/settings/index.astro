@@ -90,6 +90,14 @@ const themesJSON = JSON.stringify(
       </div>
 
       <div class="form-group">
+        <label class="checkbox-label">
+          <input type="checkbox" id="mood-toggle" checked />
+          Enable Mood Atmosphere
+        </label>
+        <span class="form-hint">Shift page colors with chapter tone when reading (respects prefers-reduced-motion)</span>
+      </div>
+
+      <div class="form-group">
         <label class="form-label">Email Visibility</label>
         <div class="radio-group" id="email-visibility-group" role="radiogroup" aria-label="Email visibility">
           <label class="radio-option">
@@ -511,6 +519,7 @@ const themesJSON = JSON.stringify(
         avatar_key: currentAvatarKey || null,
         email_visibility: emailVisibility,
         reading_font_size: currentFontSize,
+        mood_disabled: document.getElementById('mood-toggle').checked ? 0 : 1,
       }),
     })
     .then(function(res) { return res.json().then(function(data) { return { ok: res.ok, data: data }; }); })
@@ -987,6 +996,9 @@ const themesJSON = JSON.stringify(
 
       // Font size
       setFontSize(userData.reading_font_size || 'default');
+
+      // Mood toggle
+      document.getElementById('mood-toggle').checked = !(userData.mood_disabled);
 
       // Email visibility
       var visValue = userData.email_visibility || 'private';

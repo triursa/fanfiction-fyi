@@ -71,6 +71,13 @@ export const PUT: APIRoute = async ({ locals, request }) => {
     values.push(fs);
   }
 
+  if ('mood_disabled' in body) {
+    const md = body.mood_disabled;
+    const val = (md === true || md === 1) ? 1 : 0;
+    sets.push('mood_disabled = ?');
+    values.push(val);
+  }
+
   if ('avatar_url' in body) {
     sets.push('avatar_url = ?');
     values.push(typeof body.avatar_url === 'string' ? body.avatar_url : null);
@@ -108,6 +115,7 @@ export const PUT: APIRoute = async ({ locals, request }) => {
         bio: updated.bio,
         email_visibility: updated.email_visibility,
         reading_font_size: updated.reading_font_size,
+        mood_disabled: updated.mood_disabled ?? 0,
       },
     }),
     {

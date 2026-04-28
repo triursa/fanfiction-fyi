@@ -28,6 +28,7 @@ export const GET: APIRoute = async ({ request, locals }) => {
       bio: user.bio ?? '',
       email_visibility: user.email_visibility ?? 'private',
       reading_font_size: user.reading_font_size ?? 'default',
+      mood_disabled: (user as any).mood_disabled ?? 0,
       has_password: !!user.password_hash,
     },
     pseuds,
