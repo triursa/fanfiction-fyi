@@ -13,7 +13,7 @@ export const POST: APIRoute = async ({ request, locals }) => {
   }
 
   const { invite_code, email, password, display_name } = body || {};
-  if (!invite_code || !email || !password || !display_name) {
+  if (!invite_code || !email || !password || !display_name || password.length < 8 || password.length > 128) {
     return new Response(JSON.stringify({ error: 'Missing fields' }), { status: 400, headers: { 'Content-Type': 'application/json' } });
   }
 

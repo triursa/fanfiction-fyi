@@ -10,7 +10,8 @@ export const POST: APIRoute = async ({ request, locals }) => {
 
   // Require admin+ role
   const auth = await requireRole(db, request, UserRole.Admin);
-  if (!auth) return new Response(JSON.stringify({ error: 'Unauthorized or insufficient role' }), { status: 401, headers: { 'Content-Type': 'application/json' } });
+  if (!auth) return new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401, headers: { 'Content-Type': 'application/json' } });
+  if ('forbidden' in auth) return new Response(JSON.stringify({ error: 'Insufficient role' }), { status: 403, headers: { 'Content-Type': 'application/json' } });
 
   let body: any;
   try { body = await request.json(); } catch {

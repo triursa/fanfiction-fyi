@@ -4,7 +4,7 @@ import { queryFirst, queryAll, run } from '@/lib/db';
 import { getAuth, requireAuth } from '@/lib/auth';
 import type { APIRoute } from 'astro';
 
-export const GET: APIRoute = async ({ params, locals }) => {
+export const GET: APIRoute = async ({ params, locals, request }) => {
   const db = locals.runtime.env.DB as D1Database;
   const workId = Number(params.id);
   if (!workId) return new Response(JSON.stringify({ error: 'Not found' }), { status: 404, headers: { 'Content-Type': 'application/json' } });
@@ -13,6 +13,16 @@ export const GET: APIRoute = async ({ params, locals }) => {
   if (!work) return new Response(JSON.stringify({ error: 'Work not found' }), { status: 404, headers: { 'Content-Type': 'application/json' } });
 
   const chapters = await queryAll<any>(db, `SELECT id, position, title, draft, word_count, updated_at FROM chapters WHERE work_id = ?1 ORDER BY position`, workId);
+
+  // Filter out draft chapters for unauthenticated requests
+  const auth = await getAuth(db, request);
+  if (!auth) {
+    const filteredChapters = chapters.filter(c => c.draft === 0 || c.draft === false);
+    const tags = await queryAll<any>(db, `SELECT t.* FROM tags t JOIN taggings tg ON t.id = tg.tag_id WHERE tg.work_id = ?1`, workId);
+    const pseuds = await queryAll<any>(db, `SELECT p.*, c.role FROM pseuds p JOIN creatorships c ON p.id = c.pseud_id WHERE c.work_id = ?1`, workId);
+    return new Response(JSON.stringify({ work, chapters: filteredChapters, tags, pseuds }), { headers: { 'Content-Type': 'application/json' } });
+  }
+
   const tags = await queryAll<any>(db, `SELECT t.* FROM tags t JOIN taggings tg ON t.id = tg.tag_id WHERE tg.work_id = ?1`, workId);
   const pseuds = await queryAll<any>(db, `SELECT p.*, c.role FROM pseuds p JOIN creatorships c ON p.id = c.pseud_id WHERE c.work_id = ?1`, workId);
 

@@ -2,17 +2,19 @@ export const prerender = false;
 
 import { queryFirst, run, queryAll } from '@/lib/db';
 import { createSession, setSessionCookie } from '@/lib/auth';
+import { jwtVerify, createRemoteJWKSet } from 'jose';
 import type { APIRoute } from 'astro';
 
 /**
  * GET /api/auth/google/callback
- * Google OAuth callback — exchanges code for tokens, upserts user, creates session.
+ * Google OAuth callback — exchanges code for tokens, verifies ID token, upserts user, creates session.
  */
 export const GET: APIRoute = async ({ url, locals }) => {
   const db = locals.runtime.env.DB as D1Database;
   const env = locals.runtime.env;
   const clientId = env.GOOGLE_CLIENT_ID as string;
   const clientSecret = env.GOOGLE_CLIENT_SECRET as string;
+  const founderEmail = (env.FOUNDER_EMAIL as string) || 'kaleb.bays@gmail.com';
 
   const code = url.searchParams.get('code');
   const error = url.searchParams.get('error');
@@ -46,17 +48,19 @@ export const GET: APIRoute = async ({ url, locals }) => {
 
   const tokens = await tokenRes.json();
 
-  // Decode ID token payload (base64) — we trust Google's token endpoint
-  const idToken = tokens.id_token as string;
-  const [_header, payloadB64, _sig] = idToken.split('.');
-  const payload = JSON.parse(
-    // Workers don't have atob in all contexts — manual base64url decode
-    decodeURIComponent(
-      Array.from(atob(payloadB64.replace(/-/g, '+').replace(/_/g, '/')))
-        .map((c) => '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2))
-        .join('')
-    )
-  );
+  // Verify ID token signature using Google's public JWKS (prevents token forgery)
+  let payload: any;
+  try {
+    const jwks = createRemoteJWKSet(new URL('https://www.googleapis.com/oauth2/v3/certs'));
+    const { payload: verified } = await jwtVerify(tokens.id_token as string, jwks, {
+      issuer: ['accounts.google.com', 'https://accounts.google.com'],
+      audience: clientId,
+    });
+    payload = verified;
+  } catch (e) {
+    console.error('Google ID token verification failed:', e);
+    return Response.redirect(`${url.origin}/login?error=oauth_token_failed`, 302);
+  }
 
   const googleEmail = payload.email as string;
   const googleSub = payload.sub as string;
@@ -67,9 +71,8 @@ export const GET: APIRoute = async ({ url, locals }) => {
     return Response.redirect(`${url.origin}/login?error=oauth_no_email`, 302);
   }
 
-  // Determine role — founder for specific email
-  const FOUNDER_EMAIL = 'kaleb.bays@gmail.com';
-  const role = googleEmail === FOUNDER_EMAIL ? 'founder' : 'user';
+  // Determine role — founder for specific email (configurable via FOUNDER_EMAIL env var)
+  const role = googleEmail === founderEmail ? 'founder' : 'user';
 
   // Upsert user
   const existingUser = await queryFirst<{ id: number; role: string }>(

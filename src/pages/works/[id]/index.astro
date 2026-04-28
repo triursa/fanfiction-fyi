@@ -127,7 +127,7 @@ const commentsJson = JSON.stringify(allComments);
       <section class="chapter-content">
         <h2 class="chapter-title">{chapter.title}</h2>
         {chapter.content_html && <div class="prose-content" set:html={chapter.content_html} />}
-        {!chapter.content_html && chapter.content_md && <div class="prose-content" set:html={chapter.content_md} />}
+        {!chapter.content_html && chapter.content_md && <div class="prose-content" set:html={markdownToHtml(chapter.content_md)} />}
         {!chapter.content_html && !chapter.content_md && <p class="placeholder-text">Content not available.</p>}
       </section>
     )}
