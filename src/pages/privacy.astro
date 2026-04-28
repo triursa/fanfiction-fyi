@@ -1,0 +1,162 @@
+---
+export const prerender = false;
+import Base from '../layouts/Base.astro';
+---
+
+<Base title="Privacy Policy — fanfiction.fyi">
+  <article class="legal-page">
+    <h1>Privacy Policy</h1>
+    <p class="legal-updated">Last updated: April 2026</p>
+
+    <section>
+      <h2>1. Information We Collect</h2>
+      <h3>Account Information</h3>
+      <p>When you create an account, we collect your email address and a hashed password. We also store display names and bio text you choose to provide.</p>
+
+      <h3>Content You Create</h3>
+      <p>Works, chapters, comments, bookmarks, and other content you post are stored in our database. Chapter content you upload (text and images) is retained until you delete it.</p>
+
+      <h3>Usage Data</h3>
+      <p>We collect reading progress and bookmark data to provide personalized features. We do not use third-party analytics services.</p>
+
+      <h3>Authentication Data</h3>
+      <p>If you sign in with Google, we receive your Google account ID and profile image. We do not access your Google contacts, drive, or other services.</p>
+    </section>
+
+    <section>
+      <h2>2. How We Use Your Information</h2>
+      <ul>
+        <li>To provide and operate the fanfiction.fyi service</li>
+        <li>To authenticate you and maintain your session</li>
+        <li>To display your content (works, comments, profile) to other users as you intend</li>
+        <li>To communicate with you about your account (e.g., moderation notices)</li>
+        <li>To maintain site security and prevent abuse</li>
+      </ul>
+    </section>
+
+    <section>
+      <h2>3. Data Storage</h2>
+      <p>Your data is stored on Cloudflare infrastructure (D1 database and R2 storage) in the United States. We use industry-standard practices to protect your information.</p>
+    </section>
+
+    <section>
+      <h2>4. Cookies</h2>
+      <p>We use a single essential cookie (<code>session</code>) to maintain your login state. No tracking cookies, ad cookies, or third-party cookies are used. Your theme preference is stored in your browser's localStorage.</p>
+    </section>
+
+    <section>
+      <h2>5. Content Visibility</h2>
+      <p>Published works, comments, and public profiles are visible to all site users. Draft works are only visible to their authors. Email addresses are never shown publicly unless you explicitly set your email visibility to public.</p>
+    </section>
+
+    <section>
+      <h2>6. Third Parties</h2>
+      <p>We do not sell, share, or transfer your personal information to third parties, except:</p>
+      <ul>
+        <li>Cloudflare — our hosting and infrastructure provider</li>
+        <li>Google — only if you choose to sign in with Google OAuth</li>
+      </ul>
+      <p>We do not use advertising networks or third-party analytics.</p>
+    </section>
+
+    <section>
+      <h2>7. Data Retention & Deletion</h2>
+      <p>You can delete your content at any time through the site interface. To request full account deletion, contact us at the email below. We will remove your account data within 30 days of a verified request.</p>
+    </section>
+
+    <section>
+      <h2>8. Security</h2>
+      <p>Passwords are stored using salted SHA-256 hashing — we never store plaintext passwords. Session tokens are randomly generated and expire after 30 days. All data is transmitted over HTTPS.</p>
+    </section>
+
+    <section>
+      <h2>9. Children's Privacy</h2>
+      <p>fanfiction.fyi is not intended for children under 13. We do not knowingly collect personal information from children under 13.</p>
+    </section>
+
+    <section>
+      <h2>10. Changes to This Policy</h2>
+      <p>We may update this privacy policy from time to time. We will note the "Last updated" date at the top of this page. Continued use of the site after changes constitutes acceptance of the updated policy.</p>
+    </section>
+
+    <section>
+      <h2>11. Contact</h2>
+      <p>Questions about this policy? Reach us at <a href="mailto:admin@fanfiction.fyi">admin@fanfiction.fyi</a>.</p>
+    </section>
+  </article>
+
+  <style>
+    .legal-page {
+      max-width: 720px;
+      margin: 0 auto;
+      padding: var(--space-6) var(--space-4);
+    }
+
+    .legal-page h1 {
+      font: var(--md-sys-typescale-headline-large);
+      color: var(--md-sys-color-on-surface);
+      margin-bottom: var(--space-2);
+    }
+
+    .legal-updated {
+      font: var(--md-sys-typescale-body-small);
+      color: var(--md-sys-color-outline);
+      margin-bottom: var(--space-6);
+    }
+
+    .legal-page h2 {
+      font: var(--md-sys-typescale-title-medium);
+      color: var(--md-sys-color-on-surface);
+      margin-top: var(--space-6);
+      margin-bottom: var(--space-2);
+    }
+
+    .legal-page h3 {
+      font: var(--md-sys-typescale-title-small);
+      color: var(--md-sys-color-on-surface-variant);
+      margin-top: var(--space-3);
+      margin-bottom: var(--space-1);
+    }
+
+    .legal-page p {
+      font: var(--md-sys-typescale-body-large);
+      color: var(--md-sys-color-on-surface-variant);
+      line-height: 1.7;
+      margin-bottom: var(--space-3);
+    }
+
+    .legal-page ul {
+      font: var(--md-sys-typescale-body-large);
+      color: var(--md-sys-color-on-surface-variant);
+      line-height: 1.7;
+      padding-left: var(--space-6);
+      margin-bottom: var(--space-3);
+    }
+
+    .legal-page li {
+      margin-bottom: var(--space-1);
+    }
+
+    .legal-page code {
+      background: var(--md-sys-color-surface-container-highest);
+      padding: 2px var(--space-2);
+      border-radius: var(--md-sys-shape-corner-extra-small);
+      font-family: var(--font-mono);
+      font-size: 0.875rem;
+    }
+
+    .legal-page a {
+      color: var(--md-sys-color-primary);
+      text-decoration: underline;
+      text-underline-offset: 2px;
+    }
+
+    .legal-page a:hover {
+      color: var(--md-sys-color-on-primary-container);
+    }
+
+    .legal-page section {
+      margin-bottom: var(--space-2);
+    }
+  </style>
+</Base>
