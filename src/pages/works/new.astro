@@ -2,6 +2,18 @@
 export const prerender = false;
 import Base from '../../layouts/Base.astro';
 import Editor from '../../components/Editor';
+import { getAuth } from '../../lib/auth';
+
+const db = Astro.locals.runtime.env.DB as D1Database;
+const auth = await getAuth(db, Astro.request);
+
+// Redirect unauthenticated users to login
+if (!auth) return Astro.redirect('/login');
+
+const { user, pseuds } = auth;
+
+// Default pseud: match display_name, else first pseud
+const defaultPseudId = pseuds.find(p => p.name === user.display_name)?.id ?? pseuds[0]?.id ?? '';
 ---
 
 <Base title="New Work — fanfiction.fyi">
@@ -111,7 +123,9 @@ import Editor from '../../components/Editor';
       <div class="form-field">
         <label for="pseud">Post As</label>
         <select id="pseud" name="pseud_id">
-          <option value="">Loading pseuds…</option>
+          {pseuds.map(p => (
+            <option value={p.id} selected={p.id === defaultPseudId}>{p.name}</option>
+          ))}
         </select>
       </div>
 
@@ -431,43 +445,6 @@ import Editor from '../../components/Editor';
       });
     });
   }
-
-  // Load user's pseuds
-  (async () => {
-    const select = document.getElementById('pseud') as HTMLSelectElement;
-    try {
-      const res = await fetch('/api/auth/me');
-      if (res.ok) {
-        const data = await res.json();
-        select.innerHTML = ''; // clear "Loading…"
-        if (data.pseuds && data.pseuds.length > 0) {
-          data.pseuds.forEach((p: any) => {
-            const opt = document.createElement('option');
-            opt.value = p.id;
-            opt.textContent = p.name;
-            select.appendChild(opt);
-          });
-        } else {
-          const opt = document.createElement('option');
-          opt.value = '';
-          opt.textContent = 'No pseuds — create one in Settings';
-          select.appendChild(opt);
-        }
-      } else {
-        select.innerHTML = '';
-        const opt = document.createElement('option');
-        opt.value = '';
-        opt.textContent = 'Sign in to post';
-        select.appendChild(opt);
-      }
-    } catch {
-      select.innerHTML = '';
-      const opt = document.createElement('option');
-      opt.value = '';
-      opt.textContent = 'Could not load pseuds';
-      select.appendChild(opt);
-    }
-  })();
 
   // Form submit
   const form = document.getElementById('new-work-form') as HTMLFormElement;
