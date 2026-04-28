@@ -19,28 +19,66 @@ function randomHex(bytes: number): string {
     .join('');
 }
 
-export async function hashPassword(password: string): Promise<string> {
-  const salt = randomHex(16); // 32 hex chars
+const PBKDF2_ITERATIONS = 100_000;
+
+async function pbkdf2Derive(password: string, salt: string, iterations: number): Promise<string> {
   const encoder = new TextEncoder();
-  const data = encoder.encode(salt + password);
-  const hash = await crypto.subtle.digest('SHA-256', data);
-  return `${salt}$${bufToHex(hash)}`;
+  const keyMaterial = await crypto.subtle.importKey(
+    'raw',
+    encoder.encode(password),
+    'PBKDF2',
+    false,
+    ['deriveBits']
+  );
+  const bits = await crypto.subtle.deriveBits(
+    { name: 'PBKDF2', salt: encoder.encode(salt), iterations, hash: 'SHA-256' },
+    keyMaterial,
+    256
+  );
+  return bufToHex(bits);
 }
 
-export async function verifyPassword(password: string, stored: string): Promise<boolean> {
-  const [salt, hashHex] = stored.split('$');
-  if (!salt || !hashHex) return false;
-  const encoder = new TextEncoder();
-  const data = encoder.encode(salt + password);
-  const hash = await crypto.subtle.digest('SHA-256', data);
-  const computed = bufToHex(hash);
-  // constant-time-ish compare
-  if (hashHex.length !== computed.length) return false;
+function constantTimeEqual(a: string, b: string): boolean {
+  if (a.length !== b.length) return false;
   let result = 0;
-  for (let i = 0; i < hashHex.length; i++) {
-    result |= hashHex.charCodeAt(i) ^ computed.charCodeAt(i);
+  for (let i = 0; i < a.length; i++) {
+    result |= a.charCodeAt(i) ^ b.charCodeAt(i);
   }
   return result === 0;
+}
+
+export async function hashPassword(password: string): Promise<string> {
+  const salt = randomHex(16); // 32 hex chars
+  const hash = await pbkdf2Derive(password, salt, PBKDF2_ITERATIONS);
+  return `${salt}$${PBKDF2_ITERATIONS}$${hash}`;
+}
+
+export async function verifyPassword(password: string, stored: string): Promise<{ valid: boolean; needsRehash: boolean }> {
+  const parts = stored.split('$');
+
+  if (parts.length === 3) {
+    // New PBKDF2 format: salt$iterations$hash
+    const [salt, iterStr, hashHex] = parts;
+    const iterations = parseInt(iterStr, 10);
+    if (!salt || !iterStr || !hashHex) return { valid: false, needsRehash: false };
+    const computed = await pbkdf2Derive(password, salt, iterations);
+    const valid = constantTimeEqual(computed, hashHex);
+    return { valid, needsRehash: valid && iterations !== PBKDF2_ITERATIONS };
+  }
+
+  if (parts.length === 2) {
+    // Legacy SHA-256 format: salt$hash — verify with old method, then flag for rehash
+    const [salt, hashHex] = parts;
+    if (!salt || !hashHex) return { valid: false, needsRehash: false };
+    const encoder = new TextEncoder();
+    const data = encoder.encode(salt + password);
+    const hash = await crypto.subtle.digest('SHA-256', data);
+    const computed = bufToHex(hash);
+    const valid = constantTimeEqual(computed, hashHex);
+    return { valid, needsRehash: valid };
+  }
+
+  return { valid: false, needsRehash: false };
 }
 
 export async function createSession(db: D1Database, userId: number): Promise<string> {

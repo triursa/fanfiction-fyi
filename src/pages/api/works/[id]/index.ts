@@ -12,16 +12,26 @@ export const GET: APIRoute = async ({ params, locals, request }) => {
   const work = await queryFirst<any>(db, `SELECT * FROM works WHERE id = ?1`, workId);
   if (!work) return new Response(JSON.stringify({ error: 'Work not found' }), { status: 404, headers: { 'Content-Type': 'application/json' } });
 
+  // Fetch pseuds first to check ownership
+  const pseuds = await queryAll<any>(db, `SELECT p.*, c.role FROM pseuds p JOIN creatorships c ON p.id = c.pseud_id WHERE c.work_id = ?1`, workId);
+
   const auth = await getAuth(db, request);
+  const isOwner = auth && pseuds.some((p: any) => p.user_id === auth.user.id);
+
+  // Unauthenticated/non-owner users can only see published works
+  if (!work.published_at && !isOwner) {
+    return new Response(JSON.stringify({ error: 'Work not found' }), { status: 404, headers: { 'Content-Type': 'application/json' } });
+  }
+
+  // For owners: show all chapters including drafts. For others: published only, and omit the draft column.
   const chapters = await queryAll<any>(
     db,
-    auth
+    isOwner
       ? `SELECT id, position, title, draft, word_count, updated_at FROM chapters WHERE work_id = ?1 ORDER BY position`
-      : `SELECT id, position, title, draft, word_count, updated_at FROM chapters WHERE work_id = ?1 AND draft = 0 ORDER BY position`,
+      : `SELECT id, position, title, word_count, updated_at FROM chapters WHERE work_id = ?1 AND draft = 0 ORDER BY position`,
     workId
   );
   const tags = await queryAll<any>(db, `SELECT t.* FROM tags t JOIN taggings tg ON t.id = tg.tag_id WHERE tg.work_id = ?1`, workId);
-  const pseuds = await queryAll<any>(db, `SELECT p.*, c.role FROM pseuds p JOIN creatorships c ON p.id = c.pseud_id WHERE c.work_id = ?1`, workId);
 
   return new Response(JSON.stringify({ work, chapters, tags, pseuds }), { headers: { 'Content-Type': 'application/json' } });
 };

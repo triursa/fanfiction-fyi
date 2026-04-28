@@ -294,9 +294,11 @@ const tagTypes = ['fandom', 'character', 'relationship', 'freeform', 'rating', '
     cursor: pointer;
     transition: background var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard);
   }
-  .search-btn:hover {
-    background: var(--md-sys-color-primary-container);
-    color: var(--md-sys-color-on-primary-container);
+  @media (hover: hover) {
+    .search-btn:hover {
+      background: var(--md-sys-color-primary-container);
+      color: var(--md-sys-color-on-primary-container);
+    }
   }
 
   /* ── Results ── */
@@ -340,9 +342,11 @@ const tagTypes = ['fandom', 'character', 'relationship', 'freeform', 'rating', '
     transition: background var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard),
                 border-color var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard);
   }
-  .result-card:hover {
-    background: var(--md-sys-color-surface-container-high);
-    border-color: var(--md-sys-color-outline);
+  @media (hover: hover) {
+    .result-card:hover {
+      background: var(--md-sys-color-surface-container-high);
+      border-color: var(--md-sys-color-outline);
+    }
   }
 
   .result-card__title {
@@ -352,8 +356,10 @@ const tagTypes = ['fandom', 'character', 'relationship', 'freeform', 'rating', '
     display: block;
     margin: 0 0 var(--space-1);
   }
-  .result-card__title:hover {
-    text-decoration: underline;
+  @media (hover: hover) {
+    .result-card__title:hover {
+      text-decoration: underline;
+    }
   }
 
   .result-card__author {
@@ -401,10 +407,12 @@ const tagTypes = ['fandom', 'character', 'relationship', 'freeform', 'rating', '
     transition: background var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard),
                 box-shadow var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard);
   }
-  .fab-btn:hover {
-    background: var(--md-sys-color-primary);
-    color: var(--md-sys-color-on-primary);
-    box-shadow: var(--md-sys-elevation-2);
+  @media (hover: hover) {
+    .fab-btn:hover {
+      background: var(--md-sys-color-primary);
+      color: var(--md-sys-color-on-primary);
+      box-shadow: var(--md-sys-elevation-2);
+    }
   }
 
   .page-indicator {

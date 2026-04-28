@@ -173,10 +173,12 @@ for (const w of recentlyUpdated) {
                 border-color var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard);
   }
 
-  .home-card:hover {
-    background: var(--md-sys-color-surface-container-high);
-    border-color: var(--md-sys-color-outline);
-    text-decoration: none;
+  @media (hover: hover) {
+    .home-card:hover {
+      background: var(--md-sys-color-surface-container-high);
+      border-color: var(--md-sys-color-outline);
+      text-decoration: none;
+    }
   }
 
   .home-card h2 {
@@ -240,8 +242,10 @@ for (const w of recentlyUpdated) {
     text-decoration: none;
   }
 
-  .work-list-link:hover {
-    text-decoration: underline;
+  @media (hover: hover) {
+    .work-list-link:hover {
+      text-decoration: underline;
+    }
   }
 
   .work-list-meta {

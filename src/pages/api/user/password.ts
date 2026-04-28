@@ -48,7 +48,7 @@ export const POST: APIRoute = async ({ locals, request }) => {
 
   // If user has existing password, verify current_password
   if (auth.user.password_hash) {
-    const valid = await verifyPassword(current_password, auth.user.password_hash);
+    const { valid } = await verifyPassword(current_password, auth.user.password_hash);
     if (!valid) {
       return new Response(JSON.stringify({ error: 'Current password is incorrect' }), {
         status: 403,
