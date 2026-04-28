@@ -74,7 +74,9 @@ const commentsJson = JSON.stringify(allComments);
 
       <div class="work-meta">
         <p class="work-authors">
-          By {pseuds.map(p => `<a href="/pseuds/${p.id}" class="pseud-link">${p.name}</a>`).join(', ')}
+          By {pseuds.map((p, i) => (
+            <Fragment>{i > 0 ? ', ' : ''}<a href={`/pseuds/${p.id}`} class="pseud-link">{p.name}</a></Fragment>
+          ))}
         </p>
         {work.summary && <p class="work-summary">{work.summary}</p>}
         <div class="work-stats">
@@ -106,7 +108,7 @@ const commentsJson = JSON.stringify(allComments);
     {work.notes && (
       <section class="work-notes">
         <h3>Author's Notes</h3>
-        <div class="prose-content" set:html={work.notes} />
+        <div class="prose-content" set:html={markdownToHtml(work.notes)} />
       </section>
     )}
 
@@ -135,7 +137,7 @@ const commentsJson = JSON.stringify(allComments);
     {work.end_notes && (
       <section class="work-notes">
         <h3>End Notes</h3>
-        <div class="prose-content" set:html={work.end_notes} />
+        <div class="prose-content" set:html={markdownToHtml(work.end_notes)} />
       </section>
     )}
 

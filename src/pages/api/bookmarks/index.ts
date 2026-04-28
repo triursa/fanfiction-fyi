@@ -44,7 +44,7 @@ export const POST: APIRoute = async ({ request, locals }) => {
   const { work_id, notes, private: isPrivate } = body || {};
   if (!work_id) return new Response(JSON.stringify({ error: 'work_id required' }), { status: 400, headers: { 'Content-Type': 'application/json' } });
 
-  const pseudId = auth.pseuds[0]?.id;
+  const pseudId = (body?.pseud_id && auth.pseuds.some((p: any) => p.id === Number(body.pseud_id))) ? Number(body.pseud_id) : auth.pseuds[0]?.id;
   if (!pseudId) return new Response(JSON.stringify({ error: 'No pseud found' }), { status: 400, headers: { 'Content-Type': 'application/json' } });
 
   const work = await queryFirst<any>(db, `SELECT id FROM works WHERE id = ?1`, work_id);

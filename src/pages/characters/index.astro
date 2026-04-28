@@ -320,10 +320,10 @@ const fandoms = fandomRows.map(r => r.fandom);
     }
     charEmpty.style.display = 'none';
     charGrid.innerHTML = chars.map(c => `
-      <a href="/characters/${c.id}" class="char-card" data-fandom="${escapeHtml(c.fandom || '')}">
+      <a href="/characters/${encodeURIComponent(c.id)}" class="char-card" data-fandom="${escapeHtml(c.fandom || '')}">
         <div class="char-card-avatar">
           ${c.avatar_key
-            ? `<img src="/storage/${escapeHtml(c.avatar_key)}" alt="${escapeHtml(c.name)}" />`
+            ? `<img src="/storage/${encodeURIComponent(c.avatar_key)}" alt="${escapeHtml(c.name)}" />`
             : `<div class="char-avatar-placeholder">${escapeHtml(c.name.charAt(0).toUpperCase())}</div>`
           }
         </div>

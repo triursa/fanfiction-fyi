@@ -1,57 +1,43 @@
 ---
 export const prerender = false;
+import Base from '../../layouts/Base.astro';
 ---
-<!doctype html>
-<html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="description" content="Create an account on fanfiction.fyi" />
-    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
-    <title>Sign Up — fanfiction.fyi</title>
-  </head>
-  <body>
-    <div class="auth-container">
-      <a href="/" class="auth-logo">fanfiction.fyi</a>
-      <h1 class="auth-title">Create Account</h1>
+<Base title="Sign Up — fanfiction.fyi">
+  <div class="auth-container">
+    <a href="/" class="auth-logo">fanfiction.fyi</a>
+    <h1 class="auth-title">Create Account</h1>
 
-      <form id="signup-form" class="auth-form">
-        <div class="form-field">
-          <label for="invite_code">Invite Code</label>
-          <input type="text" id="invite_code" name="invite_code" required placeholder="Enter your invite code" />
-        </div>
-        <div class="form-field">
-          <label for="email">Email</label>
-          <input type="email" id="email" name="email" required autocomplete="email" placeholder="you@example.com" />
-        </div>
-        <div class="form-field">
-          <label for="password">Password</label>
-          <input type="password" id="password" name="password" required autocomplete="new-password" placeholder="Choose a password (8+ characters)" minlength="8" />
-        </div>
-        <div class="form-field">
-          <label for="display_name">Display Name</label>
-          <input type="text" id="display_name" name="display_name" required placeholder="Your pen name / pseudonym" />
-        </div>
-        <div id="signup-error" class="form-error" role="alert"></div>
-        <button type="submit" class="btn-primary">Create Account</button>
-      </form>
+    <form id="signup-form" class="auth-form">
+      <div class="form-field">
+        <label for="invite_code">Invite Code</label>
+        <input type="text" id="invite_code" name="invite_code" required placeholder="Enter your invite code" />
+      </div>
+      <div class="form-field">
+        <label for="email">Email</label>
+        <input type="email" id="email" name="email" required autocomplete="email" placeholder="you@example.com" />
+      </div>
+      <div class="form-field">
+        <label for="password">Password</label>
+        <input type="password" id="password" name="password" required autocomplete="new-password" placeholder="Choose a password (8+ characters)" minlength="8" />
+      </div>
+      <div class="form-field">
+        <label for="display_name">Display Name</label>
+        <input type="text" id="display_name" name="display_name" required placeholder="Your pen name / pseudonym" />
+      </div>
+      <div id="signup-error" class="form-error" role="alert"></div>
+      <button type="submit" class="btn-primary">Create Account</button>
+    </form>
 
-      <p class="auth-alt">Already have an account? <a href="/login">Sign in</a></p>
-    </div>
-  </body>
-</html>
+    <p class="auth-alt">Already have an account? <a href="/login">Sign in</a></p>
+  </div>
+</Base>
 
 <style is:global>
-  @import '../../styles/theme.css';
-
   .auth-container {
     max-width: 400px;
     margin: 0 auto;
     padding: var(--space-16) var(--space-4);
-    min-height: 100vh;
+    min-height: 60vh;
     display: flex;
     flex-direction: column;
     justify-content: center;

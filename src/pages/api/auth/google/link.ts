@@ -37,7 +37,11 @@ export const POST: APIRoute = async ({ locals, request, url }) => {
   }
 
   const redirectUri = `${url.origin}/api/auth/google/callback`;
-  const state = `link_${auth.user.id}`;
+  // Generate a random nonce to make the state parameter unguessable,
+  // preventing CSRF attacks where an attacker crafts a link with a
+  // predictable state=link_{userId} value.
+  const nonce = crypto.randomUUID().replace(/-/g, '').slice(0, 16);
+  const state = `link_${auth.user.id}_${nonce}`;
   const params = new URLSearchParams({
     client_id: clientId,
     redirect_uri: redirectUri,
