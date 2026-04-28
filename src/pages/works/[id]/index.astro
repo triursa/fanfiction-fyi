@@ -56,6 +56,29 @@ for (const t of tags) {
 // Kudos count
 const kudosCount = (await queryFirst<any>(db, `SELECT COUNT(*) as cnt FROM kudos WHERE work_id = ?1`, workId))?.cnt ?? 0;
 
+// Chapter reactions — counts for current chapter
+const reactionRows = chapterId
+  ? await queryAll<{ reaction: string; cnt: number }>(db, `SELECT reaction, COUNT(*) as cnt FROM chapter_reactions WHERE chapter_id = ?1 GROUP BY reaction`, chapterId)
+  : [];
+const reactionCounts: Record<string, number> = {};
+for (const row of reactionRows) {
+  reactionCounts[row.reaction] = row.cnt;
+}
+
+// User's own reactions for current chapter
+let myReactions: string[] = [];
+if (userPseudId && chapterId) {
+  const myRows = await queryAll<{ reaction: string }>(db, `SELECT reaction FROM chapter_reactions WHERE chapter_id = ?1 AND pseud_id = ?2`, chapterId, userPseudId);
+  myReactions = myRows.map(r => r.reaction);
+}
+
+// Work-level aggregate reaction summary (all chapters)
+const workReactionSummary = await queryAll<{ reaction: string; cnt: number }>(
+  db,
+  `SELECT cr.reaction, COUNT(*) as cnt FROM chapter_reactions cr JOIN chapters c ON c.id = cr.chapter_id WHERE c.work_id = ?1 GROUP BY cr.reaction ORDER BY cnt DESC`,
+  workId
+);
+
 // Bookmark & reading state for logged-in users
 let existingBookmark: any = null;
 let readingProgress: any = null;
@@ -153,6 +176,19 @@ const commentsJson = JSON.stringify(allComments);
         {!chapter.content_html && chapter.content_md && <div class="prose-content" set:html={markdownToHtml(chapter.content_md)} />}
         {!chapter.content_html && !chapter.content_md && <p class="placeholder-text">Content not available.</p>}
       </section>
+
+      <!-- Chapter Reactions Bar -->
+      <div class="chapter-reactions" data-chapter-id={chapter.id} data-authed={authUser ? 'true' : 'false'}>
+        <span class="reactions-label">React to this chapter:</span>
+        <div class="reactions-bar">
+          <button class="reaction-btn" data-reaction="fire" data-mine={myReactions.includes('fire') ? '1' : '0'} title="Fire">🔥 <span class="reaction-count">{reactionCounts['fire'] || 0}</span></button>
+          <button class="reaction-btn" data-reaction="cry" data-mine={myReactions.includes('cry') ? '1' : '0'} title="Crying">😭 <span class="reaction-count">{reactionCounts['cry'] || 0}</span></button>
+          <button class="reaction-btn" data-reaction="heartbreak" data-mine={myReactions.includes('heartbreak') ? '1' : '0'} title="Heartbreak">💔 <span class="reaction-count">{reactionCounts['heartbreak'] || 0}</span></button>
+          <button class="reaction-btn" data-reaction="swords" data-mine={myReactions.includes('swords') ? '1' : '0'} title="Action">⚔️ <span class="reaction-count">{reactionCounts['swords'] || 0}</span></button>
+          <button class="reaction-btn" data-reaction="heart" data-mine={myReactions.includes('heart') ? '1' : '0'} title="Love">❤️ <span class="reaction-count">{reactionCounts['heart'] || 0}</span></button>
+          <button class="reaction-btn" data-reaction="mindblown" data-mine={myReactions.includes('mindblown') ? '1' : '0'} title="Mind blown">🤯 <span class="reaction-count">{reactionCounts['mindblown'] || 0}</span></button>
+        </div>
+      </div>
     )}
 
     {work.end_notes && (
@@ -164,6 +200,16 @@ const commentsJson = JSON.stringify(allComments);
 
     <div class="work-actions">
       <button id="kudos-btn" class="btn-primary" data-work-id={work.id}>❤️ Leave Kudos ({kudosCount})</button>
+
+      {workReactionSummary.length > 0 && (
+        <div class="work-reactions-summary">
+          {workReactionSummary.map(r => (
+            <span class="reaction-pill">
+              {r.reaction === 'fire' ? '🔥' : r.reaction === 'cry' ? '😭' : r.reaction === 'heartbreak' ? '💔' : r.reaction === 'swords' ? '⚔️' : r.reaction === 'heart' ? '❤️' : '🤯'} {r.cnt}
+            </span>
+          ))}
+        </div>
+      )}
 
       {work.published_at && (
         <a href={`/api/works/${work.id}/export?format=epub`} class="btn-secondary" download>📥 Export EPUB</a>
@@ -318,6 +364,70 @@ const commentsJson = JSON.stringify(allComments);
   .btn-primary { font: var(--md-sys-typescale-label-large); color: var(--md-sys-color-on-primary); background: var(--md-sys-color-primary); border: none; border-radius: var(--md-sys-shape-corner-full); padding: var(--space-3) var(--space-6); cursor: pointer; }
   .btn-secondary { font: var(--md-sys-typescale-label-large); color: var(--md-sys-color-primary); background: transparent; border: 1px solid var(--md-sys-color-outline); border-radius: var(--md-sys-shape-corner-full); padding: var(--space-3) var(--space-6); cursor: pointer; text-decoration: none; }
   .placeholder-text { font: var(--md-sys-typescale-body-large); color: var(--md-sys-color-outline); font-style: italic; }
+
+  /* Chapter Reactions */
+  .chapter-reactions {
+    margin-top: var(--space-6);
+    padding-top: var(--space-4);
+    border-top: 1px solid var(--md-sys-color-outline-variant);
+  }
+  .reactions-label {
+    font: var(--md-sys-typescale-label-medium);
+    color: var(--md-sys-color-on-surface-variant);
+    display: block;
+    margin-bottom: var(--space-2);
+  }
+  .reactions-bar {
+    display: flex;
+    gap: var(--space-2);
+    flex-wrap: wrap;
+  }
+  .reaction-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-1);
+    font: var(--md-sys-typescale-label-large);
+    background: var(--md-sys-color-surface-container);
+    color: var(--md-sys-color-on-surface);
+    border: 1px solid var(--md-sys-color-outline-variant);
+    border-radius: var(--md-sys-shape-corner-full);
+    padding: var(--space-1) var(--space-3);
+    cursor: pointer;
+    transition: background 0.2s, border-color 0.2s, transform 0.1s;
+    user-select: none;
+    -webkit-user-select: none;
+    min-height: 36px;
+    min-width: 44px; /* touch-friendly */
+  }
+  .reaction-btn:hover { background: var(--md-sys-color-surface-container-high); border-color: var(--md-sys-color-outline); }
+  .reaction-btn:active { transform: scale(0.95); }
+  .reaction-btn[data-mine="1"] {
+    background: var(--md-sys-color-primary-container);
+    color: var(--md-sys-color-on-primary-container);
+    border-color: var(--md-sys-color-primary);
+    font-weight: 600;
+  }
+  .reaction-btn[data-mine="1"]:hover { background: var(--md-sys-color-secondary-container); }
+  .reaction-count { font: var(--md-sys-typescale-label-medium); }
+  .reaction-btn[disabled], .chapter-reactions[data-authed="false"] .reaction-btn {
+    cursor: default;
+    opacity: 0.7;
+  }
+
+  /* Work-level reaction summary pills */
+  .work-reactions-summary {
+    display: inline-flex;
+    gap: var(--space-2);
+    flex-wrap: wrap;
+    align-items: center;
+  }
+  .reaction-pill {
+    font: var(--md-sys-typescale-label-medium);
+    background: var(--md-sys-color-secondary-container);
+    color: var(--md-sys-color-on-secondary-container);
+    border-radius: var(--md-sys-shape-corner-full);
+    padding: var(--space-1) var(--space-3);
+  }
 </style>
 
 <script define:vars={{ workId, chapterId, authed: !!authUser }}>
@@ -339,6 +449,77 @@ const commentsJson = JSON.stringify(allComments);
           kudosBtn.disabled = true;
         }
       } catch { /* silently fail */ }
+    });
+  }
+
+  // Chapter reactions — toggle on click
+  const reactionsContainer = document.querySelector('.chapter-reactions');
+  if (reactionsContainer) {
+    reactionsContainer.addEventListener('click', async (e) => {
+      const btn = e.target.closest('.reaction-btn');
+      if (!btn) return;
+
+      if (!authed) {
+        window.location.href = '/login';
+        return;
+      }
+
+      const reaction = btn.dataset.reaction;
+      if (!reaction || !chapterId) return;
+
+      // Optimistic update
+      const isMine = btn.dataset.mine === '1';
+      const countEl = btn.querySelector('.reaction-count');
+      let count = parseInt(countEl?.textContent || '0', 10);
+
+      if (isMine) {
+        btn.dataset.mine = '0';
+        count = Math.max(0, count - 1);
+      } else {
+        btn.dataset.mine = '1';
+        count = count + 1;
+      }
+      if (countEl) countEl.textContent = String(count);
+
+      try {
+        const res = await fetch(`/api/works/${workId}/chapters/${chapterId}/reactions`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ reaction }),
+        });
+        if (res.ok) {
+          // Update work-level summary if present
+          const data = await res.json();
+          const summaryEl = document.querySelector('.work-reactions-summary');
+          if (summaryEl && data.counts) {
+            const reactionEmojis = { fire: '🔥', cry: '😭', heartbreak: '💔', swords: '⚔️', heart: '❤️', mindblown: '🤯' };
+            const sortedReactions = Object.entries(data.counts).sort((a, b) => b[1] - a[1]);
+            summaryEl.innerHTML = sortedReactions.map(([r, c]) =>
+              `<span class="reaction-pill">${reactionEmojis[r] || r} ${c}</span>`
+            ).join('');
+          }
+        } else {
+          // Revert on failure
+          if (isMine) {
+            btn.dataset.mine = '1';
+            count = count + 1;
+          } else {
+            btn.dataset.mine = '0';
+            count = Math.max(0, count - 1);
+          }
+          if (countEl) countEl.textContent = String(count);
+        }
+      } catch {
+        // Revert on network error
+        if (isMine) {
+          btn.dataset.mine = '1';
+          count = count + 1;
+        } else {
+          btn.dataset.mine = '0';
+          count = Math.max(0, count - 1);
+        }
+        if (countEl) countEl.textContent = String(count);
+      }
     });
   }
 
