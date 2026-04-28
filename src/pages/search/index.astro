@@ -15,10 +15,13 @@ let results: any[] = [];
 let total = 0;
 
 if (query) {
+  // Sanitize FTS5 query — strip special operators that cause SQL errors
+  const sanitizedQ = query.replace(/["()*]/g, '').replace(/\b(AND|OR|NOT|NEAR)\b/gi, '').trim();
+
   let countSql = `SELECT COUNT(*) as total FROM works_fts f JOIN works w ON f.rowid = w.id WHERE works_fts MATCH ? AND w.published_at IS NOT NULL`;
   let dataSql = `SELECT w.id, w.title, w.summary, w.word_count, w.published_at FROM works_fts f JOIN works w ON f.rowid = w.id WHERE works_fts MATCH ? AND w.published_at IS NOT NULL`;
-  const bindings: any[] = [query];
-  const countBindings: any[] = [query];
+  const bindings: any[] = [sanitizedQ];
+  const countBindings: any[] = [sanitizedQ];
 
   if (type) {
     dataSql += ` AND w.id IN (SELECT tg.work_id FROM taggings tg JOIN tags t ON t.id = tg.tag_id WHERE t.type = ?)`;
