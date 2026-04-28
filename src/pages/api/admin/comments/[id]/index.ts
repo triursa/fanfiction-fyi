@@ -14,7 +14,8 @@ export const DELETE: APIRoute = async ({ params, request, locals }) => {
 
   // Require mod+ role
   const auth = await requireRole(db, request, UserRole.Mod);
-  if (!auth) return new Response(JSON.stringify({ error: 'Unauthorized or insufficient role' }), { status: 401, headers: { 'Content-Type': 'application/json' } });
+  if (!auth) return new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401, headers: { 'Content-Type': 'application/json' } });
+  if ('forbidden' in auth) return new Response(JSON.stringify({ error: 'Insufficient role' }), { status: 403, headers: { 'Content-Type': 'application/json' } });
 
   const comment = await queryFirst<{ id: number }>(db, `SELECT id FROM comments WHERE id = ?1`, commentId);
   if (!comment) {

@@ -12,13 +12,25 @@ export const GET: APIRoute = async ({ url, locals, request }) => {
   const cors = corsHeaders(request);
   const db = locals.runtime.env.DB as D1Database;
 
-  const q = url.searchParams.get('q')?.trim();
-  if (!q) {
+  const rawQ = url.searchParams.get('q')?.trim();
+  if (!rawQ) {
     return new Response(JSON.stringify({ error: 'Query parameter "q" is required' }), {
       status: 400,
       headers: { 'Content-Type': 'application/json', ...cors },
     });
   }
+  // Sanitize FTS5 query — strip special operators that cause SQL errors
+  const sanitizedQ = rawQ.replace(/["()*]/g, '').replace(/\b(AND|OR|NOT|NEAR)\b/gi, '').trim();
+  if (!sanitizedQ) {
+    return new Response(
+      JSON.stringify({ error: 'Query parameter "q" must contain searchable terms' }),
+      {
+        status: 400,
+        headers: { 'Content-Type': 'application/json', ...cors },
+      }
+    );
+  }
+  const q = sanitizedQ;
 
   const type = url.searchParams.get('type')?.trim() || undefined;
   const page = Math.max(Number(url.searchParams.get('page')) || 1, 1);

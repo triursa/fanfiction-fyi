@@ -93,17 +93,17 @@ export async function requireAuth(
 }
 
 // Require a minimum role level (founder > admin > mod > user)
-// Returns null if unauthenticated, or { auth, forbidden } if role is insufficient
+// Returns null if unauthenticated, { forbidden: true } if role insufficient, or auth info if OK
 export async function requireRole(
   db: D1Database,
   request: Request,
   minimumRole: UserRole
-): Promise<{ user: User; pseuds: Pseud[] } | null> {
+): Promise<{ user: User; pseuds: Pseud[] } | { forbidden: true } | null> {
   const auth = await requireAuth(db, request);
   if (!auth) return null;
   const userLevel = ROLE_LEVEL[auth.user.role as UserRole] ?? 0;
   const requiredLevel = ROLE_LEVEL[minimumRole] ?? 0;
-  if (userLevel < requiredLevel) return null; // Caller checks and returns 403
+  if (userLevel < requiredLevel) return { forbidden: true };
   return auth;
 }
 
