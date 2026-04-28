@@ -18,6 +18,10 @@ export const GET: APIRoute = async ({ url, locals }) => {
   }
 
   const redirectUri = `${url.origin}/api/auth/google/callback`;
+
+  // Pass through state parameter for linking flows (e.g. state=link_{userId})
+  const state = url.searchParams.get('state') || undefined;
+
   const params = new URLSearchParams({
     client_id: clientId,
     redirect_uri: redirectUri,
@@ -26,6 +30,10 @@ export const GET: APIRoute = async ({ url, locals }) => {
     access_type: 'offline',
     prompt: 'consent',
   });
+
+  if (state) {
+    params.set('state', state);
+  }
 
   return Response.redirect(`https://accounts.google.com/o/oauth2/v2/auth?${params}`, 302);
 };

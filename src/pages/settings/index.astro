@@ -3,7 +3,7 @@ export const prerender = false;
 import Base from '../../layouts/Base.astro';
 import { THEMES } from '../../styles/themes';
 
-// Auth check via cookie
+// Auth check via cookie (server-side redirect guard)
 const cookie = Astro.request.headers.get('cookie') ?? '';
 const sessionMatch = cookie.match(/session=([a-f0-9]+)/);
 let currentTheme = 'obsidian';
@@ -39,9 +39,151 @@ const themesJSON = JSON.stringify(
   <article class="settings-page">
     <h1>Settings</h1>
 
-    <section class="settings-section">
-      <h2>Theme</h2>
-      <p class="settings-hint">Choose a color palette for the site.</p>
+    <!-- ═══════════════════════════════════════════════════ -->
+    <!--  SECTION 1: Profile                                -->
+    <!-- ═══════════════════════════════════════════════════ -->
+    <section class="settings-card" id="profile-section">
+      <h2 class="card-title">Profile</h2>
+      <p class="card-subtitle">Manage your public profile information.</p>
+
+      <div class="form-group">
+        <label for="display-name" class="form-label">Display Name</label>
+        <input type="text" id="display-name" class="form-input" placeholder="Your display name" />
+      </div>
+
+      <div class="form-group">
+        <label for="bio" class="form-label">Bio</label>
+        <textarea id="bio" class="form-textarea" rows="3" maxlength="500" placeholder="Tell others about yourself..."></textarea>
+        <span class="form-hint" id="bio-counter">0 / 500</span>
+      </div>
+
+      <div class="form-group">
+        <label for="avatar-url" class="form-label">Avatar URL</label>
+        <div class="avatar-input-row">
+          <input type="text" id="avatar-url" class="form-input" placeholder="https://example.com/avatar.png" />
+          <div class="avatar-preview" id="avatar-preview">
+            <img id="avatar-preview-img" src="" alt="Avatar preview" />
+            <span id="avatar-preview-fallback" class="avatar-fallback">?</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="form-group">
+        <label class="form-label">Reading Font Size</label>
+        <div class="segmented-control" id="font-size-group">
+          <button type="button" class="seg-btn" data-value="small">Small</button>
+          <button type="button" class="seg-btn" data-value="default">Default</button>
+          <button type="button" class="seg-btn" data-value="large">Large</button>
+          <button type="button" class="seg-btn" data-value="xlarge">X-Large</button>
+        </div>
+      </div>
+
+      <div class="form-group">
+        <label class="form-label">Email Visibility</label>
+        <div class="radio-group" id="email-visibility-group">
+          <label class="radio-option">
+            <input type="radio" name="email_visibility" value="public" />
+            <span class="radio-label">
+              <strong>Public</strong>
+              <span class="radio-desc">Anyone can see your email address.</span>
+            </span>
+          </label>
+          <label class="radio-option">
+            <input type="radio" name="email_visibility" value="mutual" />
+            <span class="radio-label">
+              <strong>Mutual</strong>
+              <span class="radio-desc">Only users you follow can see your email.</span>
+            </span>
+          </label>
+          <label class="radio-option">
+            <input type="radio" name="email_visibility" value="private" />
+            <span class="radio-label">
+              <strong>Private</strong>
+              <span class="radio-desc">No one can see your email address.</span>
+            </span>
+          </label>
+        </div>
+      </div>
+
+      <div class="form-actions">
+        <button type="button" class="btn-filled" id="save-profile-btn">Save Profile</button>
+        <span class="inline-feedback" id="profile-feedback"></span>
+      </div>
+    </section>
+
+    <!-- ═══════════════════════════════════════════════════ -->
+    <!--  SECTION 2: Account                                -->
+    <!-- ═══════════════════════════════════════════════════ -->
+    <section class="settings-card" id="account-section">
+      <h2 class="card-title">Account</h2>
+      <p class="card-subtitle">Manage your account security and linked services.</p>
+
+      <!-- Email (display only) -->
+      <div class="form-group">
+        <label class="form-label">Email</label>
+        <div class="static-field" id="account-email">
+          <span id="email-value">—</span>
+          <span class="form-hint" id="email-visibility-note"></span>
+        </div>
+      </div>
+
+      <!-- Password -->
+      <div class="form-group" id="password-section">
+        <h3 class="subsection-title" id="password-title">Password</h3>
+
+        <div id="current-password-row" class="form-group" style="display:none">
+          <label for="current-password" class="form-label">Current Password</label>
+          <input type="password" id="current-password" class="form-input" autocomplete="current-password" />
+        </div>
+
+        <div class="form-group">
+          <label for="new-password" class="form-label">New Password</label>
+          <input type="password" id="new-password" class="form-input" autocomplete="new-password" />
+        </div>
+
+        <div class="form-group">
+          <label for="confirm-password" class="form-label">Confirm Password</label>
+          <input type="password" id="confirm-password" class="form-input" autocomplete="new-password" />
+        </div>
+
+        <div class="form-actions">
+          <button type="button" class="btn-filled" id="save-password-btn">Save Password</button>
+          <span class="inline-feedback" id="password-feedback"></span>
+        </div>
+      </div>
+
+      <!-- Google Account -->
+      <div class="form-group" id="google-section">
+        <h3 class="subsection-title">Google Account</h3>
+        <div id="google-linked" style="display:none">
+          <div class="google-status">
+            <span class="google-badge google-badge--linked">Linked ✓</span>
+            <img id="google-avatar" class="google-avatar" src="" alt="Google avatar" style="display:none" />
+          </div>
+          <p class="form-hint">Your account is linked to Google. You can sign in with Google or your password.</p>
+          <div class="form-actions">
+            <button type="button" class="btn-outlined btn-danger" id="unlink-google-btn">Unlink Google</button>
+            <span class="inline-feedback" id="google-feedback"></span>
+          </div>
+          <p class="form-warning" id="unlink-warning" style="display:none">⚠️ You must set a password before unlinking Google.</p>
+        </div>
+        <div id="google-unlinked" style="display:none">
+          <p class="form-hint">Link your Google account for easier sign-in.</p>
+          <div class="form-actions">
+            <button type="button" class="btn-filled" id="link-google-btn">Link Google Account</button>
+            <span class="inline-feedback" id="google-feedback"></span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ═══════════════════════════════════════════════════ -->
+    <!--  SECTION 3: Theme                                  -->
+    <!-- ═══════════════════════════════════════════════════ -->
+    <section class="settings-card">
+      <h2 class="card-title">Theme</h2>
+      <p class="card-subtitle">Choose a color palette for the site.</p>
+      <p class="form-hint" style="margin-top:0">Font size also affects reading experience.</p>
       <div class="theme-grid">
         {themeList.map((theme) => (
           <button
@@ -62,14 +204,45 @@ const themesJSON = JSON.stringify(
 <!-- Theme colors data injected via set:html (Astro doesn't interpolate inside <script> tags) -->
 <div id="ff-themes-json" style="display:none" set:html={themesJSON} />
 
+<!-- Toast notification container -->
+<div id="toast-container"></div>
+
 <script is:inline>
-  // Read theme colors from the hidden data element
+  // ─── User data state ────────────────────────────────────
+  var userData = null;
+
+  // ─── Toast system ───────────────────────────────────────
+  function showToast(message, type) {
+    type = type || 'success';
+    var container = document.getElementById('toast-container');
+    var toast = document.createElement('div');
+    toast.className = 'toast toast--' + type;
+    toast.textContent = message;
+    container.appendChild(toast);
+    // Trigger entrance
+    requestAnimationFrame(function() {
+      toast.classList.add('toast--visible');
+    });
+    // Auto-dismiss
+    setTimeout(function() {
+      toast.classList.remove('toast--visible');
+      setTimeout(function() { toast.remove(); }, 300);
+    }, 3000);
+  }
+
+  // ─── Inline feedback helper ──────────────────────────────
+  function setFeedback(el, message, isError) {
+    if (!el) return;
+    el.textContent = message;
+    el.className = 'inline-feedback ' + (isError ? 'feedback-error' : 'feedback-success');
+    if (message) {
+      setTimeout(function() { el.textContent = ''; el.className = 'inline-feedback'; }, 4000);
+    }
+  }
+
+  // ─── Read theme colors from hidden data element ─────────
   var themeColors = JSON.parse(document.getElementById('ff-themes-json').textContent || '{}');
 
-  /**
-   * Apply a theme's colors as CSS custom properties on :root
-   * and persist the choice to localStorage.
-   */
   function applyThemeClientSide(themeName) {
     var colors = themeColors[themeName];
     if (!colors) return;
@@ -77,12 +250,11 @@ const themesJSON = JSON.stringify(
     for (var token in colors) {
       root.style.setProperty(token, colors[token]);
     }
-    // Update body data-theme attribute for any selectors that use it
     document.body.dataset.theme = themeName;
-    // Persist to localStorage as a fallback for non-authed / SSR-delayed pages
     try { localStorage.setItem('ff-theme', themeName); } catch (_) {}
   }
 
+  // ─── Theme swatch click handlers ────────────────────────
   document.querySelectorAll('.theme-swatch').forEach(function(btn) {
     btn.addEventListener('click', function() {
       var theme = btn.dataset.theme;
@@ -93,57 +265,676 @@ const themesJSON = JSON.stringify(
         body: JSON.stringify({ theme: theme }),
       }).then(function(res) {
         if (res.ok) {
-          // Immediately apply the theme on the client for instant visual feedback
           applyThemeClientSide(theme);
-
-          // Update active swatch indicator
           document.querySelectorAll('.theme-swatch').forEach(function(b) {
             b.classList.remove('theme-swatch--active');
           });
           btn.classList.add('theme-swatch--active');
-
-          // Update checkmark
           document.querySelectorAll('.swatch-check').forEach(function(c) { c.remove(); });
           var check = document.createElement('span');
           check.className = 'swatch-check';
           check.textContent = '\u2713';
           btn.appendChild(check);
-
-          // Give D1 eventual consistency a moment to settle before reloading
-          setTimeout(function() { location.reload(); }, 800);
+          showToast('Theme updated!');
         }
       });
     });
   });
+
+  // ─── Bio character counter ──────────────────────────────
+  var bioTextarea = document.getElementById('bio');
+  var bioCounter = document.getElementById('bio-counter');
+  bioTextarea.addEventListener('input', function() {
+    var len = bioTextarea.value.length;
+    bioCounter.textContent = len + ' / 500';
+    if (len > 480) {
+      bioCounter.classList.add('counter-warning');
+    } else {
+      bioCounter.classList.remove('counter-warning');
+    }
+  });
+
+  // ─── Avatar preview ─────────────────────────────────────
+  var avatarInput = document.getElementById('avatar-url');
+  var avatarPreviewImg = document.getElementById('avatar-preview-img');
+  var avatarPreviewFallback = document.getElementById('avatar-preview-fallback');
+
+  function updateAvatarPreview(url) {
+    if (url && url.match(/^https?:\/\/.+/)) {
+      avatarPreviewImg.src = url;
+      avatarPreviewImg.style.display = 'block';
+      avatarPreviewFallback.style.display = 'none';
+      avatarPreviewImg.onerror = function() {
+        avatarPreviewImg.style.display = 'none';
+        avatarPreviewFallback.style.display = '';
+      };
+    } else {
+      avatarPreviewImg.style.display = 'none';
+      avatarPreviewFallback.style.display = '';
+    }
+  }
+
+  avatarInput.addEventListener('input', function() {
+    updateAvatarPreview(avatarInput.value.trim());
+  });
+
+  // ─── Segmented button (font size) ───────────────────────
+  var fontSizeGroup = document.getElementById('font-size-group');
+  var currentFontSize = 'default';
+
+  function setFontSize(value) {
+    currentFontSize = value;
+    fontSizeGroup.querySelectorAll('.seg-btn').forEach(function(b) {
+      b.classList.toggle('seg-btn--active', b.dataset.value === value);
+    });
+  }
+
+  fontSizeGroup.querySelectorAll('.seg-btn').forEach(function(b) {
+    b.addEventListener('click', function() {
+      setFontSize(b.dataset.value);
+    });
+  });
+
+  // ─── Save Profile ───────────────────────────────────────
+  var saveProfileBtn = document.getElementById('save-profile-btn');
+  var profileFeedback = document.getElementById('profile-feedback');
+
+  saveProfileBtn.addEventListener('click', function() {
+    var displayName = document.getElementById('display-name').value.trim();
+    var bio = document.getElementById('bio').value;
+    var avatarUrl = document.getElementById('avatar-url').value.trim();
+    var emailVisEl = document.querySelector('input[name="email_visibility"]:checked');
+    var emailVisibility = emailVisEl ? emailVisEl.value : 'private';
+
+    saveProfileBtn.disabled = true;
+    setFeedback(profileFeedback, 'Saving…', false);
+
+    fetch('/api/user/profile', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        display_name: displayName || null,
+        bio: bio,
+        avatar_url: avatarUrl || null,
+        email_visibility: emailVisibility,
+        reading_font_size: currentFontSize,
+      }),
+    })
+    .then(function(res) { return res.json().then(function(data) { return { ok: res.ok, data: data }; }); })
+    .then(function(result) {
+      saveProfileBtn.disabled = false;
+      if (result.ok) {
+        setFeedback(profileFeedback, 'Profile saved!', false);
+        showToast('Profile updated!');
+      } else {
+        setFeedback(profileFeedback, result.data.error || 'Failed to save profile.', true);
+      }
+    })
+    .catch(function() {
+      saveProfileBtn.disabled = false;
+      setFeedback(profileFeedback, 'Network error. Please try again.', true);
+    });
+  });
+
+  // ─── Save Password ──────────────────────────────────────
+  var savePasswordBtn = document.getElementById('save-password-btn');
+  var passwordFeedback = document.getElementById('password-feedback');
+
+  savePasswordBtn.addEventListener('click', function() {
+    var currentPassword = document.getElementById('current-password').value;
+    var newPassword = document.getElementById('new-password').value;
+    var confirmPassword = document.getElementById('confirm-password').value;
+
+    if (!newPassword) {
+      setFeedback(passwordFeedback, 'Please enter a new password.', true);
+      return;
+    }
+    if (newPassword !== confirmPassword) {
+      setFeedback(passwordFeedback, 'Passwords do not match.', true);
+      return;
+    }
+
+    savePasswordBtn.disabled = true;
+    setFeedback(passwordFeedback, 'Saving…', false);
+
+    fetch('/api/user/password', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        current_password: currentPassword,
+        new_password: newPassword,
+      }),
+    })
+    .then(function(res) { return res.json().then(function(data) { return { ok: res.ok, status: res.status, data: data }; }); })
+    .then(function(result) {
+      savePasswordBtn.disabled = false;
+      if (result.ok) {
+        setFeedback(passwordFeedback, 'Password updated!', false);
+        showToast('Password updated!');
+        document.getElementById('current-password').value = '';
+        document.getElementById('new-password').value = '';
+        document.getElementById('confirm-password').value = '';
+        // Update state: now has password
+        if (userData) {
+          userData.has_password = true;
+          updatePasswordFieldVisibility();
+          updateUnlinkWarning();
+        }
+      } else {
+        setFeedback(passwordFeedback, result.data.error || 'Failed to update password.', true);
+      }
+    })
+    .catch(function() {
+      savePasswordBtn.disabled = false;
+      setFeedback(passwordFeedback, 'Network error. Please try again.', true);
+    });
+  });
+
+  // ─── Google linking ─────────────────────────────────────
+  var linkGoogleBtn = document.getElementById('link-google-btn');
+  var unlinkGoogleBtn = document.getElementById('unlink-google-btn');
+  var googleFeedback = document.getElementById('google-feedback');
+
+  linkGoogleBtn.addEventListener('click', function() {
+    setFeedback(googleFeedback, 'Redirecting to Google…', false);
+    fetch('/api/auth/google/link', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+    })
+    .then(function(res) { return res.json().then(function(data) { return { ok: res.ok, status: res.status, data: data }; }); })
+    .then(function(result) {
+      if (result.ok && result.data.url) {
+        window.location.href = result.data.url;
+      } else {
+        setFeedback(googleFeedback, result.data.error || 'Failed to initiate Google linking.', true);
+      }
+    })
+    .catch(function() {
+      setFeedback(googleFeedback, 'Network error. Please try again.', true);
+    });
+  });
+
+  unlinkGoogleBtn.addEventListener('click', function() {
+    if (!confirm('Unlink your Google account? You will no longer be able to sign in with Google.')) return;
+    setFeedback(googleFeedback, 'Unlinking…', false);
+    fetch('/api/auth/google/link', {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+    })
+    .then(function(res) { return res.json().then(function(data) { return { ok: res.ok, status: res.status, data: data }; }); })
+    .then(function(result) {
+      if (result.ok) {
+        showToast('Google account unlinked.');
+        document.getElementById('google-linked').style.display = 'none';
+        document.getElementById('google-unlinked').style.display = '';
+        if (userData) { userData.google_linked = false; }
+      } else {
+        if (result.status === 403) {
+          document.getElementById('unlink-warning').style.display = '';
+          setFeedback(googleFeedback, 'You must set a password first.', true);
+        } else {
+          setFeedback(googleFeedback, result.data.error || 'Failed to unlink Google.', true);
+        }
+      }
+    })
+    .catch(function() {
+      setFeedback(googleFeedback, 'Network error. Please try again.', true);
+    });
+  });
+
+  // ─── Password field visibility based on has_password ────
+  function updatePasswordFieldVisibility() {
+    if (!userData) return;
+    var title = document.getElementById('password-title');
+    var currentRow = document.getElementById('current-password-row');
+    if (userData.has_password) {
+      title.textContent = 'Change Password';
+      currentRow.style.display = '';
+    } else {
+      title.textContent = 'Set Password';
+      currentRow.style.display = 'none';
+    }
+  }
+
+  function updateUnlinkWarning() {
+    var warning = document.getElementById('unlink-warning');
+    if (userData && !userData.has_password) {
+      warning.style.display = '';
+    } else {
+      warning.style.display = 'none';
+    }
+  }
+
+  // ─── Google section visibility ──────────────────────────
+  function updateGoogleSection() {
+    if (!userData) return;
+    if (userData.google_linked) {
+      document.getElementById('google-linked').style.display = '';
+      document.getElementById('google-unlinked').style.display = 'none';
+      if (userData.avatar_url) {
+        var gAvatar = document.getElementById('google-avatar');
+        gAvatar.src = userData.avatar_url;
+        gAvatar.style.display = '';
+      }
+    } else {
+      document.getElementById('google-linked').style.display = 'none';
+      document.getElementById('google-unlinked').style.display = '';
+    }
+  }
+
+  // ─── Load user profile from /api/auth/me ────────────────
+  fetch('/api/auth/me')
+    .then(function(res) { return res.json(); })
+    .then(function(data) {
+      if (!data || !data.user) return;
+      userData = data.user;
+
+      // Profile fields
+      document.getElementById('display-name').value = userData.display_name || '';
+      document.getElementById('bio').value = userData.bio || '';
+      // Trigger counter
+      bioCounter.textContent = (userData.bio || '').length + ' / 500';
+      document.getElementById('avatar-url').value = userData.avatar_url || '';
+      updateAvatarPreview(userData.avatar_url);
+
+      // Font size
+      setFontSize(userData.reading_font_size || 'default');
+
+      // Email visibility
+      var visValue = userData.email_visibility || 'private';
+      var visRadio = document.querySelector('input[name="email_visibility"][value="' + visValue + '"]');
+      if (visRadio) visRadio.checked = true;
+
+      // Account section
+      document.getElementById('email-value').textContent = userData.email || '—';
+      var visNote = document.getElementById('email-visibility-note');
+      var visLabels = { public: 'visible to everyone', mutual: 'visible to mutuals', private: 'hidden' };
+      visNote.textContent = '(' + (visLabels[visValue] || 'hidden') + ')';
+
+      // Password section
+      updatePasswordFieldVisibility();
+
+      // Google section
+      updateGoogleSection();
+      updateUnlinkWarning();
+    })
+    .catch(function(err) {
+      console.error('Failed to load user profile:', err);
+    });
+
+  // ─── Check URL params for Google redirect feedback ──────
+  (function() {
+    var params = new URLSearchParams(window.location.search);
+    if (params.get('linked') === 'true') {
+      showToast('Google account linked successfully!');
+      // Clean the URL
+      window.history.replaceState({}, document.title, window.location.pathname);
+    }
+    if (params.get('error') === 'google_already_linked') {
+      showToast('That Google account is already linked to another user.', 'error');
+      window.history.replaceState({}, document.title, window.location.pathname);
+    }
+  })();
 </script>
 
 <style>
+  /* ═══════════════════════════════════════════════════════ */
+  /*  Layout & Card                                        */
+  /* ═══════════════════════════════════════════════════════ */
   .settings-page {
     max-width: var(--reading-width, 65ch);
     margin: 0 auto;
     padding: var(--space-4, 16px);
   }
+
   .settings-page h1 {
     color: var(--md-sys-color-on-surface);
     font-size: var(--md-sys-typescale-headline-large-size, 32px);
+    margin-bottom: var(--space-6, 24px);
   }
-  .settings-section {
-    margin-top: var(--space-6, 24px);
+
+  .settings-card {
+    background: var(--md-sys-color-surface-container);
+    border: 1px solid var(--md-sys-color-outline-variant);
+    border-radius: var(--md-sys-shape-corner-large, 16px);
+    padding: var(--space-6, 24px);
+    margin-bottom: var(--space-6, 24px);
   }
-  .settings-section h2 {
+
+  .card-title {
+    color: var(--md-sys-color-on-surface);
+    font-size: var(--md-sys-typescale-title-large-size, 22px);
+    margin: 0 0 var(--space-1, 4px) 0;
+  }
+
+  .card-subtitle {
+    color: var(--md-sys-color-on-surface-variant);
+    font-size: var(--md-sys-typescale-body-medium-size, 14px);
+    margin: 0 0 var(--space-5, 20px) 0;
+  }
+
+  .subsection-title {
     color: var(--md-sys-color-on-surface);
     font-size: var(--md-sys-typescale-title-medium-size, 16px);
-    margin-bottom: var(--space-2, 8px);
+    font-weight: 600;
+    margin: var(--space-4, 16px) 0 var(--space-2, 8px) 0;
+    padding-top: var(--space-3, 12px);
+    border-top: 1px solid var(--md-sys-color-outline-variant);
   }
-  .settings-hint {
-    color: var(--md-sys-color-on-surface-variant);
+
+  .subsection-title:first-of-type {
+    border-top: none;
+    padding-top: 0;
+    margin-top: 0;
+  }
+
+  /* ═══════════════════════════════════════════════════════ */
+  /*  Form elements                                       */
+  /* ═══════════════════════════════════════════════════════ */
+  .form-group {
     margin-bottom: var(--space-4, 16px);
   }
+
+  .form-label {
+    display: block;
+    color: var(--md-sys-color-on-surface);
+    font-size: var(--md-sys-typescale-label-large-size, 14px);
+    font-weight: 500;
+    margin-bottom: var(--space-1, 4px);
+  }
+
+  .form-input,
+  .form-textarea {
+    width: 100%;
+    box-sizing: border-box;
+    background: var(--md-sys-color-surface-container-high);
+    border: 1px solid var(--md-sys-color-outline);
+    border-radius: var(--md-sys-shape-corner-small, 8px);
+    color: var(--md-sys-color-on-surface);
+    font-family: 'Inter', sans-serif;
+    font-size: var(--md-sys-typescale-body-large-size, 16px);
+    padding: var(--space-3, 12px) var(--space-4, 16px);
+    outline: none;
+    transition: border-color 200ms;
+  }
+
+  .form-input:focus,
+  .form-textarea:focus {
+    border-color: var(--md-sys-color-primary);
+  }
+
+  .form-textarea {
+    resize: vertical;
+    min-height: 80px;
+  }
+
+  .form-hint {
+    display: block;
+    color: var(--md-sys-color-on-surface-variant);
+    font-size: var(--md-sys-typescale-body-small-size, 12px);
+    margin-top: var(--space-1, 4px);
+  }
+
+  .form-warning {
+    display: block;
+    color: var(--md-sys-color-error);
+    font-size: var(--md-sys-typescale-body-small-size, 12px);
+    margin-top: var(--space-2, 8px);
+  }
+
+  .counter-warning {
+    color: var(--md-sys-color-error);
+  }
+
+  .static-field {
+    background: var(--md-sys-color-surface-container-high);
+    border: 1px solid var(--md-sys-color-outline-variant);
+    border-radius: var(--md-sys-shape-corner-small, 8px);
+    padding: var(--space-3, 12px) var(--space-4, 16px);
+    color: var(--md-sys-color-on-surface);
+    font-size: var(--md-sys-typescale-body-large-size, 16px);
+  }
+
+  .static-field .form-hint {
+    margin-top: var(--space-1, 4px);
+    font-size: var(--md-sys-typescale-body-small-size, 12px);
+    color: var(--md-sys-color-on-surface-variant);
+  }
+
+  /* ═══════════════════════════════════════════════════════ */
+  /*  Avatar input row                                    */
+  /* ═══════════════════════════════════════════════════════ */
+  .avatar-input-row {
+    display: flex;
+    gap: var(--space-3, 12px);
+    align-items: flex-start;
+  }
+
+  .avatar-input-row .form-input {
+    flex: 1;
+  }
+
+  .avatar-preview {
+    width: 48px;
+    height: 48px;
+    border-radius: 50%;
+    flex-shrink: 0;
+    overflow: hidden;
+    background: var(--md-sys-color-surface-container-highest);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .avatar-preview img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
+
+  .avatar-fallback {
+    color: var(--md-sys-color-on-surface-variant);
+    font-size: 20px;
+    font-weight: 600;
+  }
+
+  /* ═══════════════════════════════════════════════════════ */
+  /*  Segmented control (font size)                       */
+  /* ═══════════════════════════════════════════════════════ */
+  .segmented-control {
+    display: inline-flex;
+    border: 1px solid var(--md-sys-color-outline);
+    border-radius: var(--md-sys-shape-corner-full, 100px);
+    overflow: hidden;
+  }
+
+  .seg-btn {
+    background: transparent;
+    border: none;
+    color: var(--md-sys-color-on-surface);
+    font-family: 'Inter', sans-serif;
+    font-size: var(--md-sys-typescale-label-large-size, 14px);
+    padding: var(--space-2, 8px) var(--space-4, 16px);
+    cursor: pointer;
+    transition: background 200ms, color 200ms;
+    border-right: 1px solid var(--md-sys-color-outline);
+  }
+
+  .seg-btn:last-child {
+    border-right: none;
+  }
+
+  .seg-btn:hover {
+    background: var(--md-sys-color-surface-container-highest);
+  }
+
+  .seg-btn--active {
+    background: var(--md-sys-color-secondary-container);
+    color: var(--md-sys-color-on-secondary-container);
+  }
+
+  .seg-btn--active:hover {
+    background: var(--md-sys-color-secondary-container);
+  }
+
+  /* ═══════════════════════════════════════════════════════ */
+  /*  Radio group (email visibility)                      */
+  /* ═══════════════════════════════════════════════════════ */
+  .radio-group {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2, 8px);
+  }
+
+  .radio-option {
+    display: flex;
+    align-items: flex-start;
+    gap: var(--space-3, 12px);
+    cursor: pointer;
+    padding: var(--space-2, 8px) var(--space-3, 12px);
+    border-radius: var(--md-sys-shape-corner-small, 8px);
+    transition: background 200ms;
+  }
+
+  .radio-option:hover {
+    background: var(--md-sys-color-surface-container-high);
+  }
+
+  .radio-option input[type="radio"] {
+    margin-top: 3px;
+    accent-color: var(--md-sys-color-primary);
+    flex-shrink: 0;
+  }
+
+  .radio-label strong {
+    display: block;
+    color: var(--md-sys-color-on-surface);
+    font-size: var(--md-sys-typescale-body-medium-size, 14px);
+  }
+
+  .radio-desc {
+    display: block;
+    color: var(--md-sys-color-on-surface-variant);
+    font-size: var(--md-sys-typescale-body-small-size, 12px);
+  }
+
+  /* ═══════════════════════════════════════════════════════ */
+  /*  Buttons                                             */
+  /* ═══════════════════════════════════════════════════════ */
+  .form-actions {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3, 12px);
+    margin-top: var(--space-4, 16px);
+  }
+
+  .btn-filled {
+    background: var(--md-sys-color-primary);
+    color: var(--md-sys-color-on-primary);
+    border: none;
+    border-radius: var(--md-sys-shape-corner-full, 100px);
+    font-family: 'Inter', sans-serif;
+    font-size: var(--md-sys-typescale-label-large-size, 14px);
+    font-weight: 500;
+    padding: var(--space-2, 8px) var(--space-5, 20px);
+    cursor: pointer;
+    transition: background 200ms;
+    white-space: nowrap;
+  }
+
+  .btn-filled:hover {
+    background: var(--md-sys-color-primary-container);
+    color: var(--md-sys-color-on-primary-container);
+  }
+
+  .btn-filled:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
+  .btn-outlined {
+    background: transparent;
+    color: var(--md-sys-color-primary);
+    border: 1px solid var(--md-sys-color-outline);
+    border-radius: var(--md-sys-shape-corner-full, 100px);
+    font-family: 'Inter', sans-serif;
+    font-size: var(--md-sys-typescale-label-large-size, 14px);
+    font-weight: 500;
+    padding: var(--space-2, 8px) var(--space-5, 20px);
+    cursor: pointer;
+    transition: background 200ms, border-color 200ms;
+    white-space: nowrap;
+  }
+
+  .btn-outlined:hover {
+    background: var(--md-sys-color-surface-container-highest);
+  }
+
+  .btn-danger {
+    color: var(--md-sys-color-error);
+    border-color: var(--md-sys-color-error);
+  }
+
+  .btn-danger:hover {
+    background: var(--md-sys-color-error-container);
+    border-color: var(--md-sys-color-error);
+  }
+
+  /* ═══════════════════════════════════════════════════════ */
+  /*  Inline feedback                                    */
+  /* ═══════════════════════════════════════════════════════ */
+  .inline-feedback {
+    font-size: var(--md-sys-typescale-body-small-size, 12px);
+    min-height: 1em;
+  }
+
+  .feedback-success {
+    color: var(--md-sys-color-primary);
+  }
+
+  .feedback-error {
+    color: var(--md-sys-color-error);
+  }
+
+  /* ═══════════════════════════════════════════════════════ */
+  /*  Google section                                     */
+  /* ═══════════════════════════════════════════════════════ */
+  .google-status {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3, 12px);
+    margin-bottom: var(--space-2, 8px);
+  }
+
+  .google-badge {
+    font-size: var(--md-sys-typescale-label-large-size, 14px);
+    font-weight: 600;
+    padding: var(--space-1, 4px) var(--space-3, 12px);
+    border-radius: var(--md-sys-shape-corner-full, 100px);
+  }
+
+  .google-badge--linked {
+    background: var(--md-sys-color-primary-container);
+    color: var(--md-sys-color-on-primary-container);
+  }
+
+  .google-avatar {
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    object-fit: cover;
+  }
+
+  /* ═══════════════════════════════════════════════════════ */
+  /*  Theme grid (kept from original)                     */
+  /* ═══════════════════════════════════════════════════════ */
   .theme-grid {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
     gap: var(--space-3, 12px);
+    margin-top: var(--space-3, 12px);
   }
+
   .theme-swatch {
     border: 2px solid var(--md-sys-color-outline-variant);
     border-radius: var(--md-sys-shape-corner-medium, 12px);
@@ -156,25 +947,101 @@ const themesJSON = JSON.stringify(
     gap: var(--space-2, 8px);
     transition: border-color 200ms, box-shadow 200ms;
   }
+
   .theme-swatch:hover {
     border-color: var(--md-sys-color-primary);
   }
+
   .theme-swatch--active {
     border-color: var(--md-sys-color-primary);
     box-shadow: 0 0 0 1px var(--md-sys-color-primary);
   }
+
   .swatch-preview {
     width: 48px;
     height: 48px;
     border-radius: 50%;
     background: var(--swatch-primary, var(--md-sys-color-primary));
   }
+
   .swatch-label {
     color: var(--md-sys-color-on-surface);
     font-size: var(--md-sys-typescale-label-large-size, 14px);
   }
+
   .swatch-check {
     color: var(--md-sys-color-primary);
     font-weight: bold;
+  }
+
+  /* ═══════════════════════════════════════════════════════ */
+  /*  Toast notifications                                */
+  /* ═══════════════════════════════════════════════════════ */
+  #toast-container {
+    position: fixed;
+    bottom: var(--space-6, 24px);
+    right: var(--space-6, 24px);
+    z-index: 9999;
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2, 8px);
+    pointer-events: none;
+  }
+
+  .toast {
+    background: var(--md-sys-color-inverse-surface);
+    color: var(--md-sys-color-inverse-on-surface);
+    padding: var(--space-3, 12px) var(--space-5, 20px);
+    border-radius: var(--md-sys-shape-corner-medium, 12px);
+    font-family: 'Inter', sans-serif;
+    font-size: var(--md-sys-typescale-body-medium-size, 14px);
+    opacity: 0;
+    transform: translateY(8px);
+    transition: opacity 300ms, transform 300ms;
+    pointer-events: auto;
+  }
+
+  .toast--visible {
+    opacity: 1;
+    transform: translateY(0);
+  }
+
+  .toast--error {
+    background: var(--md-sys-color-error-container);
+    color: var(--md-sys-color-on-error-container);
+  }
+
+  /* ═══════════════════════════════════════════════════════ */
+  /*  Responsive                                         */
+  /* ═══════════════════════════════════════════════════════ */
+  @media (max-width: 480px) {
+    .settings-card {
+      padding: var(--space-4, 16px);
+    }
+
+    .segmented-control {
+      flex-wrap: wrap;
+      border-radius: var(--md-sys-shape-corner-small, 8px);
+    }
+
+    .seg-btn {
+      flex: 1 1 auto;
+      text-align: center;
+    }
+
+    .avatar-input-row {
+      flex-direction: column;
+      align-items: stretch;
+    }
+
+    .avatar-preview {
+      align-self: center;
+    }
+
+    #toast-container {
+      left: var(--space-4, 16px);
+      right: var(--space-4, 16px);
+      bottom: var(--space-4, 16px);
+    }
   }
 </style>
