@@ -30,6 +30,9 @@ export interface User {
   google_id?: string | null;
   avatar_url?: string | null;
   display_name?: string | null;
+  bio?: string | null;
+  email_visibility?: string | null;
+  reading_font_size?: string | null;
   invite_code?: string | null;
   created_at: string;
   updated_at: string;
