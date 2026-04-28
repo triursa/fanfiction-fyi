@@ -39,6 +39,13 @@ if (sessionMatch) {
 
 const isOwner = authUser && pseuds.some(p => p.user_id === authUser.id);
 
+// Series membership
+const seriesLinks = await queryAll<any>(
+  db,
+  `SELECT s.id, s.title, sw.position FROM serial_works sw JOIN series s ON s.id = sw.series_id WHERE sw.work_id = ?1 ORDER BY s.title`,
+  workId
+);
+
 // Group tags by type
 const tagsByType: Record<string, string[]> = {};
 for (const t of tags) {
@@ -88,6 +95,14 @@ const commentsJson = JSON.stringify(allComments);
           {work.published_at && <><span>·</span><span>Published {new Date(work.published_at).toLocaleDateString()}</span></>}
         </div>
       </div>
+
+      {seriesLinks.length > 0 && (
+        <div class="work-series">
+          {seriesLinks.map(sl => (
+            <span class="series-link">Part {sl.position} of <a href={`/series/${sl.id}`}>{sl.title}</a></span>
+          ))}
+        </div>
+      )}
 
       {tagsByType.rating && <div class="tag-group"><span class="tag-label">Rating:</span> {tagsByType.rating.map(t => <span class="tag-pill tag-rating">{t}</span>)}</div>}
       {tagsByType.warning && <div class="tag-group"><span class="tag-label">Warnings:</span> {tagsByType.warning.map(t => <span class="tag-pill tag-warning">{t}</span>)}</div>}
@@ -229,6 +244,10 @@ const commentsJson = JSON.stringify(allComments);
   .work-authors a, .pseud-link { color: var(--md-sys-color-primary); }
   .work-summary { font: var(--md-sys-typescale-body-large); color: var(--md-sys-color-on-surface-variant); font-style: italic; margin: var(--space-2) 0; }
   .work-stats { font: var(--md-sys-typescale-body-medium); color: var(--md-sys-color-outline); display: flex; gap: var(--space-2); flex-wrap: wrap; }
+
+  .work-series { display: flex; flex-wrap: wrap; gap: var(--space-2); margin-top: var(--space-2); }
+  .series-link { font: var(--md-sys-typescale-body-medium); color: var(--md-sys-color-on-surface-variant); }
+  .series-link a { color: var(--md-sys-color-primary); }
 
   .tag-group { display: flex; flex-wrap: wrap; gap: var(--space-2); align-items: center; margin: var(--space-1) 0; }
   .tag-label { font: var(--md-sys-typescale-label-large); color: var(--md-sys-color-on-surface-variant); }

@@ -192,3 +192,20 @@ export interface CharacterAppearance {
   added_by?: number | null;
   created_at: string;
 }
+
+export interface Series {
+  id: number;
+  title: string;
+  description?: string | null;
+  creator_pseud_id: number;
+  complete: number; // 0=WIP, 1=complete
+  created_at: string;
+  updated_at: string;
+}
+
+export interface SerialWork {
+  id: number;
+  series_id: number;
+  work_id: number;
+  position: number;
+}

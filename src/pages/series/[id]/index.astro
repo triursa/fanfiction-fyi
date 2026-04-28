@@ -1,0 +1,184 @@
+---
+export const prerender = false;
+import Base from '../../../layouts/Base.astro';
+import { queryFirst, queryAll } from '../../../lib/db';
+import { markdownToHtml } from '../../../lib/markdown';
+
+const seriesId = Number(Astro.params.id);
+if (!seriesId) return Astro.redirect('/series');
+
+const db = Astro.locals.runtime.env.DB as D1Database;
+
+const series = await queryFirst<any>(
+  db,
+  `SELECT s.*, p.name as creator_name, p.id as creator_pseud_id
+   FROM series s JOIN pseuds p ON s.creator_pseud_id = p.id
+   WHERE s.id = ?1`,
+  seriesId
+);
+if (!series) return Astro.redirect('/series');
+
+// Get works in series order
+const works = await queryAll<any>(
+  db,
+  `SELECT w.*, sw.position as series_position
+   FROM serial_works sw
+   JOIN works w ON w.id = sw.work_id
+   WHERE sw.series_id = ?1
+   ORDER BY sw.position`,
+  seriesId
+);
+
+// Enrich each work with tags, pseuds, and kudos
+for (const w of works) {
+  w.tags = await queryAll<any>(db, `SELECT t.name, t.type FROM tags t JOIN taggings tg ON t.id = tg.tag_id WHERE tg.work_id = ?1`, w.id);
+  w.pseuds = await queryAll<any>(db, `SELECT p.name, c.role FROM pseuds p JOIN creatorships c ON p.id = c.pseud_id WHERE c.work_id = ?1`, w.id);
+  w.kudos_count = (await queryFirst<any>(db, `SELECT COUNT(*) as cnt FROM kudos WHERE work_id = ?1`, w.id))?.cnt ?? 0;
+}
+
+// Check auth for edit button
+let isOwner = false;
+const cookie = Astro.request.headers.get('cookie') ?? '';
+const sessionMatch = cookie.match(/session=([a-f0-9]+)/);
+if (sessionMatch) {
+  const session = await queryFirst<any>(db, `SELECT user_id FROM sessions WHERE token = ?1 AND expires_at > datetime('now')`, sessionMatch[1]);
+  if (session) {
+    const pseuds = await queryAll<any>(db, `SELECT id FROM pseuds WHERE user_id = ?1`, session.user_id);
+    isOwner = pseuds.some(p => p.id === series.creator_pseud_id);
+  }
+}
+
+const totalWords = works.reduce((sum: number, w: any) => sum + (w.word_count ?? 0), 0);
+const publishedWorks = works.filter((w: any) => w.published_at !== null);
+---
+
+<Base title={`${series.title} — fanfiction.fyi`}>
+  <article class="series-detail">
+    <header class="series-header">
+      <h1 class="series-title">{series.title}</h1>
+      <div class="series-meta">
+        <span class="series-creator">by <a href={`/pseuds/${series.creator_pseud_id}`} class="pseud-link">{series.creator_name}</a></span>
+        <span>·</span>
+        <span>{series.complete ? 'Complete' : 'Work in Progress'}</span>
+        <span>·</span>
+        <span>{works.length} work{works.length !== 1 ? 's' : ''}</span>
+        {totalWords > 0 && <><span>·</span><span>{totalWords.toLocaleString()} words</span></>}
+        <span>·</span>
+        <span>Updated {new Date(series.updated_at).toLocaleDateString()}</span>
+      </div>
+
+      {series.description && (
+        <div class="series-description" set:html={markdownToHtml(series.description)} />
+      )}
+
+      {isOwner && (
+        <div class="series-owner-actions">
+          <a href={`/series/${series.id}/edit`} class="btn-secondary">Edit Series</a>
+          <button id="delete-series-btn" class="btn-danger" data-series-id={series.id}>Delete Series</button>
+        </div>
+      )}
+    </header>
+
+    {works.length === 0 ? (
+      <div class="empty-state" role="status">
+        <p>No works in this series yet.</p>
+        {isOwner && <a href={`/series/${series.id}/edit`} class="btn-primary">Add Works</a>}
+      </div>
+    ) : (
+      <ol class="series-works-list">
+        {works.map((w: any) => (
+          <li class="series-work-item">
+            <span class="series-position">Part {w.series_position}</span>
+            <div class="series-work-info">
+              <a href={`/works/${w.id}`} class="series-work-link">{w.title}</a>
+              {w.published_at === null && <span class="draft-badge">Draft</span>}
+              <div class="series-work-meta">
+                {w.pseuds.length > 0 && <span>by {w.pseuds.map((p: any) => p.name).join(', ')}</span>}
+                <span>·</span>
+                <span>{w.word_count?.toLocaleString()} words</span>
+                <span>·</span>
+                <span>{w.kudos_count} kudos</span>
+                <span>·</span>
+                <span>{w.complete ? 'Complete' : 'WIP'}</span>
+              </div>
+              {w.tags.filter((t: any) => t.type === 'fandom').length > 0 && (
+                <div class="series-work-fandoms">
+                  {w.tags.filter((t: any) => t.type === 'fandom').map((t: any) => <span class="tag-pill">{t.name}</span>)}
+                </div>
+              )}
+              {w.summary && <p class="series-work-summary">{w.summary.length > 200 ? w.summary.slice(0, 200) + '…' : w.summary}</p>}
+            </div>
+          </li>
+        ))}
+      </ol>
+    )}
+  </article>
+</Base>
+
+<style is:global>
+  @import '../../../styles/theme.css';
+
+  .series-detail { max-width: var(--reading-width); margin: 0 auto; padding: var(--space-6) 0; }
+  .series-title { font: var(--md-sys-typescale-display-small); color: var(--md-sys-color-on-surface); margin: 0 0 var(--space-4); }
+  .series-meta { font: var(--md-sys-typescale-body-medium); color: var(--md-sys-color-outline); display: flex; gap: var(--space-2); flex-wrap: wrap; margin-bottom: var(--space-4); }
+  .series-creator a, .pseud-link { color: var(--md-sys-color-primary); }
+  .series-description {
+    font: var(--md-sys-typescale-body-large); line-height: 1.8; color: var(--md-sys-color-on-surface);
+    background: var(--md-sys-color-surface-container); border-radius: var(--md-sys-shape-corner-medium); padding: var(--space-4); margin: var(--space-4) 0;
+  }
+  .series-description p { margin: var(--space-2) 0; }
+
+  .series-owner-actions { display: flex; gap: var(--space-3); margin-top: var(--space-4); }
+  .btn-danger {
+    font: var(--md-sys-typescale-label-large); color: var(--md-sys-color-on-error); background: var(--md-sys-color-error);
+    border: none; border-radius: var(--md-sys-shape-corner-full); padding: var(--space-3) var(--space-6); cursor: pointer;
+  }
+
+  .empty-state { text-align: center; padding: var(--space-12) 0; }
+  .empty-state p { font: var(--md-sys-typescale-body-large); color: var(--md-sys-color-outline); margin: 0 0 var(--space-4); }
+
+  .series-works-list { list-style: none; padding: 0; display: flex; flex-direction: column; gap: var(--space-3); margin-top: var(--space-6); }
+  .series-work-item {
+    display: flex; gap: var(--space-4); align-items: flex-start;
+    background: var(--md-sys-color-surface-container); border: 1px solid var(--md-sys-color-outline-variant);
+    border-radius: var(--md-sys-shape-corner-large); padding: var(--space-4) var(--space-5);
+  }
+  .series-position {
+    font: var(--md-sys-typescale-label-large); color: var(--md-sys-color-on-secondary-container);
+    background: var(--md-sys-color-secondary-container); padding: var(--space-1) var(--space-3);
+    border-radius: var(--md-sys-shape-corner-full); white-space: nowrap; min-width: fit-content;
+  }
+  .draft-badge {
+    font: var(--md-sys-typescale-label-small); color: var(--md-sys-color-on-error-container);
+    background: var(--md-sys-color-error-container); padding: 2px var(--space-2);
+    border-radius: var(--md-sys-shape-corner-full); margin-left: var(--space-2);
+  }
+  .series-work-info { flex: 1; }
+  .series-work-link { font: var(--md-sys-typescale-title-medium); color: var(--md-sys-color-primary); text-decoration: none; }
+  @media (hover: hover) { .series-work-link:hover { text-decoration: underline; } }
+  .series-work-meta { font: var(--md-sys-typescale-body-small); color: var(--md-sys-color-outline); display: flex; gap: var(--space-2); flex-wrap: wrap; margin-top: var(--space-1); }
+  .series-work-fandoms { display: flex; gap: var(--space-1); flex-wrap: wrap; margin-top: var(--space-1); }
+  .tag-pill { font: var(--md-sys-typescale-body-small); background: var(--md-sys-color-secondary-container); color: var(--md-sys-color-on-secondary-container); padding: 2px var(--space-3); border-radius: var(--md-sys-shape-corner-full); }
+  .series-work-summary { font: var(--md-sys-typescale-body-medium); color: var(--md-sys-color-on-surface-variant); margin: var(--space-1) 0 0; font-style: italic; }
+
+  .btn-primary { font: var(--md-sys-typescale-label-large); color: var(--md-sys-color-on-primary); background: var(--md-sys-color-primary); border: none; border-radius: var(--md-sys-shape-corner-full); padding: var(--space-3) var(--space-6); cursor: pointer; text-decoration: none; display: inline-block; }
+  .btn-secondary { font: var(--md-sys-typescale-label-large); color: var(--md-sys-color-primary); background: transparent; border: 1px solid var(--md-sys-color-outline); border-radius: var(--md-sys-shape-corner-full); padding: var(--space-3) var(--space-6); cursor: pointer; text-decoration: none; }
+</style>
+
+{isOwner && <script define:vars={{ seriesId }}>
+  const deleteBtn = document.getElementById('delete-series-btn');
+  if (deleteBtn) {
+    deleteBtn.addEventListener('click', async () => {
+      if (!confirm('Delete this series? Works will NOT be deleted — only the series grouping is removed.')) return;
+      try {
+        const res = await fetch(`/api/series/${seriesId}`, { method: 'DELETE' });
+        if (res.ok) {
+          window.location.href = '/series';
+        } else {
+          const data = await res.json();
+          alert(data.error || 'Failed to delete series');
+        }
+      } catch { alert('Failed to delete series'); }
+    });
+  }
+</script>}
