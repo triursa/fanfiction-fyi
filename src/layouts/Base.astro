@@ -53,7 +53,7 @@ const title = Astro.props.title ?? 'fanfiction.fyi';
     <title>{title}</title>
     {themeOverrideCSS && <style>{themeOverrideCSS}</style>}
     <!-- Serialized theme colors for client-side localStorage fallback -->
-    <script type="application/json" id="ff-themes-data">{JSON.stringify(Object.fromEntries(Object.entries(THEMES).map(([k, v]) => [k, v.colors])))}</script>
+    <script type="application/json" id="ff-themes-data" set:html={JSON.stringify(Object.fromEntries(Object.entries(THEMES).map(([k, v]) => [k, v.colors])))} />
   </head>
   <body data-theme={userTheme ?? 'obsidian'}>
     <!-- Inline script to apply localStorage theme ASAP, before paint,

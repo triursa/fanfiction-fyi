@@ -59,20 +59,23 @@ const themesJSON = JSON.stringify(
   </article>
 </Base>
 
-<script define:vars={{ themesJSON }}>
-  // Expose theme colors map: { themeName: { '--md-sys-color-...': '#hex', ... } }
-  const themeColors = JSON.parse(themesJSON);
+<!-- Theme colors data injected via set:html (Astro doesn't interpolate inside <script> tags) -->
+<div id="ff-themes-json" style="display:none" set:html={themesJSON} />
+
+<script is:inline>
+  // Read theme colors from the hidden data element
+  var themeColors = JSON.parse(document.getElementById('ff-themes-json').textContent || '{}');
 
   /**
    * Apply a theme's colors as CSS custom properties on :root
    * and persist the choice to localStorage.
    */
   function applyThemeClientSide(themeName) {
-    const colors = themeColors[themeName];
+    var colors = themeColors[themeName];
     if (!colors) return;
-    const root = document.documentElement;
-    for (const [token, value] of Object.entries(colors)) {
-      root.style.setProperty(token, value);
+    var root = document.documentElement;
+    for (var token in colors) {
+      root.style.setProperty(token, colors[token]);
     }
     // Update body data-theme attribute for any selectors that use it
     document.body.dataset.theme = themeName;
@@ -80,28 +83,36 @@ const themesJSON = JSON.stringify(
     try { localStorage.setItem('ff-theme', themeName); } catch (_) {}
   }
 
-  document.querySelectorAll('.theme-swatch').forEach(btn => {
-    btn.addEventListener('click', async () => {
-      const theme = btn.dataset.theme;
+  document.querySelectorAll('.theme-swatch').forEach(function(btn) {
+    btn.addEventListener('click', function() {
+      var theme = btn.dataset.theme;
       if (!theme) return;
-      const res = await fetch('/api/user/theme', {
+      fetch('/api/user/theme', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ theme }),
+        body: JSON.stringify({ theme: theme }),
+      }).then(function(res) {
+        if (res.ok) {
+          // Immediately apply the theme on the client for instant visual feedback
+          applyThemeClientSide(theme);
+
+          // Update active swatch indicator
+          document.querySelectorAll('.theme-swatch').forEach(function(b) {
+            b.classList.remove('theme-swatch--active');
+          });
+          btn.classList.add('theme-swatch--active');
+
+          // Update checkmark
+          document.querySelectorAll('.swatch-check').forEach(function(c) { c.remove(); });
+          var check = document.createElement('span');
+          check.className = 'swatch-check';
+          check.textContent = '\u2713';
+          btn.appendChild(check);
+
+          // Give D1 eventual consistency a moment to settle before reloading
+          setTimeout(function() { location.reload(); }, 800);
+        }
       });
-      if (res.ok) {
-        // Immediately apply the theme on the client for instant visual feedback
-        applyThemeClientSide(theme);
-
-        // Update active swatch indicator
-        document.querySelectorAll('.theme-swatch').forEach(b => {
-          b.classList.remove('theme-swatch--active');
-        });
-        btn.classList.add('theme-swatch--active');
-
-        // Give D1 eventual consistency a moment to settle before reloading
-        setTimeout(() => { location.reload(); }, 800);
-      }
     });
   });
 </script>
