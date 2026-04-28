@@ -104,14 +104,14 @@ import Editor from '../../components/Editor';
         </div>
         <div class="form-field">
           <label>Content</label>
-          <div id="editor-mount" data-placeholder="Start writing your story..."></div>
+          <Editor client:load placeholder="Start writing your story..." />
         </div>
       </fieldset>
 
       <div class="form-field">
         <label for="pseud">Post As</label>
         <select id="pseud" name="pseud_id">
-          <!-- Populated by JS -->
+          <option value="">Loading pseuds…</option>
         </select>
       </div>
 
@@ -262,14 +262,129 @@ import Editor from '../../components/Editor';
 
   .btn-secondary:hover { background: var(--md-sys-color-surface-container-high); }
   .btn-secondary:disabled { opacity: 0.5; cursor: not-allowed; }
+
+  /* TipTap editor styles */
+  .tiptap-wrapper {
+    border: 1px solid var(--md-sys-color-outline-variant);
+    border-radius: var(--md-sys-shape-corner-small);
+    overflow: hidden;
+    transition: border-color var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard);
+  }
+
+  .tiptap-wrapper--focused {
+    border-color: var(--md-sys-color-primary);
+  }
+
+  .tiptap-toolbar {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 2px;
+    padding: var(--space-2) var(--space-3);
+    background: var(--md-sys-color-surface-container);
+    border-bottom: 1px solid var(--md-sys-color-outline-variant);
+  }
+
+  .tiptap-toolbar-btn {
+    font: var(--md-sys-typescale-label-large);
+    color: var(--md-sys-color-on-surface);
+    background: transparent;
+    border: none;
+    border-radius: var(--md-sys-shape-corner-small);
+    padding: var(--space-1) var(--space-2);
+    cursor: pointer;
+    min-width: 28px;
+    text-align: center;
+  }
+
+  .tiptap-toolbar-btn:hover {
+    background: var(--md-sys-color-surface-container-high);
+  }
+
+  .tiptap-toolbar-btn--active {
+    background: var(--md-sys-color-primary-container);
+    color: var(--md-sys-color-on-primary-container);
+  }
+
+  .tiptap-toolbar-btn--secondary {
+    font-size: 0.75rem;
+  }
+
+  .tiptap-toolbar-separator {
+    width: 1px;
+    height: 20px;
+    background: var(--md-sys-color-outline-variant);
+    margin: 0 var(--space-1);
+  }
+
+  .tiptap-toolbar-spacer {
+    flex: 1;
+  }
+
+  .tiptap-editor-area {
+    min-height: 200px;
+    padding: var(--space-3) var(--space-4);
+  }
+
+  .tiptap-editor-area .tiptap {
+    outline: none;
+    min-height: 180px;
+    font: var(--md-sys-typescale-body-large);
+    color: var(--md-sys-color-on-surface);
+    line-height: 1.7;
+  }
+
+  .tiptap-editor-area .tiptap p.is-editor-empty:first-child::before {
+    content: attr(data-placeholder);
+    float: left;
+    color: var(--md-sys-color-on-surface-variant);
+    pointer-events: none;
+    height: 0;
+  }
+
+  .tiptap-editor-area .tiptap h1,
+  .tiptap-editor-area .tiptap h2,
+  .tiptap-editor-area .tiptap h3 {
+    margin: 0.5em 0 0.25em;
+  }
+
+  .tiptap-editor-area .tiptap blockquote {
+    border-left: 3px solid var(--md-sys-color-outline-variant);
+    padding-left: var(--space-3);
+    margin: var(--space-2) 0;
+    color: var(--md-sys-color-on-surface-variant);
+  }
+
+  .tiptap-editor-area .tiptap pre {
+    background: var(--md-sys-color-surface-container-high);
+    border-radius: var(--md-sys-shape-corner-small);
+    padding: var(--space-3);
+    overflow-x: auto;
+  }
+
+  .tiptap-editor-area .tiptap a {
+    color: var(--md-sys-color-primary);
+    text-decoration: underline;
+  }
+
+  .tiptap-footer {
+    display: flex;
+    padding: var(--space-1) var(--space-3);
+    border-top: 1px solid var(--md-sys-color-outline-variant);
+  }
+
+  .tiptap-wordcount {
+    font: var(--md-sys-typescale-body-small);
+    color: var(--md-sys-color-on-surface-variant);
+  }
 </style>
 
 <script define:vars={{}}">
   // Tag autocomplete logic
   const tagInputFields = document.querySelectorAll('.tag-input');
-  const selectedTags: Record<string, number[]> = {};
-  let currentPseudId: number | null = null;
+  const selectedTags: Record<string, { id: number; name: string }[]> = {};
 
+  // Store tags with names for display
   tagInputFields.forEach(input => {
     const el = input as HTMLInputElement;
     const type = el.dataset.tagType!;
@@ -291,8 +406,8 @@ import Editor from '../../components/Editor';
           pill.addEventListener('click', () => {
             const id = Number((pill as HTMLElement).dataset.id);
             const name = (pill as HTMLElement).dataset.name!;
-            if (!selectedTags[type].includes(id)) {
-              selectedTags[type].push(id);
+            if (!selectedTags[type].some(t => t.id === id)) {
+              selectedTags[type].push({ id, name });
               updateSelectedDisplay(type);
             }
             el.value = '';
@@ -305,14 +420,13 @@ import Editor from '../../components/Editor';
 
   function updateSelectedDisplay(type: string) {
     const container = document.getElementById(`${type}-selected`)!;
-    // Tags are stored by ID; we'll reconstruct display on submit
-    container.innerHTML = selectedTags[type].map(id =>
-      `<span class="tag-pill" data-id="${id}" title="Click to remove">Tag #${id} ✕</span>`
+    container.innerHTML = selectedTags[type].map(t =>
+      `<span class="tag-pill" data-id="${t.id}" title="Click to remove">${t.name} ✕</span>`
     ).join('');
     container.querySelectorAll('.tag-pill').forEach(pill => {
       pill.addEventListener('click', () => {
         const id = Number((pill as HTMLElement).dataset.id);
-        selectedTags[type] = selectedTags[type].filter(i => i !== id);
+        selectedTags[type] = selectedTags[type].filter(t => t.id !== id);
         updateSelectedDisplay(type);
       });
     });
@@ -320,20 +434,39 @@ import Editor from '../../components/Editor';
 
   // Load user's pseuds
   (async () => {
+    const select = document.getElementById('pseud') as HTMLSelectElement;
     try {
       const res = await fetch('/api/auth/me');
       if (res.ok) {
         const data = await res.json();
-        const select = document.getElementById('pseud') as HTMLSelectElement;
-        data.pseuds.forEach((p: any) => {
+        select.innerHTML = ''; // clear "Loading…"
+        if (data.pseuds && data.pseuds.length > 0) {
+          data.pseuds.forEach((p: any) => {
+            const opt = document.createElement('option');
+            opt.value = p.id;
+            opt.textContent = p.name;
+            select.appendChild(opt);
+          });
+        } else {
           const opt = document.createElement('option');
-          opt.value = p.id;
-          opt.textContent = p.name;
+          opt.value = '';
+          opt.textContent = 'No pseuds — create one in Settings';
           select.appendChild(opt);
-        });
-        if (data.pseuds.length > 0) currentPseudId = data.pseuds[0].id;
+        }
+      } else {
+        select.innerHTML = '';
+        const opt = document.createElement('option');
+        opt.value = '';
+        opt.textContent = 'Sign in to post';
+        select.appendChild(opt);
       }
-    } catch { /* not logged in — form will fail with 401 */ }
+    } catch {
+      select.innerHTML = '';
+      const opt = document.createElement('option');
+      opt.value = '';
+      opt.textContent = 'Could not load pseuds';
+      select.appendChild(opt);
+    }
   })();
 
   // Form submit
@@ -349,22 +482,23 @@ import Editor from '../../components/Editor';
     const summary = (document.getElementById('summary') as HTMLTextAreaElement).value;
     const notes = (document.getElementById('notes') as HTMLTextAreaElement).value;
     const chapterTitle = (document.getElementById('chapter-title') as HTMLInputElement).value;
-    const pseudId = Number((document.getElementById('pseud') as HTMLSelectElement).value);
+    const pseudSelect = document.getElementById('pseud') as HTMLSelectElement;
+    const pseudId = pseudSelect.value ? Number(pseudSelect.value) : null;
     const rating = (document.getElementById('rating') as HTMLSelectElement).value;
     const category = (document.getElementById('category') as HTMLSelectElement).value;
     const warning = (document.getElementById('warning') as HTMLSelectElement).value;
 
-    // Gather tag IDs (include dropdown tags)
+    // Get markdown content from the editor (exposed as markdown by Editor.tsx)
+    const chapterContent = (window as any).__editorMarkdown || (window as any).__editorContent || '';
+
+    // Gather tag IDs
     const tagIds: number[] = [];
-    Object.values(selectedTags).flat().forEach(id => tagIds.push(id));
-    if (rating) { /* will need to find/resolve the tag ID for this */ }
-    // For simplicity, send tag names and let the API resolve them
-    const tagNames: { type: string; name: string }[] = [];
-    // Gather freeform text tags that were added
-    for (const [type, ids] of Object.entries(selectedTags)) {
-      for (const id of ids) {
-        // We'll need a way to look up tag names — for now, just send IDs
-      }
+    Object.values(selectedTags).flat().forEach((t: any) => tagIds.push(t.id));
+
+    // Validate
+    if (!pseudId) {
+      errorEl.textContent = 'Please select a pseud (alias) to post as. Create one in Settings if you don\'t have one.';
+      return;
     }
 
     try {
@@ -377,9 +511,9 @@ import Editor from '../../components/Editor';
           notes: notes || null,
           pseud_id: pseudId,
           chapter_title: chapterTitle,
-          chapter_content: (window as any).__editorContent || '',
+          chapter_content: chapterContent,
           draft: action === 'draft' ? 1 : 0,
-          tag_ids: Object.values(selectedTags).flat(),
+          tag_ids: tagIds,
           rating: rating || null,
           category: category || null,
           warning: warning || null,
