@@ -720,15 +720,23 @@ const initialTagsJson = JSON.stringify(initialTagState);
     }
   });
 
-  // Work form submit
+  // Work form submit — capture button intent via click, not activeElement
   const form = document.getElementById('edit-work-form') as HTMLFormElement;
   const errorEl = document.getElementById('form-error')!;
+  let submitAction: string = 'save';
+
+  // Track which submit button was clicked (document.activeElement is unreliable)
+  form.querySelectorAll('button[type="submit"]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      submitAction = (btn as HTMLButtonElement).value || 'save';
+    });
+  });
 
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
     errorEl.textContent = '';
 
-    const action = (document.activeElement as HTMLButtonElement)?.value || 'save';
+    const action = submitAction;
     const title = (document.getElementById('title') as HTMLInputElement).value;
     const summary = (document.getElementById('summary') as HTMLTextAreaElement).value;
     const notes = (document.getElementById('notes') as HTMLTextAreaElement).value;

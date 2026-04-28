@@ -474,15 +474,23 @@ const defaultPseudId = pseuds.find(p => p.name === user.display_name)?.id ?? pse
     });
   }
 
-  // Form submit
+  // Form submit — capture button intent via click, not activeElement
   const form = document.getElementById('new-work-form') as HTMLFormElement;
   const errorEl = document.getElementById('form-error')!;
+  let submitAction: string = 'draft';
+
+  // Track which submit button was clicked (document.activeElement is unreliable)
+  form.querySelectorAll('button[type="submit"]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      submitAction = (btn as HTMLButtonElement).value || 'draft';
+    });
+  });
 
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
     errorEl.textContent = '';
 
-    const action = (document.activeElement as HTMLButtonElement)?.value || 'draft';
+    const action = submitAction;
     const title = (document.getElementById('title') as HTMLInputElement).value;
     const summary = (document.getElementById('summary') as HTMLTextAreaElement).value;
     const notes = (document.getElementById('notes') as HTMLTextAreaElement).value;
