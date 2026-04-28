@@ -53,6 +53,9 @@ for (const t of tags) {
   tagsByType[t.type].push(t.name);
 }
 
+// Reading time estimation (230 wpm)
+const readingTimeMinutes = Math.max(1, Math.ceil((work.word_count || 0) / 230));
+
 // Kudos count
 const kudosCount = (await queryFirst<any>(db, `SELECT COUNT(*) as cnt FROM kudos WHERE work_id = ?1`, workId))?.cnt ?? 0;
 
@@ -117,6 +120,8 @@ const commentsJson = JSON.stringify(allComments);
         {work.summary && <p class="work-summary">{work.summary}</p>}
         <div class="work-stats">
           <span>{work.word_count.toLocaleString()} words</span>
+          <span>·</span>
+          <span>~{readingTimeMinutes} min read</span>
           <span>·</span>
           <span>{publishedChapters.length} chapter{publishedChapters.length !== 1 ? 's' : ''}</span>
           <span>·</span>
@@ -210,6 +215,8 @@ const commentsJson = JSON.stringify(allComments);
           ))}
         </div>
       )}
+
+      <a href={`/works/${work.id}/read${chapterId ? `?chapter=${chapterId}` : ''}`} class="btn-secondary">📖 Reading Mode</a>
 
       {work.published_at && (
         <a href={`/api/works/${work.id}/export?format=epub`} class="btn-secondary" download>📥 Export EPUB</a>
