@@ -1,5 +1,6 @@
 ---
 export const prerender = false;
+import Base from '@/layouts/Base.astro';
 import { queryFirst, queryAll } from '@/lib/db';
 import { UserRole, ROLE_LEVEL } from '@/lib/types';
 
@@ -42,39 +43,41 @@ const works = await queryAll<{
 `);
 ---
 
-<h1 class="admin-heading">Content Moderation</h1>
+<Base title="Content Moderation — Admin">
+  <h1 class="admin-heading">Content Moderation</h1>
 
-<h2 class="section-heading">Recent Comments</h2>
-<div class="comments-list">
-  {comments.map(c => (
-    <div class="comment-card" data-comment-id={c.id}>
-      <div class="comment-meta">
-        <span class="comment-author">{c.pseud_name}</span>
-        <span class="comment-work">on <a href={`/works/${c.work_id}`}>{c.work_title}</a></span>
-        <span class="comment-date">{new Date(c.created_at).toLocaleString()}</span>
+  <h2 class="section-heading">Recent Comments</h2>
+  <div class="comments-list">
+    {comments.map(c => (
+      <div class="comment-card" data-comment-id={c.id}>
+        <div class="comment-meta">
+          <span class="comment-author">{c.pseud_name}</span>
+          <span class="comment-work">on <a href={`/works/${c.work_id}`}>{c.work_title}</a></span>
+          <span class="comment-date">{new Date(c.created_at).toLocaleString()}</span>
+        </div>
+        <div class="comment-body">{c.content.length > 300 ? c.content.slice(0, 300) + '…' : c.content}</div>
+        <button class="btn-delete-comment" data-comment-id={c.id}>Delete</button>
       </div>
-      <div class="comment-body">{c.content.length > 300 ? c.content.slice(0, 300) + '…' : c.content}</div>
-      <button class="btn-delete-comment" data-comment-id={c.id}>Delete</button>
-    </div>
-  ))}
-  {comments.length === 0 && <p class="empty-state">No comments found.</p>}
-</div>
+    ))}
+    {comments.length === 0 && <p class="empty-state">No comments found.</p>}
+  </div>
 
-<h2 class="section-heading">Recent Published Works</h2>
-<div class="works-list">
-  {works.map(w => (
-    <div class="work-card">
-      <div class="work-info">
-        <a href={`/works/${w.id}`} class="work-title">{w.title}</a>
-        <span class="work-meta">by {w.author_name} · {w.word_count} words · {new Date(w.published_at).toLocaleDateString()}</span>
+  <h2 class="section-heading">Recent Published Works</h2>
+  <div class="works-list">
+    {works.map(w => (
+      <div class="work-card">
+        <div class="work-info">
+          <a href={`/works/${w.id}`} class="work-title">{w.title}</a>
+          <span class="work-meta">by {w.author_name} &middot; {w.word_count} words &middot; {new Date(w.published_at).toLocaleDateString()}</span>
+        </div>
+        <a href={`/works/${w.id}/edit`} class="btn-edit">Edit</a>
       </div>
-      <a href={`/works/${w.id}/edit`} class="btn-edit">Edit</a>
-    </div>
-  ))}
-  {works.length === 0 && <p class="empty-state">No published works found.</p>}
-</div>
+    ))}
+    {works.length === 0 && <p class="empty-state">No published works found.</p>}
+  </div>
 
-<div id="toast" class="toast hidden"></div>
+  <div id="toast" class="toast hidden"></div>
+</Base>
 
 <script>
   document.querySelectorAll('.btn-delete-comment').forEach(btn => {

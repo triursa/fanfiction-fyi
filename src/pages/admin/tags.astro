@@ -1,5 +1,6 @@
 ---
 export const prerender = false;
+import Base from '@/layouts/Base.astro';
 import { queryFirst, queryAll } from '@/lib/db';
 import { UserRole, ROLE_LEVEL } from '@/lib/types';
 
@@ -29,59 +30,61 @@ const tags = await queryAll<{
 `);
 ---
 
-<h1 class="admin-heading">Tag Management</h1>
+<Base title="Tag Management — Admin">
+  <h1 class="admin-heading">Tag Management</h1>
 
-<h2 class="section-heading">All Tags</h2>
-<div class="table-wrap">
-  <table class="admin-table">
-    <thead>
-      <tr>
-        <th>ID</th>
-        <th>Name</th>
-        <th>Type</th>
-        <th>Works</th>
-      </tr>
-    </thead>
-    <tbody>
-      {tags.map(t => (
+  <h2 class="section-heading">All Tags</h2>
+  <div class="table-wrap">
+    <table class="admin-table">
+      <thead>
         <tr>
-          <td>{t.id}</td>
-          <td>{t.name}</td>
-          <td><span class={`tag-type tag-type-${t.type}`}>{t.type}</span></td>
-          <td>{t.work_count}</td>
+          <th>ID</th>
+          <th>Name</th>
+          <th>Type</th>
+          <th>Works</th>
         </tr>
-      ))}
-    </tbody>
-  </table>
-</div>
-
-<h2 class="section-heading">Merge Tags</h2>
-<div class="merge-form">
-  <p class="merge-hint">Select a source tag and a target tag. All works tagged with the source will be re-tagged with the target. The source tag will be deleted. Duplicate taggings are skipped.</p>
-  <div class="merge-row">
-    <div class="merge-field">
-      <label for="source-tag">Source (will be deleted)</label>
-      <select id="source-tag">
-        <option value="">— Select source tag —</option>
+      </thead>
+      <tbody>
         {tags.map(t => (
-          <option value={t.id}>{t.name} ({t.type}, {t.work_count} works)</option>
+          <tr>
+            <td>{t.id}</td>
+            <td>{t.name}</td>
+            <td><span class={`tag-type tag-type-${t.type}`}>{t.type}</span></td>
+            <td>{t.work_count}</td>
+          </tr>
         ))}
-      </select>
-    </div>
-    <div class="merge-field">
-      <label for="target-tag">Target (will remain)</label>
-      <select id="target-tag">
-        <option value="">— Select target tag —</option>
-        {tags.map(t => (
-          <option value={t.id}>{t.name} ({t.type}, {t.work_count} works)</option>
-        ))}
-      </select>
-    </div>
-    <button id="btn-merge" class="btn-merge">Merge</button>
+      </tbody>
+    </table>
   </div>
-</div>
 
-<div id="toast" class="toast hidden"></div>
+  <h2 class="section-heading">Merge Tags</h2>
+  <div class="merge-form">
+    <p class="merge-hint">Select a source tag and a target tag. All works tagged with the source will be re-tagged with the target. The source tag will be deleted. Duplicate taggings are skipped.</p>
+    <div class="merge-row">
+      <div class="merge-field">
+        <label for="source-tag">Source (will be deleted)</label>
+        <select id="source-tag">
+          <option value="">— Select source tag —</option>
+          {tags.map(t => (
+            <option value={t.id}>{t.name} ({t.type}, {t.work_count} works)</option>
+          ))}
+        </select>
+      </div>
+      <div class="merge-field">
+        <label for="target-tag">Target (will remain)</label>
+        <select id="target-tag">
+          <option value="">— Select target tag —</option>
+          {tags.map(t => (
+            <option value={t.id}>{t.name} ({t.type}, {t.work_count} works)</option>
+          ))}
+        </select>
+      </div>
+      <button id="btn-merge" class="btn-merge">Merge</button>
+    </div>
+  </div>
+
+  <div id="toast" class="toast hidden"></div>
+</Base>
 
 <script>
   document.getElementById('btn-merge')!.addEventListener('click', async () => {

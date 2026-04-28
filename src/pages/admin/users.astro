@@ -1,5 +1,6 @@
 ---
 export const prerender = false;
+import Base from '@/layouts/Base.astro';
 import { queryFirst, queryAll, run } from '@/lib/db';
 import { UserRole, ROLE_LEVEL } from '@/lib/types';
 
@@ -25,58 +26,60 @@ const users = await queryAll<{
 const allRoles: UserRole[] = [UserRole.Admin, UserRole.Mod, UserRole.User];
 ---
 
-<h1 class="admin-heading">User Management</h1>
+<Base title="User Management — Admin">
+  <h1 class="admin-heading">User Management</h1>
 
-<div class="table-wrap">
-  <table class="admin-table">
-    <thead>
-      <tr>
-        <th>ID</th>
-        <th>Email</th>
-        <th>Role</th>
-        <th>Google</th>
-        <th>Banned</th>
-        <th>Created</th>
-        <th>Actions</th>
-      </tr>
-    </thead>
-    <tbody>
-      {users.map(u => (
-        <tr class:row-banned={u.banned === 1}>
-          <td>{u.id}</td>
-          <td>{u.email}</td>
-          <td>
-            {u.role === 'founder' ? (
-              <span class="badge badge-founder">founder</span>
-            ) : (
-              <select class="role-select" data-user-id={u.id} data-current-role={u.role}>
-                {allRoles.map(r => (
-                  <option value={r} selected={u.role === r}>{r}</option>
-                ))}
-              </select>
-            )}
-          </td>
-          <td>{u.google_id ? '✓' : '—'}</td>
-          <td>{u.banned ? 'Yes' : 'No'}</td>
-          <td>{new Date(u.created_at).toLocaleDateString()}</td>
-          <td>
-            {u.role !== 'founder' && (
-              <button
-                class={u.banned ? 'btn-activate' : 'btn-ban'}
-                data-user-id={u.id}
-                data-banned={u.banned}
-              >
-                {u.banned ? 'Activate' : 'Ban'}
-              </button>
-            )}
-          </td>
+  <div class="table-wrap">
+    <table class="admin-table">
+      <thead>
+        <tr>
+          <th>ID</th>
+          <th>Email</th>
+          <th>Role</th>
+          <th>Google</th>
+          <th>Banned</th>
+          <th>Created</th>
+          <th>Actions</th>
         </tr>
-      ))}
-    </tbody>
-  </table>
-</div>
+      </thead>
+      <tbody>
+        {users.map(u => (
+          <tr class:row-banned={u.banned === 1}>
+            <td>{u.id}</td>
+            <td>{u.email}</td>
+            <td>
+              {u.role === 'founder' ? (
+                <span class="badge badge-founder">founder</span>
+              ) : (
+                <select class="role-select" data-user-id={u.id} data-current-role={u.role}>
+                  {allRoles.map(r => (
+                    <option value={r} selected={u.role === r}>{r}</option>
+                  ))}
+                </select>
+              )}
+            </td>
+            <td>{u.google_id ? '✓' : '—'}</td>
+            <td>{u.banned ? 'Yes' : 'No'}</td>
+            <td>{new Date(u.created_at).toLocaleDateString()}</td>
+            <td>
+              {u.role !== 'founder' && (
+                <button
+                  class={u.banned ? 'btn-activate' : 'btn-ban'}
+                  data-user-id={u.id}
+                  data-banned={u.banned}
+                >
+                  {u.banned ? 'Activate' : 'Ban'}
+                </button>
+              )}
+            </td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  </div>
 
-<div id="toast" class="toast hidden"></div>
+  <div id="toast" class="toast hidden"></div>
+</Base>
 
 <script>
   // Role change handler
