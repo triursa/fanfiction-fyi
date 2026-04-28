@@ -12,17 +12,19 @@ export const GET: APIRoute = async ({ params, locals, request }) => {
   const work = await queryFirst<any>(db, `SELECT * FROM works WHERE id = ?1`, workId);
   if (!work) return new Response(JSON.stringify({ error: 'Work not found' }), { status: 404, headers: { 'Content-Type': 'application/json' } });
 
-  const chapters = await queryAll<any>(db, `SELECT id, position, title, draft, word_count, updated_at FROM chapters WHERE work_id = ?1 ORDER BY position`, workId);
-
-  // Filter out draft chapters for unauthenticated requests
   const auth = await getAuth(db, request);
   if (!auth) {
-    const filteredChapters = chapters.filter(c => c.draft === 0 || c.draft === false);
+    const chapters = await queryAll<any>(
+      db,
+      `SELECT id, position, title, draft, word_count, updated_at FROM chapters WHERE work_id = ?1 AND draft = 0 ORDER BY position`,
+      workId
+    );
     const tags = await queryAll<any>(db, `SELECT t.* FROM tags t JOIN taggings tg ON t.id = tg.tag_id WHERE tg.work_id = ?1`, workId);
     const pseuds = await queryAll<any>(db, `SELECT p.*, c.role FROM pseuds p JOIN creatorships c ON p.id = c.pseud_id WHERE c.work_id = ?1`, workId);
-    return new Response(JSON.stringify({ work, chapters: filteredChapters, tags, pseuds }), { headers: { 'Content-Type': 'application/json' } });
+    return new Response(JSON.stringify({ work, chapters, tags, pseuds }), { headers: { 'Content-Type': 'application/json' } });
   }
 
+  const chapters = await queryAll<any>(db, `SELECT id, position, title, draft, word_count, updated_at FROM chapters WHERE work_id = ?1 ORDER BY position`, workId);
   const tags = await queryAll<any>(db, `SELECT t.* FROM tags t JOIN taggings tg ON t.id = tg.tag_id WHERE tg.work_id = ?1`, workId);
   const pseuds = await queryAll<any>(db, `SELECT p.*, c.role FROM pseuds p JOIN creatorships c ON p.id = c.pseud_id WHERE c.work_id = ?1`, workId);
 
