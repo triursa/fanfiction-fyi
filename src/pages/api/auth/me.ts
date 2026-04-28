@@ -3,13 +3,34 @@ export const prerender = false;
 import { getAuth } from '@/lib/auth';
 import type { APIRoute } from 'astro';
 
+/**
+ * GET /api/auth/me — return full authenticated user profile
+ * D1 eventual consistency: changes may take 500-800ms to be visible in subsequent reads
+ */
 export const GET: APIRoute = async ({ request, locals }) => {
   const db = locals.runtime.env.DB as D1Database;
   const auth = await getAuth(db, request);
   if (!auth) {
     return new Response(JSON.stringify({ error: 'Not authenticated' }), { status: 401, headers: { 'Content-Type': 'application/json' } });
   }
-  return new Response(JSON.stringify({ user: { id: auth.user.id, email: auth.user.email, role: auth.user.role }, pseuds: auth.pseuds }), {
+
+  const { user, pseuds } = auth;
+
+  return new Response(JSON.stringify({
+    user: {
+      id: user.id,
+      email: user.email,
+      role: user.role,
+      google_linked: !!user.google_id,
+      avatar_url: user.avatar_url ?? null,
+      display_name: user.display_name ?? null,
+      bio: user.bio ?? '',
+      email_visibility: user.email_visibility ?? 'private',
+      reading_font_size: user.reading_font_size ?? 'default',
+      has_password: !!user.password_hash,
+    },
+    pseuds,
+  }), {
     headers: { 'Content-Type': 'application/json' },
   });
 };
