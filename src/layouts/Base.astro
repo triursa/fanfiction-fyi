@@ -52,8 +52,33 @@ const title = Astro.props.title ?? 'fanfiction.fyi';
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
     <title>{title}</title>
     {themeOverrideCSS && <style>{themeOverrideCSS}</style>}
+    <!-- Serialized theme colors for client-side localStorage fallback -->
+    <script type="application/json" id="ff-themes-data">{JSON.stringify(Object.fromEntries(Object.entries(THEMES).map(([k, v]) => [k, v.colors])))}</script>
   </head>
   <body data-theme={userTheme ?? 'obsidian'}>
+    <!-- Inline script to apply localStorage theme ASAP, before paint,
+         so non-authed pages and fresh navigations respect the user's choice -->
+    <script is:inline>
+    (function() {
+      try {
+        var stored = localStorage.getItem('ff-theme');
+        if (stored && stored !== 'obsidian') {
+          var themesEl = document.getElementById('ff-themes-data');
+          if (themesEl) {
+            var themeColors = JSON.parse(themesEl.textContent || '{}');
+            var colors = themeColors[stored];
+            if (colors) {
+              var root = document.documentElement;
+              for (var token in colors) {
+                root.style.setProperty(token, colors[token]);
+              }
+              document.body.dataset.theme = stored;
+            }
+          }
+        }
+      } catch(e) {}
+    })();
+    </script>
     <header class="app-bar">
       <a href="/" class="app-bar__title">fanfiction.fyi</a>
       <nav class="app-bar__nav">

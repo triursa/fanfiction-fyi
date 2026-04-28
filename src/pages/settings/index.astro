@@ -26,6 +26,13 @@ if (!authed) {
 }
 
 const themeList = Object.values(THEMES);
+
+// Serialize theme colors for client-side use
+const themesJSON = JSON.stringify(
+  Object.fromEntries(
+    Object.entries(THEMES).map(([key, val]) => [key, val.colors])
+  )
+);
 ---
 
 <Base title="Settings — fanfiction.fyi">
@@ -52,10 +59,30 @@ const themeList = Object.values(THEMES);
   </article>
 </Base>
 
-<script>
+<script define:vars={{ themesJSON }}>
+  // Expose theme colors map: { themeName: { '--md-sys-color-...': '#hex', ... } }
+  const themeColors = JSON.parse(themesJSON);
+
+  /**
+   * Apply a theme's colors as CSS custom properties on :root
+   * and persist the choice to localStorage.
+   */
+  function applyThemeClientSide(themeName) {
+    const colors = themeColors[themeName];
+    if (!colors) return;
+    const root = document.documentElement;
+    for (const [token, value] of Object.entries(colors)) {
+      root.style.setProperty(token, value);
+    }
+    // Update body data-theme attribute for any selectors that use it
+    document.body.dataset.theme = themeName;
+    // Persist to localStorage as a fallback for non-authed / SSR-delayed pages
+    try { localStorage.setItem('ff-theme', themeName); } catch (_) {}
+  }
+
   document.querySelectorAll('.theme-swatch').forEach(btn => {
     btn.addEventListener('click', async () => {
-      const theme = (btn as HTMLElement).dataset.theme;
+      const theme = btn.dataset.theme;
       if (!theme) return;
       const res = await fetch('/api/user/theme', {
         method: 'PUT',
@@ -63,7 +90,17 @@ const themeList = Object.values(THEMES);
         body: JSON.stringify({ theme }),
       });
       if (res.ok) {
-        location.reload();
+        // Immediately apply the theme on the client for instant visual feedback
+        applyThemeClientSide(theme);
+
+        // Update active swatch indicator
+        document.querySelectorAll('.theme-swatch').forEach(b => {
+          b.classList.remove('theme-swatch--active');
+        });
+        btn.classList.add('theme-swatch--active');
+
+        // Give D1 eventual consistency a moment to settle before reloading
+        setTimeout(() => { location.reload(); }, 800);
       }
     });
   });
