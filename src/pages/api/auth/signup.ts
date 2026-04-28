@@ -2,9 +2,10 @@ export const prerender = false;
 
 import { queryFirst, run } from '@/lib/db';
 import { hashPassword, createSession, setSessionCookie } from '@/lib/auth';
+import { checkRateLimit, recordFailedAttempt, clearRateLimit } from '@/lib/rate-limit';
 import type { APIRoute } from 'astro';
 
-export const POST: APIRoute = async ({ request, locals }) => {
+export const POST: APIRoute = async ({ request, locals, clientAddress }) => {
   const db = locals.runtime.env.DB as D1Database;
 
   let body: any;
@@ -20,8 +21,24 @@ export const POST: APIRoute = async ({ request, locals }) => {
     return new Response(JSON.stringify({ error: 'Password must be 8–128 characters' }), { status: 400, headers: { 'Content-Type': 'application/json' } });
   }
 
+  // Basic email format validation
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    return new Response(JSON.stringify({ error: 'Invalid email format' }), { status: 400, headers: { 'Content-Type': 'application/json' } });
+  }
+
+  // Rate limit by IP to prevent signup spam
+  const rateLimitKey = (clientAddress || request.headers.get('x-forwarded-for') || 'unknown').split(',')[0].trim();
+  const rateLimit = await checkRateLimit(db, rateLimitKey, 'signup');
+  if (!rateLimit.allowed) {
+    return new Response(JSON.stringify({ error: `Too many signup attempts. Try again in ${rateLimit.retryAfterSeconds}s.`, retryAfter: rateLimit.retryAfterSeconds }), {
+      status: 429,
+      headers: { 'Content-Type': 'application/json', 'Retry-After': String(rateLimit.retryAfterSeconds) },
+    });
+  }
+
   const invite = await queryFirst<{ id: number; used_by: number | null }>(db, `SELECT id, used_by FROM invite_codes WHERE code = ?1`, invite_code);
   if (!invite) {
+    await recordFailedAttempt(db, rateLimitKey, 'signup');
     return new Response(JSON.stringify({ error: 'Invalid invite code' }), { status: 400, headers: { 'Content-Type': 'application/json' } });
   }
   if (invite.used_by !== null) {
@@ -42,6 +59,9 @@ export const POST: APIRoute = async ({ request, locals }) => {
 
   const pseudResult = await run(db, `INSERT INTO pseuds (user_id, name, created_at) VALUES (?1, ?2, datetime('now'))`, userId, display_name);
   const pseudId = pseudResult.meta.last_row_id;
+
+  // Clear rate limit on successful signup
+  await clearRateLimit(db, rateLimitKey, 'signup');
 
   const token = await createSession(db, userId);
 

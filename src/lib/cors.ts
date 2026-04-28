@@ -7,12 +7,17 @@
  */
 
 function getAllowedOrigin(request: Request): string {
-  // Prefer runtime env var (Cloudflare Workers), then process.env, then "*"
+  // Prefer runtime env var (Cloudflare Workers), then process.env.
+  // If neither is set, fall back to the request's Origin header (same-origin
+  // requests) rather than "*" which allows any site to call the API with
+  // user credentials. For production, always set API_ALLOWED_ORIGIN.
   const envOrigin =
     (globalThis as any).API_ALLOWED_ORIGIN ??
-    (typeof process !== "undefined" && process.env?.API_ALLOWED_ORIGIN) ??
-    "*";
-  return envOrigin;
+    (typeof process !== "undefined" && process.env?.API_ALLOWED_ORIGIN);
+  if (envOrigin) return envOrigin;
+  // Mirror the requesting origin (prevents wildcard + credentials)
+  const reqOrigin = request.headers.get("Origin");
+  return reqOrigin || "https://fanfiction.fyi";
 }
 
 /** Returns a HeadersInit object with the required CORS headers. */

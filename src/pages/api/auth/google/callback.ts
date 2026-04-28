@@ -37,7 +37,9 @@ export const GET: APIRoute = async ({ url, locals, request }) => {
 
   // --- Link flow: when state starts with "link_", this is an account linking request ---
   if (state && state.startsWith('link_')) {
-    const linkUserId = parseInt(state.slice(5), 10);
+    // State format: link_{userId} or link_{userId}_{nonce}
+    const stateParts = state.slice(5).split('_');
+    const linkUserId = parseInt(stateParts[0], 10);
     if (isNaN(linkUserId)) {
       return Response.redirect(`${url.origin}/settings?error=invalid_link_state`, 302);
     }

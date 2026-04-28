@@ -33,8 +33,14 @@ export const POST: APIRoute = async ({ locals, request }) => {
 
   const { current_password = '', new_password } = body;
 
-  if (!new_password || new_password.length < 1) {
-    return new Response(JSON.stringify({ error: 'new_password is required' }), {
+  if (!new_password || new_password.length < 8) {
+    return new Response(JSON.stringify({ error: 'Password must be at least 8 characters' }), {
+      status: 400,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+  if (new_password.length > 128) {
+    return new Response(JSON.stringify({ error: 'Password must be 128 characters or fewer' }), {
       status: 400,
       headers: { 'Content-Type': 'application/json' },
     });

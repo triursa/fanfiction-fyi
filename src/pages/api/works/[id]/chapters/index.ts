@@ -28,7 +28,8 @@ export const POST: APIRoute = async ({ params, request, locals }) => {
   const maxPos = await queryFirst<{ max_pos: number }>(db, `SELECT MAX(position) as max_pos FROM chapters WHERE work_id = ?1`, workId);
   const position = (maxPos?.max_pos ?? 0) + 1;
 
-  const result = await run(db, `INSERT INTO chapters (work_id, position, title, content_md, content_html, draft, word_count, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, 1, ?6, datetime('now'), datetime('now'))`, workId, position, title, contentMd, contentHtml, wordCount);
+  const draft = body?.draft !== undefined ? (body.draft ? 1 : 0) : 1;
+  const result = await run(db, `INSERT INTO chapters (work_id, position, title, content_md, content_html, draft, word_count, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, datetime('now'), datetime('now'))`, workId, position, title, contentMd, contentHtml, draft, wordCount);
   const chapter = await queryFirst<any>(db, `SELECT * FROM chapters WHERE id = ?1`, result.meta.last_row_id);
 
   return new Response(JSON.stringify(chapter), { status: 201, headers: { 'Content-Type': 'application/json' } });

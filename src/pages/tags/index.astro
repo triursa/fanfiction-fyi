@@ -261,9 +261,9 @@ const initialTags = await queryAll<{
     }
     tagEmpty.style.display = 'none';
     tagGrid.innerHTML = tags.map(tag => `
-      <a href="/works?tag_id=${tag.id}" class="tag-card" data-type="${tag.type}">
+      <a href="/works?tag_id=${encodeURIComponent(tag.id)}" class="tag-card" data-type="${escapeHtml(tag.type)}">
         <span class="tag-name">${escapeHtml(tag.name)}</span>
-        <span class="tag-badge badge-${tag.type}">${tag.type}</span>
+        <span class="tag-badge badge-${escapeHtml(tag.type)}">${escapeHtml(tag.type)}</span>
         <span class="tag-count">${tag.work_count} ${tag.work_count === 1 ? 'work' : 'works'}</span>
       </a>
     `).join('');

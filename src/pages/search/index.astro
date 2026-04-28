@@ -158,7 +158,7 @@ const tagTypes = ['fandom', 'character', 'relationship', 'freeform', 'rating', '
           for (var i = 0; i < results.length; i++) {
             var w = results[i];
             html += '<article class="result-card">';
-            html += '<a href="/works/' + w.id + '" class="result-card__title">' + escapeHtml(w.title) + '</a>';
+            html += '<a href="/works/' + encodeURIComponent(w.id) + '" class="result-card__title">' + escapeHtml(w.title) + '</a>';
             if (w.pseud_name) html += '<p class="result-card__author">by ' + escapeHtml(w.pseud_name) + '</p>';
             if (w.summary) {
               var truncated = w.summary.length > 250 ? w.summary.slice(0, 250) + '\u2026' : w.summary;
