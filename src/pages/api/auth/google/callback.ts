@@ -5,6 +5,9 @@ import { createSession, setSessionCookie, getAuth } from '@/lib/auth';
 import { jwtVerify, createRemoteJWKSet } from 'jose';
 import type { APIRoute } from 'astro';
 
+// Module-level JWKS — cached and reused across requests to avoid per-request setup cost
+const GOOGLE_JWKS = createRemoteJWKSet(new URL('https://www.googleapis.com/oauth2/v3/certs'));
+
 /**
  * GET /api/auth/google/callback
  * Google OAuth callback — exchanges code for tokens, handles three flows:
@@ -69,8 +72,7 @@ export const GET: APIRoute = async ({ url, locals, request }) => {
     // Verify ID token signature using Google's public JWKS (prevents token forgery)
     let linkPayload: any;
     try {
-      const jwks = createRemoteJWKSet(new URL('https://www.googleapis.com/oauth2/v3/certs'));
-      const { payload: verified } = await jwtVerify(tokens.id_token as string, jwks, {
+      const { payload: verified } = await jwtVerify(tokens.id_token as string, GOOGLE_JWKS, {
         issuer: ['accounts.google.com', 'https://accounts.google.com'],
         audience: clientId,
       });
@@ -85,7 +87,7 @@ export const GET: APIRoute = async ({ url, locals, request }) => {
     const googleName = linkPayload.name as string | undefined;
     const googlePicture = linkPayload.picture as string | undefined;
 
-    if (!googleEmail || !googleSub) {
+    if (!googleEmail || !googleSub || !linkPayload.email_verified) {
       return Response.redirect(`${url.origin}/settings?error=oauth_no_email`, 302);
     }
 
@@ -151,8 +153,7 @@ export const GET: APIRoute = async ({ url, locals, request }) => {
   // Verify ID token signature using Google's public JWKS (prevents token forgery)
   let payload: any;
   try {
-    const jwks = createRemoteJWKSet(new URL('https://www.googleapis.com/oauth2/v3/certs'));
-    const { payload: verified } = await jwtVerify(tokens.id_token as string, jwks, {
+    const { payload: verified } = await jwtVerify(tokens.id_token as string, GOOGLE_JWKS, {
       issuer: ['accounts.google.com', 'https://accounts.google.com'],
       audience: clientId,
     });
@@ -167,7 +168,7 @@ export const GET: APIRoute = async ({ url, locals, request }) => {
   const googleName = payload.name as string | undefined;
   const googlePicture = payload.picture as string | undefined;
 
-  if (!googleEmail) {
+  if (!googleEmail || !payload.email_verified) {
     return Response.redirect(`${url.origin}/login?error=oauth_no_email`, 302);
   }
 
