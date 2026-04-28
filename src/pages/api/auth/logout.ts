@@ -12,8 +12,11 @@ export const POST: APIRoute = async ({ request, locals }) => {
     const token = cookie.match(/session=([a-f0-9]+)/)?.[1];
     if (token) await deleteSession(db, token);
   }
-  return new Response(JSON.stringify({ ok: true }), {
-    status: 200,
-    headers: { 'Content-Type': 'application/json', 'Set-Cookie': clearSessionCookie() },
+  return new Response(null, {
+    status: 303,
+    headers: {
+      'Location': '/',
+      'Set-Cookie': clearSessionCookie(),
+    },
   });
 };
