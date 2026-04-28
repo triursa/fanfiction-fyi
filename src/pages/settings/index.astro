@@ -112,7 +112,35 @@ const themesJSON = JSON.stringify(
     </section>
 
     <!-- ═══════════════════════════════════════════════════ -->
-    <!--  SECTION 2: Account                                -->
+    <!--  SECTION 2: Aliases (Pseuds)                       -->
+    <!-- ═══════════════════════════════════════════════════ -->
+    <section class="settings-card" id="aliases-section">
+      <h2 class="card-title">Aliases</h2>
+      <p class="card-subtitle">Pseuds are pen names you write under. You can have multiple — one for each fandom or persona.</p>
+
+      <div id="pseuds-list" class="pseuds-list">
+        <!-- Populated by JS -->
+      </div>
+
+      <div class="pseud-add-form" id="pseud-add-form">
+        <h3 class="subsection-title" style="margin-top:0; border-top:none; padding-top:0;">Add Alias</h3>
+        <div class="form-group">
+          <label for="new-pseud-name" class="form-label">Name</label>
+          <input type="text" id="new-pseud-name" class="form-input" placeholder="e.g. DarkElfWriter" maxlength="100" />
+        </div>
+        <div class="form-group">
+          <label for="new-pseud-desc" class="form-label">Description <span class="form-hint" style="display:inline">(optional)</span></label>
+          <input type="text" id="new-pseud-desc" class="form-input" placeholder="A short blurb about this pseud" maxlength="200" />
+        </div>
+        <div class="form-actions">
+          <button type="button" class="btn-filled" id="add-pseud-btn">Add Alias</button>
+          <span class="inline-feedback" id="add-pseud-feedback"></span>
+        </div>
+      </div>
+    </section>
+
+    <!-- ═══════════════════════════════════════════════════ -->
+    <!--  SECTION 3: Account                                -->
     <!-- ═══════════════════════════════════════════════════ -->
     <section class="settings-card" id="account-section">
       <h2 class="card-title">Account</h2>
@@ -178,7 +206,7 @@ const themesJSON = JSON.stringify(
     </section>
 
     <!-- ═══════════════════════════════════════════════════ -->
-    <!--  SECTION 3: Theme                                  -->
+    <!--  SECTION 4: Theme                                  -->
     <!-- ═══════════════════════════════════════════════════ -->
     <section class="settings-card">
       <h2 class="card-title">Theme</h2>
@@ -206,6 +234,29 @@ const themesJSON = JSON.stringify(
 
 <!-- Toast notification container -->
 <div id="toast-container"></div>
+
+<!-- ═══════════════════════════════════════════════════════ -->
+<!--  Edit Pseud Modal (hidden by default)                  -->
+<!-- ═══════════════════════════════════════════════════════ -->
+<div class="modal-overlay" id="pseud-edit-modal" style="display:none" role="dialog" aria-modal="true" aria-label="Edit alias">
+  <div class="modal-card">
+    <h3 class="modal-title">Edit Alias</h3>
+    <input type="hidden" id="edit-pseud-id" />
+    <div class="form-group">
+      <label for="edit-pseud-name" class="form-label">Name</label>
+      <input type="text" id="edit-pseud-name" class="form-input" maxlength="100" />
+    </div>
+    <div class="form-group">
+      <label for="edit-pseud-desc" class="form-label">Description <span class="form-hint" style="display:inline">(optional)</span></label>
+      <input type="text" id="edit-pseud-desc" class="form-input" maxlength="200" />
+    </div>
+    <div class="form-actions">
+      <button type="button" class="btn-filled" id="save-pseud-btn">Save</button>
+      <button type="button" class="btn-outlined" id="cancel-pseud-btn">Cancel</button>
+      <span class="inline-feedback" id="edit-pseud-feedback"></span>
+    </div>
+  </div>
+</div>
 
 <script is:inline>
   // ─── User data state ────────────────────────────────────
@@ -238,6 +289,12 @@ const themesJSON = JSON.stringify(
     if (message) {
       setTimeout(function() { el.textContent = ''; el.className = 'inline-feedback'; }, 4000);
     }
+  }
+
+  // ─── Escape HTML for safe innerHTML insertion ─────────────
+  function escapeHtml(str) {
+    if (!str) return '';
+    return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
   }
 
   // ─── Read theme colors from hidden data element ─────────
@@ -524,6 +581,200 @@ const themesJSON = JSON.stringify(
     }
   }
 
+  // ═════════════════════════════════════════════════════════
+  //  PSEUDS / ALIASES MANAGEMENT
+  // ═════════════════════════════════════════════════════════
+  var pseudsList = document.getElementById('pseuds-list');
+  var pseudsData = [];
+
+  function renderPseuds() {
+    if (!pseudsData || pseudsData.length === 0) {
+      pseudsList.innerHTML = '<div class="pseuds-empty" role="status">No aliases yet. Add one below.</div>';
+      return;
+    }
+    var html = '';
+    pseudsData.forEach(function(p) {
+      html += '<div class="pseud-card" data-pseud-id="' + p.id + '">';
+      html += '  <div class="pseud-info">';
+      html += '    <span class="pseud-name">' + escapeHtml(p.name) + '</span>';
+      if (p.description) {
+        html += '    <span class="pseud-desc">' + escapeHtml(p.description) + '</span>';
+      }
+      html += '  </div>';
+      html += '  <div class="pseud-actions">';
+      html += '    <button type="button" class="btn-icon pseud-edit-btn" data-pseud-id="' + p.id + '" title="Edit" aria-label="Edit ' + escapeHtml(p.name) + '">';
+      html += '      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/></svg>';
+      html += '    </button>';
+      html += '    <button type="button" class="btn-icon btn-icon--danger pseud-delete-btn" data-pseud-id="' + p.id + '" data-pseud-name="' + escapeHtml(p.name) + '" title="Delete" aria-label="Delete ' + escapeHtml(p.name) + '">';
+      html += '      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></svg>';
+      html += '    </button>';
+      html += '  </div>';
+      html += '</div>';
+    });
+    pseudsList.innerHTML = html;
+
+    // Bind edit buttons
+    pseudsList.querySelectorAll('.pseud-edit-btn').forEach(function(btn) {
+      btn.addEventListener('click', function() {
+        var pseudId = parseInt(btn.dataset.pseudId, 10);
+        var pseud = pseudsData.find(function(p) { return p.id === pseudId; });
+        if (!pseud) return;
+        openEditModal(pseud);
+      });
+    });
+
+    // Bind delete buttons
+    pseudsList.querySelectorAll('.pseud-delete-btn').forEach(function(btn) {
+      btn.addEventListener('click', function() {
+        var pseudId = parseInt(btn.dataset.pseudId, 10);
+        var pseudName = btn.dataset.pseudName;
+        deletePseud(pseudId, pseudName);
+      });
+    });
+  }
+
+  function loadPseuds() {
+    fetch('/api/pseuds')
+      .then(function(res) { return res.json(); })
+      .then(function(data) {
+        pseudsData = Array.isArray(data) ? data : [];
+        renderPseuds();
+      })
+      .catch(function(err) {
+        console.error('Failed to load pseuds:', err);
+      });
+  }
+
+  // ─── Add new pseud ────────────────────────────────────
+  var addPseudBtn = document.getElementById('add-pseud-btn');
+  var addPseudFeedback = document.getElementById('add-pseud-feedback');
+
+  addPseudBtn.addEventListener('click', function() {
+    var name = document.getElementById('new-pseud-name').value.trim();
+    var desc = document.getElementById('new-pseud-desc').value.trim();
+
+    if (!name) {
+      setFeedback(addPseudFeedback, 'Name is required.', true);
+      return;
+    }
+
+    addPseudBtn.disabled = true;
+    setFeedback(addPseudFeedback, 'Adding…', false);
+
+    fetch('/api/pseuds', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: name, description: desc || null }),
+    })
+    .then(function(res) { return res.json().then(function(data) { return { ok: res.ok, data: data }; }); })
+    .then(function(result) {
+      addPseudBtn.disabled = false;
+      if (result.ok) {
+        document.getElementById('new-pseud-name').value = '';
+        document.getElementById('new-pseud-desc').value = '';
+        setFeedback(addPseudFeedback, 'Alias added!', false);
+        showToast('Alias created!');
+        loadPseuds();
+      } else {
+        setFeedback(addPseudFeedback, result.data.error || 'Failed to add alias.', true);
+      }
+    })
+    .catch(function() {
+      addPseudBtn.disabled = false;
+      setFeedback(addPseudFeedback, 'Network error.', true);
+    });
+  });
+
+  // ─── Edit modal ───────────────────────────────────────
+  var editModal = document.getElementById('pseud-edit-modal');
+  var savePseudBtn = document.getElementById('save-pseud-btn');
+  var cancelPseudBtn = document.getElementById('cancel-pseud-btn');
+  var editPseudFeedback = document.getElementById('edit-pseud-feedback');
+
+  function openEditModal(pseud) {
+    document.getElementById('edit-pseud-id').value = pseud.id;
+    document.getElementById('edit-pseud-name').value = pseud.name || '';
+    document.getElementById('edit-pseud-desc').value = pseud.description || '';
+    editPseudFeedback.textContent = '';
+    editPseudFeedback.className = 'inline-feedback';
+    editModal.style.display = '';
+    document.getElementById('edit-pseud-name').focus();
+  }
+
+  function closeEditModal() {
+    editModal.style.display = 'none';
+  }
+
+  cancelPseudBtn.addEventListener('click', closeEditModal);
+
+  // Close modal on overlay click
+  editModal.addEventListener('click', function(e) {
+    if (e.target === editModal) closeEditModal();
+  });
+
+  // Close modal on Escape
+  document.addEventListener('keydown', function(e) {
+    if (e.key === 'Escape' && editModal.style.display !== 'none') closeEditModal();
+  });
+
+  savePseudBtn.addEventListener('click', function() {
+    var pseudId = document.getElementById('edit-pseud-id').value;
+    var name = document.getElementById('edit-pseud-name').value.trim();
+    var desc = document.getElementById('edit-pseud-desc').value.trim();
+
+    if (!name) {
+      setFeedback(editPseudFeedback, 'Name is required.', true);
+      return;
+    }
+
+    savePseudBtn.disabled = true;
+    setFeedback(editPseudFeedback, 'Saving…', false);
+
+    fetch('/api/pseuds/' + encodeURIComponent(pseudId), {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: name, description: desc || null }),
+    })
+    .then(function(res) { return res.json().then(function(data) { return { ok: res.ok, data: data }; }); })
+    .then(function(result) {
+      savePseudBtn.disabled = false;
+      if (result.ok) {
+        setFeedback(editPseudFeedback, 'Alias updated!', false);
+        showToast('Alias updated!');
+        closeEditModal();
+        loadPseuds();
+      } else {
+        setFeedback(editPseudFeedback, result.data.error || 'Failed to update alias.', true);
+      }
+    })
+    .catch(function() {
+      savePseudBtn.disabled = false;
+      setFeedback(editPseudFeedback, 'Network error.', true);
+    });
+  });
+
+  // ─── Delete pseud ──────────────────────────────────────
+  function deletePseud(pseudId, pseudName) {
+    if (!confirm('Delete alias "' + pseudName + '"? Comments, kudos, bookmarks, and reading progress under this name will also be removed.')) return;
+
+    fetch('/api/pseuds/' + encodeURIComponent(pseudId), {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+    })
+    .then(function(res) { return res.json().then(function(data) { return { ok: res.ok, status: res.status, data: data }; }); })
+    .then(function(result) {
+      if (result.ok) {
+        showToast('Alias deleted.');
+        loadPseuds();
+      } else {
+        showToast(result.data.error || 'Failed to delete alias.', 'error');
+      }
+    })
+    .catch(function() {
+      showToast('Network error.', 'error');
+    });
+  }
+
   // ─── Load user profile from /api/auth/me ────────────────
   fetch('/api/auth/me')
     .then(function(res) { return res.json(); })
@@ -563,6 +814,9 @@ const themesJSON = JSON.stringify(
     .catch(function(err) {
       console.error('Failed to load user profile:', err);
     });
+
+  // ─── Load pseuds ─────────────────────────────────────
+  loadPseuds();
 
   // ─── Check URL params for Google redirect feedback ──────
   (function() {
@@ -928,6 +1182,126 @@ const themesJSON = JSON.stringify(
   }
 
   /* ═══════════════════════════════════════════════════════ */
+  /*  Pseud list & cards                                   */
+  /* ═══════════════════════════════════════════════════════ */
+  .pseuds-list {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2, 8px);
+    margin-bottom: var(--space-5, 20px);
+  }
+
+  .pseuds-empty {
+    color: var(--md-sys-color-on-surface-variant);
+    font-size: var(--md-sys-typescale-body-medium-size, 14px);
+    text-align: center;
+    padding: var(--space-5, 20px);
+    background: var(--md-sys-color-surface-container-high);
+    border-radius: var(--md-sys-shape-corner-small, 8px);
+  }
+
+  .pseud-card {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-3, 12px);
+    padding: var(--space-3, 12px) var(--space-4, 16px);
+    background: var(--md-sys-color-surface-container-high);
+    border: 1px solid var(--md-sys-color-outline-variant);
+    border-radius: var(--md-sys-shape-corner-small, 8px);
+    transition: border-color 200ms;
+  }
+
+  .pseud-card:hover {
+    border-color: var(--md-sys-color-outline);
+  }
+
+  .pseud-info {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+  }
+
+  .pseud-name {
+    color: var(--md-sys-color-on-surface);
+    font-size: var(--md-sys-typescale-body-large-size, 16px);
+    font-weight: 500;
+    word-break: break-word;
+  }
+
+  .pseud-desc {
+    color: var(--md-sys-color-on-surface-variant);
+    font-size: var(--md-sys-typescale-body-small-size, 12px);
+    word-break: break-word;
+  }
+
+  .pseud-actions {
+    display: flex;
+    align-items: center;
+    gap: var(--space-1, 4px);
+    flex-shrink: 0;
+  }
+
+  .btn-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 36px;
+    height: 36px;
+    border: none;
+    border-radius: var(--md-sys-shape-corner-full, 100px);
+    background: transparent;
+    color: var(--md-sys-color-on-surface-variant);
+    cursor: pointer;
+    transition: background 200ms, color 200ms;
+  }
+
+  .btn-icon:hover {
+    background: var(--md-sys-color-surface-container-highest);
+    color: var(--md-sys-color-on-surface);
+  }
+
+  .btn-icon--danger:hover {
+    background: var(--md-sys-color-error-container);
+    color: var(--md-sys-color-error);
+  }
+
+  .pseud-add-form {
+    border-top: 1px solid var(--md-sys-color-outline-variant);
+    padding-top: var(--space-4, 16px);
+  }
+
+  /* ═══════════════════════════════════════════════════════ */
+  /*  Modal                                               */
+  /* ═══════════════════════════════════════════════════════ */
+  .modal-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.5);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 10000;
+    padding: var(--space-4, 16px);
+  }
+
+  .modal-card {
+    background: var(--md-sys-color-surface-container);
+    border: 1px solid var(--md-sys-color-outline-variant);
+    border-radius: var(--md-sys-shape-corner-large, 16px);
+    padding: var(--space-6, 24px);
+    width: 100%;
+    max-width: 420px;
+  }
+
+  .modal-title {
+    color: var(--md-sys-color-on-surface);
+    font-size: var(--md-sys-typescale-title-large-size, 22px);
+    margin: 0 0 var(--space-4, 16px) 0;
+  }
+
+  /* ═══════════════════════════════════════════════════════ */
   /*  Theme grid (kept from original)                     */
   /* ═══════════════════════════════════════════════════════ */
   .theme-grid {
@@ -1038,6 +1412,19 @@ const themesJSON = JSON.stringify(
 
     .avatar-preview {
       align-self: center;
+    }
+
+    .pseud-card {
+      flex-direction: column;
+      align-items: flex-start;
+    }
+
+    .pseud-actions {
+      align-self: flex-end;
+    }
+
+    .modal-card {
+      max-width: 100%;
     }
 
     #toast-container {
