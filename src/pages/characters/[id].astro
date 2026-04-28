@@ -1,0 +1,464 @@
+---
+export const prerender = false;
+import Base from '../../layouts/Base.astro';
+import { queryFirst, queryAll } from '../../lib/db';
+import { markdownToHtml } from '../../lib/markdown';
+
+const id = Number(Astro.params.id);
+if (!id) return Astro.redirect('/characters');
+
+const db = Astro.locals.runtime.env.DB as D1Database;
+
+const character = await queryFirst<{
+  id: number;
+  name: string;
+  fandom: string | null;
+  group_id: number | null;
+  tag_id: number | null;
+  description: string | null;
+  short_desc: string | null;
+  avatar_key: string | null;
+  aliases: string | null;
+  created_by: number | null;
+  created_at: string;
+  updated_at: string;
+}>(db, `SELECT * FROM characters WHERE id = ?1`, id);
+
+if (!character) return Astro.redirect('/characters');
+
+// Group info
+let group = null;
+let groupSiblings: any[] = [];
+if (character.group_id) {
+  group = await queryFirst<any>(db, `SELECT * FROM character_groups WHERE id = ?1`, character.group_id);
+  groupSiblings = await queryAll<any>(
+    db,
+    `SELECT id, name, fandom FROM characters WHERE group_id = ?1 AND id != ?2`,
+    character.group_id, id
+  );
+}
+
+// Appearances
+const appearances = await queryAll<{
+  id: number;
+  character_id: number;
+  work_id: number;
+  role: string;
+  notes: string | null;
+  work_title: string;
+  work_summary: string | null;
+  word_count: number;
+  work_complete: number;
+  published_at: string | null;
+}>(db, `
+  SELECT ca.id, ca.character_id, ca.work_id, ca.role, ca.notes,
+         w.title as work_title, w.summary as work_summary, w.word_count,
+         w.complete as work_complete, w.published_at
+  FROM character_appearances ca
+  JOIN works w ON ca.work_id = w.id
+  WHERE ca.character_id = ?1
+  ORDER BY ca.created_at DESC
+`, id);
+
+const workCount = appearances.length;
+
+// Parse aliases
+let aliases: string[] = [];
+try { aliases = character.aliases ? JSON.parse(character.aliases) : []; } catch {}
+
+// Render description markdown
+const descriptionHtml = character.description ? markdownToHtml(character.description) : '';
+
+// Linked tag
+let linkedTag = null;
+if (character.tag_id) {
+  linkedTag = await queryFirst<any>(db, `SELECT * FROM tags WHERE id = ?1`, character.tag_id);
+}
+
+// Auth check for edit
+const cookie = Astro.request.headers.get('cookie') ?? '';
+const sessionMatch = cookie.match(/session=([a-f0-9]+)/);
+let canEdit = false;
+if (sessionMatch) {
+  const session = await queryFirst<any>(db, `SELECT user_id FROM sessions WHERE token = ?1 AND expires_at > datetime('now')`, sessionMatch[1]);
+  if (session) {
+    const user = await queryFirst<any>(db, `SELECT id, role FROM users WHERE id = ?1`, session.user_id);
+    if (user) {
+      const pseuds = await queryAll<any>(db, `SELECT id FROM pseuds WHERE user_id = ?1`, user.id);
+      const isCreator = character.created_by && pseuds.some(p => p.id === character.created_by);
+      const isPrivileged = ['admin', 'mod', 'founder'].includes(user.role);
+      canEdit = isCreator || isPrivileged;
+    }
+  }
+}
+
+const ROLE_LABELS: Record<string, string> = {
+  protagonist: 'Protagonist',
+  deuteragonist: 'Deuteragonist',
+  antagonist: 'Antagonist',
+  side: 'Side Character',
+  cameo: 'Cameo',
+};
+
+const ROLE_COLORS: Record<string, string> = {
+  protagonist: 'primary',
+  deuteragonist: 'secondary',
+  antagonist: 'error',
+  side: 'surface',
+  cameo: 'outline',
+};
+---
+
+<Base title="{character.name} — Character Library — fanfiction.fyi">
+  <div class="char-profile">
+    <!-- Header -->
+    <div class="char-profile-header">
+      <div class="char-profile-avatar">
+        {character.avatar_key
+          ? <img src={`/storage/${character.avatar_key}`} alt={character.name} />
+          : <div class="char-avatar-lg">{character.name.charAt(0).toUpperCase()}</div>
+        }
+      </div>
+      <div class="char-profile-meta">
+        <h1 class="char-profile-name">{character.name}</h1>
+        {character.fandom && <span class="char-profile-fandom">{character.fandom}</span>}
+        {aliases.length > 0 && (
+          <div class="char-profile-aliases">
+            Also known as: {aliases.map((a, i) => (
+              <span class="alias">{a}{i < aliases.length - 1 ? ', ' : ''}</span>
+            ))}
+          </div>
+        )}
+        {character.short_desc && <p class="char-profile-short">{character.short_desc}</p>}
+        <div class="char-profile-stats">
+          <span class="stat">{workCount} {workCount === 1 ? 'work' : 'works'}</span>
+          {group && <span class="stat">Group: <a href={`/characters?group_id=${group.id}`}>{group.name}</a></span>}
+        </div>
+        {canEdit && <a href={`/characters/${id}/edit`} class="btn-edit">Edit Character</a>}
+        {linkedTag && <a href={`/works?tag_id=${linkedTag.id}`} class="btn-tag-link">View tagged works →</a>}
+      </div>
+    </div>
+
+    <!-- Description (wiki content) -->
+    {descriptionHtml && (
+      <section class="char-profile-section">
+        <h2 class="section-title">About</h2>
+        <div class="char-description prose" set:html={descriptionHtml} />
+      </section>
+    )}
+
+    <!-- Alternate Versions -->
+    {groupSiblings.length > 0 && (
+      <section class="char-profile-section">
+        <h2 class="section-title">Alternate Versions</h2>
+        <div class="alt-versions">
+          {groupSiblings.map(s => (
+            <a href={`/characters/${s.id}`} class="alt-version-card">
+              <span class="alt-name">{s.name}</span>
+              {s.fandom && <span class="alt-fandom">{s.fandom}</span>}
+            </a>
+          ))}
+        </div>
+      </section>
+    )}
+
+    <!-- Appearances -->
+    <section class="char-profile-section">
+      <h2 class="section-title">Appearances ({workCount})</h2>
+      {appearances.length > 0 ? (
+        <div class="appearances-list">
+          {appearances.map(a => (
+            <a href={`/works/${a.work_id}`} class="appearance-card">
+              <div class="appearance-body">
+                <span class="appearance-title">{a.work_title}</span>
+                {a.notes && <span class="appearance-notes">{a.notes}</span>}
+              </div>
+              <span class={`appearance-role role-${ROLE_COLORS[a.role] || 'surface'}`}>
+                {ROLE_LABELS[a.role] || a.role}
+              </span>
+            </a>
+          ))}
+        </div>
+      ) : (
+        <p class="empty-state">This character hasn't been linked to any works yet.</p>
+      )}
+    </section>
+  </div>
+</Base>
+
+<style is:global>
+  @import '../../styles/theme.css';
+
+  .char-profile {
+    padding: var(--space-4) 0;
+  }
+
+  /* ── Header ── */
+  .char-profile-header {
+    display: flex;
+    gap: var(--space-6);
+    margin-bottom: var(--space-8);
+  }
+
+  .char-profile-avatar {
+    flex-shrink: 0;
+    width: 96px;
+    height: 96px;
+    border-radius: var(--md-sys-shape-corner-full);
+    overflow: hidden;
+  }
+
+  .char-profile-avatar img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
+
+  .char-avatar-lg {
+    width: 100%;
+    height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--md-sys-color-secondary-container);
+    color: var(--md-sys-color-on-secondary-container);
+    font: var(--md-sys-typescale-display-small);
+  }
+
+  .char-profile-meta {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+  }
+
+  .char-profile-name {
+    font: var(--md-sys-typescale-headline-large);
+    color: var(--md-sys-color-on-surface);
+    margin: 0;
+  }
+
+  .char-profile-fandom {
+    font: var(--md-sys-typescale-title-medium);
+    color: var(--md-sys-color-primary);
+  }
+
+  .char-profile-aliases {
+    font: var(--md-sys-typescale-body-medium);
+    color: var(--md-sys-color-on-surface-variant);
+  }
+
+  .alias {
+    font-style: italic;
+  }
+
+  .char-profile-short {
+    font: var(--md-sys-typescale-body-large);
+    color: var(--md-sys-color-on-surface-variant);
+    margin: 0;
+  }
+
+  .char-profile-stats {
+    display: flex;
+    gap: var(--space-4);
+    font: var(--md-sys-typescale-body-medium);
+    color: var(--md-sys-color-outline);
+  }
+
+  .char-profile-stats a {
+    color: var(--md-sys-color-primary);
+    text-decoration: none;
+  }
+
+  .char-profile-stats a:hover {
+    text-decoration: underline;
+  }
+
+  .btn-edit, .btn-tag-link {
+    display: inline-block;
+    font: var(--md-sys-typescale-label-large);
+    padding: var(--space-2) var(--space-4);
+    border-radius: var(--md-sys-shape-corner-full);
+    text-decoration: none;
+    cursor: pointer;
+    width: fit-content;
+  }
+
+  .btn-edit {
+    background: var(--md-sys-color-secondary-container);
+    color: var(--md-sys-color-on-secondary-container);
+  }
+
+  .btn-tag-link {
+    background: transparent;
+    color: var(--md-sys-color-primary);
+    border: 1px solid var(--md-sys-color-outline-variant);
+  }
+
+  .btn-tag-link:hover {
+    background: var(--md-sys-color-surface-container-high);
+  }
+
+  /* ── Sections ── */
+  .char-profile-section {
+    margin-bottom: var(--space-8);
+  }
+
+  .section-title {
+    font: var(--md-sys-typescale-title-large);
+    color: var(--md-sys-color-on-surface);
+    margin: 0 0 var(--space-4);
+    padding-bottom: var(--space-2);
+    border-bottom: 1px solid var(--md-sys-color-outline-variant);
+  }
+
+  .char-description.prose {
+    font: var(--md-sys-typescale-body-large);
+    color: var(--md-sys-color-on-surface);
+    line-height: 1.7;
+  }
+
+  .char-description.prose h1, .char-description.prose h2, .char-description.prose h3 {
+    color: var(--md-sys-color-on-surface);
+    margin-top: var(--space-4);
+  }
+
+  .char-description.prose a {
+    color: var(--md-sys-color-primary);
+  }
+
+  /* ── Alternate Versions ── */
+  .alt-versions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-3);
+  }
+
+  .alt-version-card {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    background: var(--md-sys-color-surface-container);
+    border: 1px solid var(--md-sys-color-outline-variant);
+    border-radius: var(--md-sys-shape-corner-medium);
+    padding: var(--space-3) var(--space-4);
+    text-decoration: none;
+    transition: background var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard);
+  }
+
+  .alt-version-card:hover {
+    background: var(--md-sys-color-surface-container-high);
+    text-decoration: none;
+  }
+
+  .alt-name {
+    font: var(--md-sys-typescale-body-large);
+    font-weight: 600;
+    color: var(--md-sys-color-on-surface);
+  }
+
+  .alt-fandom {
+    font: var(--md-sys-typescale-body-small);
+    color: var(--md-sys-color-primary);
+  }
+
+  /* ── Appearances ── */
+  .appearances-list {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+  }
+
+  .appearance-card {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-3);
+    background: var(--md-sys-color-surface-container);
+    border: 1px solid var(--md-sys-color-outline-variant);
+    border-radius: var(--md-sys-shape-corner-medium);
+    padding: var(--space-3) var(--space-4);
+    text-decoration: none;
+    color: var(--md-sys-color-on-surface);
+    transition: background var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard);
+  }
+
+  .appearance-card:hover {
+    background: var(--md-sys-color-surface-container-high);
+    text-decoration: none;
+  }
+
+  .appearance-body {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+  }
+
+  .appearance-title {
+    font: var(--md-sys-typescale-body-large);
+    font-weight: 500;
+    color: var(--md-sys-color-on-surface);
+  }
+
+  .appearance-notes {
+    font: var(--md-sys-typescale-body-small);
+    color: var(--md-sys-color-on-surface-variant);
+  }
+
+  .appearance-role {
+    font: var(--md-sys-typescale-label-small);
+    padding: 2px var(--space-3);
+    border-radius: var(--md-sys-shape-corner-full);
+    white-space: nowrap;
+    flex-shrink: 0;
+    text-transform: capitalize;
+  }
+
+  .role-primary {
+    background: var(--md-sys-color-primary-container);
+    color: var(--md-sys-color-on-primary-container);
+  }
+
+  .role-secondary {
+    background: var(--md-sys-color-secondary-container);
+    color: var(--md-sys-color-on-secondary-container);
+  }
+
+  .role-error {
+    background: var(--md-sys-color-error-container);
+    color: var(--md-sys-color-on-error-container);
+  }
+
+  .role-surface {
+    background: var(--md-sys-color-surface-container-highest);
+    color: var(--md-sys-color-on-surface-variant);
+  }
+
+  .role-outline {
+    background: transparent;
+    color: var(--md-sys-color-outline);
+    border: 1px solid var(--md-sys-color-outline-variant);
+  }
+
+  .empty-state {
+    font: var(--md-sys-typescale-body-large);
+    color: var(--md-sys-color-outline);
+    text-align: center;
+    padding: var(--space-8);
+  }
+
+  /* ── Responsive ── */
+  @media (max-width: 640px) {
+    .char-profile-header {
+      flex-direction: column;
+      align-items: center;
+      text-align: center;
+    }
+    .char-profile-meta {
+      align-items: center;
+    }
+    .char-profile-stats {
+      justify-content: center;
+    }
+  }
+</style>

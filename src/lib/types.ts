@@ -154,3 +154,41 @@ export interface InviteCode {
   created_at: string;
   used_at?: string | null;
 }
+
+// ─── Character Library ────────────────────────────
+
+export type CharacterRole = 'protagonist' | 'deuteragonist' | 'antagonist' | 'side' | 'cameo';
+
+export interface CharacterGroup {
+  id: number;
+  name: string;
+  description?: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface Character {
+  id: number;
+  name: string;
+  fandom?: string | null;
+  group_id?: number | null;
+  tag_id?: number | null;
+  description?: string | null;
+  short_desc?: string | null;
+  avatar_key?: string | null;
+  aliases?: string | null; // JSON array string
+  created_by?: number | null;
+  updated_by?: number | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CharacterAppearance {
+  id: number;
+  character_id: number;
+  work_id: number;
+  role: CharacterRole;
+  notes?: string | null;
+  added_by?: number | null;
+  created_at: string;
+}

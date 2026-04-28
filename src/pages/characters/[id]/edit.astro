@@ -1,0 +1,7 @@
+---
+export const prerender = false;
+// Redirect /characters/[id]/edit → /characters/new?edit=[id]
+// The new page handles both create and edit via the ?edit= query param
+const id = Astro.params.id;
+return Astro.redirect(`/characters/new?edit=${id}`);
+---
