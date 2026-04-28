@@ -14,7 +14,7 @@ export const GET: APIRoute = async ({ url, locals }) => {
   const env = locals.runtime.env;
   const clientId = env.GOOGLE_CLIENT_ID as string;
   const clientSecret = env.GOOGLE_CLIENT_SECRET as string;
-  const founderEmail = (env.FOUNDER_EMAIL as string) || 'kaleb.bays@gmail.com';
+  const founderEmail = (env.FOUNDER_EMAIL as string | undefined)?.trim() || undefined;
 
   const code = url.searchParams.get('code');
   const error = url.searchParams.get('error');
