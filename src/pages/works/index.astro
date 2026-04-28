@@ -22,7 +22,10 @@ for (const w of works) {
     <h1 class="page-title">Works</h1>
 
     {works.length === 0 && (
-      <p class="placeholder-text">No works have been published yet. Be the first to share a story!</p>
+      <div class="empty-state" role="status">
+        <p class="placeholder-text">No works have been published yet.</p>
+        <a href="/works/new" class="empty-state-cta">Post a Work</a>
+      </div>
     )}
 
     <div class="works-grid">
@@ -56,6 +59,18 @@ for (const w of works) {
   .works-listing { max-width: 900px; margin: 0 auto; }
   .page-title { font: var(--md-sys-typescale-headline-medium); color: var(--md-sys-color-on-surface); margin: 0 0 var(--space-6); }
   .placeholder-text { font: var(--md-sys-typescale-body-large); color: var(--md-sys-color-outline); font-style: italic; }
+  .empty-state { text-align: center; padding: var(--space-8) 0; }
+  .empty-state-cta {
+    display: inline-block; margin-top: var(--space-4);
+    font: var(--md-sys-typescale-label-large);
+    color: var(--md-sys-color-on-primary);
+    background: var(--md-sys-color-primary);
+    border-radius: var(--md-sys-shape-corner-full);
+    padding: var(--space-3) var(--space-6);
+    text-decoration: none;
+    transition: background var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard);
+  }
+  .empty-state-cta:hover { background: var(--md-sys-color-primary-container); color: var(--md-sys-color-on-primary-container); text-decoration: none; }
 
   .works-grid { display: flex; flex-direction: column; gap: var(--space-4); }
 

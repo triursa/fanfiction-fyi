@@ -70,17 +70,17 @@ const themesJSON = JSON.stringify(
 
       <div class="form-group">
         <label class="form-label">Reading Font Size</label>
-        <div class="segmented-control" id="font-size-group">
-          <button type="button" class="seg-btn" data-value="small">Small</button>
-          <button type="button" class="seg-btn" data-value="default">Default</button>
-          <button type="button" class="seg-btn" data-value="large">Large</button>
-          <button type="button" class="seg-btn" data-value="xlarge">X-Large</button>
+        <div class="segmented-control" id="font-size-group" role="radiogroup" aria-label="Reading font size">
+          <button type="button" class="seg-btn" data-value="small" role="radio" aria-checked="false">Small</button>
+          <button type="button" class="seg-btn" data-value="default" role="radio" aria-checked="true">Default</button>
+          <button type="button" class="seg-btn" data-value="large" role="radio" aria-checked="false">Large</button>
+          <button type="button" class="seg-btn" data-value="xlarge" role="radio" aria-checked="false">X-Large</button>
         </div>
       </div>
 
       <div class="form-group">
         <label class="form-label">Email Visibility</label>
-        <div class="radio-group" id="email-visibility-group">
+        <div class="radio-group" id="email-visibility-group" role="radiogroup" aria-label="Email visibility">
           <label class="radio-option">
             <input type="radio" name="email_visibility" value="public" />
             <span class="radio-label">
@@ -325,7 +325,9 @@ const themesJSON = JSON.stringify(
   function setFontSize(value) {
     currentFontSize = value;
     fontSizeGroup.querySelectorAll('.seg-btn').forEach(function(b) {
-      b.classList.toggle('seg-btn--active', b.dataset.value === value);
+      const isActive = b.dataset.value === value;
+      b.classList.toggle('seg-btn--active', isActive);
+      b.setAttribute('aria-checked', String(isActive));
     });
   }
 

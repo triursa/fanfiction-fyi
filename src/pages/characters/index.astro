@@ -39,7 +39,7 @@ const fandoms = fandomRows.map(r => r.fandom);
       </div>
 
       <!-- Fandom filter chips -->
-      <div class="filter-chips" id="filter-chips" role="tablist" aria-label="Filter by fandom">
+      <div class="filter-chips" id="filter-chips" role="tablist" aria-label="Filter by fandom" aria-controls="char-grid">
         <button class="chip active" data-fandom="" role="tab" aria-selected="true">All</button>
         {fandoms.map(f => (
           <button class="chip" data-fandom={f} role="tab" aria-selected="false">{f}</button>
@@ -60,7 +60,7 @@ const fandoms = fandomRows.map(r => r.fandom);
     </header>
 
     <!-- Character grid -->
-    <div class="char-grid" id="char-grid">
+    <div class="char-grid" id="char-grid" role="tabpanel" aria-label="Character results">
       {initialCharacters.map(c => (
         <a href={`/characters/${c.id}`} class="char-card" data-fandom={c.fandom || ''}>
           <div class="char-card-avatar">
@@ -80,7 +80,7 @@ const fandoms = fandomRows.map(r => r.fandom);
       ))}
     </div>
 
-    <div class="char-empty" id="char-empty" style="display:none;">
+    <div class="char-empty" id="char-empty" style="display:none;" role="status">
       <p>No characters found matching your filters.</p>
     </div>
   </div>

@@ -32,6 +32,8 @@ function ToolbarButton({ editor, btn }: { editor: Editor; btn: ToolbarBtn }) {
       type="button"
       class={`tiptap-toolbar-btn${active ? ' tiptap-toolbar-btn--active' : ''}`}
       title={btn.title}
+      aria-label={btn.title}
+      aria-pressed={active}
       onClick={() => btn.action(editor)}
     >
       {btn.label}
@@ -225,10 +227,10 @@ export default function TipTapEditor({
 
   return (
     <div class="tiptap-wrapper">
-      <div class="tiptap-toolbar">
+      <div class="tiptap-toolbar" role="toolbar" aria-label="Formatting toolbar">
         {toolbarButtons.map((btn, i) =>
           btn.separator ? (
-            <div key={`sep-${i}`} class="tiptap-toolbar-separator" />
+            <div key={`sep-${i}`} class="tiptap-toolbar-separator" role="separator" aria-orientation="vertical" />
           ) : (
             editor && (
               <ToolbarButton key={`btn-${i}`} editor={editor} btn={btn} />

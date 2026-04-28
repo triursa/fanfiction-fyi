@@ -26,7 +26,7 @@ const initialTags = await queryAll<{
       <h1 class="tags-title">Browse Tags</h1>
 
       <!-- Type filter chips -->
-      <div class="filter-chips" id="filter-chips" role="tablist" aria-label="Filter by tag type">
+      <div class="filter-chips" id="filter-chips" role="tablist" aria-label="Filter by tag type" aria-controls="tag-grid">
         <button class="chip active" data-type="" role="tab" aria-selected="true">All</button>
         <button class="chip" data-type="fandom" role="tab" aria-selected="false">Fandom</button>
         <button class="chip" data-type="character" role="tab" aria-selected="false">Character</button>
@@ -51,7 +51,7 @@ const initialTags = await queryAll<{
     </header>
 
     <!-- Tag grid (server-rendered initial, then client-updated) -->
-    <div class="tag-grid" id="tag-grid">
+    <div class="tag-grid" id="tag-grid" role="tabpanel" aria-label="Tag results">
       {initialTags.map(tag => (
         <a href={`/works?tag_id=${tag.id}`} class="tag-card" data-type={tag.type}>
           <span class="tag-name">{tag.name}</span>
@@ -61,7 +61,7 @@ const initialTags = await queryAll<{
       ))}
     </div>
 
-    <div class="tag-empty" id="tag-empty" style="display:none;">
+    <div class="tag-empty" id="tag-empty" style="display:none;" role="status">
       <p>No tags found matching your filters.</p>
     </div>
   </div>
