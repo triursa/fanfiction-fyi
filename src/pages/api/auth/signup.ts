@@ -52,7 +52,9 @@ export const POST: APIRoute = async ({ request, locals, clientAddress }) => {
 
   const passwordHash = await hashPassword(password);
 
-  const userResult = await run(db, `INSERT INTO users (email, password_hash, invite_code, created_at, updated_at) VALUES (?1, ?2, ?3, datetime('now'), datetime('now'))`, email, passwordHash, invite_code);
+  // New invite-code users require approval (approved = 0)
+  // Founder can pre-approve via admin panel after signup
+  const userResult = await run(db, `INSERT INTO users (email, password_hash, invite_code, approved, created_at, updated_at) VALUES (?1, ?2, ?3, 0, datetime('now'), datetime('now'))`, email, passwordHash, invite_code);
   const userId = userResult.meta.last_row_id;
 
   await run(db, `UPDATE invite_codes SET used_by = ?1, used_at = datetime('now') WHERE id = ?2`, userId, invite.id);
@@ -65,7 +67,7 @@ export const POST: APIRoute = async ({ request, locals, clientAddress }) => {
 
   const token = await createSession(db, userId);
 
-  return new Response(JSON.stringify({ id: userId, email, pseud_id: pseudId }), {
+  return new Response(JSON.stringify({ id: userId, email, pseud_id: pseudId, approvalStatus: 'pending' }), {
     status: 201,
     headers: { 'Content-Type': 'application/json', 'Set-Cookie': setSessionCookie(token) },
   });

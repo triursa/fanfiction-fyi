@@ -26,6 +26,8 @@ export interface User {
   id: number;
   email: string;
   role: UserRole;
+  approved: number; // 0=pending approval, 1=approved
+  banned: number;   // 0=active, 1=banned
   password_hash?: string | null;
   google_id?: string | null;
   avatar_url?: string | null;

@@ -175,19 +175,27 @@ export const GET: APIRoute = async ({ url, locals, request }) => {
   }
 
   // Determine role — founder for specific email (configurable via FOUNDER_EMAIL env var)
-  const role = googleEmail === founderEmail ? 'founder' : 'user';
+  const isFounder = googleEmail === founderEmail;
+  const role = isFounder ? 'founder' : 'user';
 
-  // Upsert user
-  const existingUser = await queryFirst<{ id: number; role: string }>(
+  // Upsert user — also fetch approved/banned status for login gating
+  const existingUser = await queryFirst<{ id: number; role: string; approved: number; banned: number }>(
     db,
-    `SELECT id, role FROM users WHERE email = ?1`,
+    `SELECT id, role, approved, banned FROM users WHERE email = ?1`,
     googleEmail
   );
 
   let userId: number;
+  let redirectPath: string;
 
   if (existingUser) {
     userId = existingUser.id;
+
+    // Banned users cannot log in
+    if (existingUser.banned) {
+      return Response.redirect(`${url.origin}/login?error=banned`, 302);
+    }
+
     // Update Google fields on existing user (but never downgrade role)
     await run(
       db,
@@ -199,13 +207,18 @@ export const GET: APIRoute = async ({ url, locals, request }) => {
     if (role === 'founder' && existingUser.role !== 'founder') {
       await run(db, `UPDATE users SET role = 'founder', updated_at = datetime('now') WHERE id = ?1`, userId);
     }
+
+    // Unapproved users go to pending-approval page
+    redirectPath = existingUser.approved ? '/' : '/pending-approval';
   } else {
-    // Create new OAuth user (no password, no invite code needed for Google signup)
+    // Create new OAuth user — new users require approval (approved = 0)
+    // Exception: founder is auto-approved
+    const approved = isFounder ? 1 : 0;
     const result = await run(
       db,
-      `INSERT INTO users (email, role, google_id, avatar_url, display_name, created_at, updated_at)
-       VALUES (?1, ?2, ?3, ?4, ?5, datetime('now'), datetime('now'))`,
-      googleEmail, role, googleSub, googlePicture ?? null, googleName ?? null
+      `INSERT INTO users (email, role, google_id, avatar_url, display_name, approved, created_at, updated_at)
+       VALUES (?1, ?2, ?3, ?4, ?5, ?6, datetime('now'), datetime('now'))`,
+      googleEmail, role, googleSub, googlePicture ?? null, googleName ?? null, approved
     );
     userId = result.meta.last_row_id;
 
@@ -216,16 +229,19 @@ export const GET: APIRoute = async ({ url, locals, request }) => {
       `INSERT INTO pseuds (user_id, name, created_at) VALUES (?1, ?2, datetime('now'))`,
       userId, pseudName
     );
+
+    // New users go to pending-approval unless they're the founder
+    redirectPath = isFounder ? '/' : '/pending-approval';
   }
 
   // Create session
   const token = await createSession(db, userId);
 
-  // Redirect to home with session cookie
+  // Redirect to appropriate page with session cookie
   return new Response(null, {
     status: 302,
     headers: {
-      Location: '/',
+      Location: redirectPath,
       'Set-Cookie': setSessionCookie(token),
     },
   });

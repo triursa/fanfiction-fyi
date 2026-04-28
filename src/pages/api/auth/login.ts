@@ -48,11 +48,20 @@ export const POST: APIRoute = async ({ request, locals, clientAddress }) => {
   // Clear rate limit on successful login
   await clearRateLimit(db, email.toLowerCase(), 'login');
 
+  // Banned users cannot log in
+  if (user.banned) {
+    return new Response(JSON.stringify({ error: 'banned' }), { status: 403, headers: { 'Content-Type': 'application/json' } });
+  }
+
+  // Unapproved users can log in but are redirected to pending-approval
+  // Return a special flag so the frontend knows where to send them
+  const approvalStatus = user.approved ? 'approved' : 'pending';
+
   const token = await createSession(db, user.id);
 
   const pseuds = await queryAll<any>(db, `SELECT * FROM pseuds WHERE user_id = ?1`, user.id);
 
-  return new Response(JSON.stringify({ user: { id: user.id, email: user.email, role: user.role }, pseuds }), {
+  return new Response(JSON.stringify({ user: { id: user.id, email: user.email, role: user.role, approved: user.approved }, pseuds, approvalStatus }), {
     status: 200,
     headers: { 'Content-Type': 'application/json', 'Set-Cookie': setSessionCookie(token) },
   });

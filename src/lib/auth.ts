@@ -130,6 +130,19 @@ export async function requireAuth(
   return auth;
 }
 
+// Check if a user is approved (not banned, and approved = 1)
+// Returns: null if unauthenticated, { forbidden: 'banned' } if banned,
+//   { forbidden: 'unapproved' } if not yet approved, or the auth info if OK
+export function checkApproved(auth: { user: User; pseuds: Pseud[] } | null):
+  | { user: User; pseuds: Pseud[] }
+  | { forbidden: 'banned' | 'unapproved' }
+  | null {
+  if (!auth) return null;
+  if (auth.user.banned) return { forbidden: 'banned' };
+  if (!auth.user.approved) return { forbidden: 'unapproved' };
+  return auth;
+}
+
 // Require a minimum role level (founder > admin > mod > user)
 // Returns null if unauthenticated, { forbidden: true } if role insufficient, or auth info if OK
 export async function requireRole(

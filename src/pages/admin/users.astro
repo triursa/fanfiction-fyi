@@ -20,8 +20,8 @@ const userLevel = ROLE_LEVEL[currentUser.role as UserRole] ?? 0;
 if (userLevel < ROLE_LEVEL[UserRole.Admin]) return Astro.redirect('/');
 
 const users = await queryAll<{
-  id: number; email: string; role: string; created_at: string; google_id: string | null; banned: number;
-}>(db, `SELECT id, email, role, created_at, google_id, banned FROM users ORDER BY id`);
+  id: number; email: string; role: string; created_at: string; google_id: string | null; banned: number; approved: number;
+}>(db, `SELECT id, email, role, created_at, google_id, banned, approved FROM users ORDER BY CASE WHEN approved = 0 THEN 0 ELSE 1 END, id`);
 
 const allRoles: UserRole[] = [UserRole.Admin, UserRole.Mod, UserRole.User];
 ---
@@ -37,14 +37,14 @@ const allRoles: UserRole[] = [UserRole.Admin, UserRole.Mod, UserRole.User];
           <th>Email</th>
           <th>Role</th>
           <th>Google</th>
-          <th>Banned</th>
+          <th>Status</th>
           <th>Created</th>
           <th>Actions</th>
         </tr>
       </thead>
       <tbody>
         {users.map(u => (
-          <tr class:row-banned={u.banned === 1}>
+          <tr class:row-banned={u.banned === 1} class:row-pending={u.approved === 0 && u.banned === 0}>
             <td>{u.id}</td>
             <td>{u.email}</td>
             <td>
@@ -59,17 +59,45 @@ const allRoles: UserRole[] = [UserRole.Admin, UserRole.Mod, UserRole.User];
               )}
             </td>
             <td>{u.google_id ? '✓' : '—'}</td>
-            <td>{u.banned ? 'Yes' : 'No'}</td>
-            <td>{new Date(u.created_at).toLocaleDateString()}</td>
             <td>
+              {u.banned ? (
+                <span class="badge badge-banned">Banned</span>
+              ) : u.approved ? (
+                <span class="badge badge-approved">Approved</span>
+              ) : (
+                <span class="badge badge-pending">Pending</span>
+              )}
+            </td>
+            <td>{new Date(u.created_at).toLocaleDateString()}</td>
+            <td class="actions-cell">
               {u.role !== 'founder' && (
-                <button
-                  class={u.banned ? 'btn-activate' : 'btn-ban'}
-                  data-user-id={u.id}
-                  data-banned={u.banned}
-                >
-                  {u.banned ? 'Activate' : 'Ban'}
-                </button>
+                <>
+                  {u.approved === 0 && !u.banned && (
+                    <button
+                      class="btn-approve"
+                      data-user-id={u.id}
+                      data-approved="0"
+                    >
+                      Approve
+                    </button>
+                  )}
+                  {u.approved === 1 && !u.banned && (
+                    <button
+                      class="btn-reject"
+                      data-user-id={u.id}
+                      data-approved="1"
+                    >
+                      Revoke
+                    </button>
+                  )}
+                  <button
+                    class={u.banned ? 'btn-activate' : 'btn-ban'}
+                    data-user-id={u.id}
+                    data-banned={u.banned}
+                  >
+                    {u.banned ? 'Unban' : 'Ban'}
+                  </button>
+                </>
               )}
             </td>
           </tr>
@@ -112,7 +140,7 @@ const allRoles: UserRole[] = [UserRole.Admin, UserRole.Mod, UserRole.User];
   // Ban/activate handler
   document.querySelectorAll('.btn-ban, .btn-activate').forEach(btn => {
     btn.addEventListener('click', async (e) => {
-      const button = e.target;
+      const button = e.target as HTMLButtonElement;
       const userId = button.dataset.userId;
       const currentlyBanned = button.dataset.banned === '1';
       const newBanned = currentlyBanned ? 0 : 1;
@@ -126,12 +154,34 @@ const allRoles: UserRole[] = [UserRole.Admin, UserRole.Mod, UserRole.User];
           const err = await res.json();
           showToast(err.error || 'Failed to update status', true);
         } else {
-          button.dataset.banned = String(newBanned);
-          button.textContent = newBanned ? 'Activate' : 'Ban';
-          button.className = newBanned ? 'btn-activate' : 'btn-ban';
-          button.closest('tr').classList.toggle('row-banned', !!newBanned);
-          button.closest('tr').querySelector('td:nth-child(5)').textContent = newBanned ? 'Yes' : 'No';
-          showToast(newBanned ? 'User banned' : 'User activated');
+          // Reload to reflect all status changes
+          window.location.reload();
+        }
+      } catch {
+        showToast('Network error', true);
+      }
+    });
+  });
+
+  // Approve/revoke handler
+  document.querySelectorAll('.btn-approve, .btn-reject').forEach(btn => {
+    btn.addEventListener('click', async (e) => {
+      const button = e.target as HTMLButtonElement;
+      const userId = button.dataset.userId;
+      const currentlyApproved = button.dataset.approved === '1';
+      const newApproved = currentlyApproved ? 0 : 1;
+      try {
+        const res = await fetch(`/api/admin/users/${userId}/role`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ approved: newApproved }),
+        });
+        if (!res.ok) {
+          const err = await res.json();
+          showToast(err.error || 'Failed to update approval', true);
+        } else {
+          // Reload to reflect all status changes
+          window.location.reload();
         }
       } catch {
         showToast('Network error', true);
@@ -184,6 +234,10 @@ const allRoles: UserRole[] = [UserRole.Admin, UserRole.Mod, UserRole.User];
     background: rgba(255, 100, 100, 0.1);
   }
 
+  .row-pending {
+    background: rgba(255, 200, 50, 0.08);
+  }
+
   .badge {
     display: inline-block;
     padding: 2px 8px;
@@ -196,6 +250,21 @@ const allRoles: UserRole[] = [UserRole.Admin, UserRole.Mod, UserRole.User];
     color: var(--md-sys-color-on-primary-container);
   }
 
+  .badge-approved {
+    background: rgba(52, 168, 83, 0.15);
+    color: #1b7a30;
+  }
+
+  .badge-pending {
+    background: rgba(255, 200, 50, 0.2);
+    color: #8a6d00;
+  }
+
+  .badge-banned {
+    background: var(--md-sys-color-error-container);
+    color: var(--md-sys-color-on-error-container);
+  }
+
   .role-select {
     background: var(--md-sys-color-surface-container-high);
     color: var(--md-sys-color-on-surface);
@@ -206,13 +275,19 @@ const allRoles: UserRole[] = [UserRole.Admin, UserRole.Mod, UserRole.User];
     cursor: pointer;
   }
 
-  .btn-ban, .btn-activate {
+  .btn-ban, .btn-activate, .btn-approve, .btn-reject {
     border: none;
     border-radius: var(--md-sys-shape-corner-small);
     padding: var(--space-1) var(--space-3);
     font: var(--md-sys-typescale-label-large);
     cursor: pointer;
     transition: background var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard);
+  }
+
+  .actions-cell {
+    display: flex;
+    gap: var(--space-2);
+    align-items: center;
   }
 
   .btn-ban {
@@ -233,6 +308,24 @@ const allRoles: UserRole[] = [UserRole.Admin, UserRole.Mod, UserRole.User];
   .btn-activate:hover {
     background: var(--md-sys-color-primary);
     color: var(--md-sys-color-on-primary);
+  }
+
+  .btn-approve {
+    background: rgba(52, 168, 83, 0.15);
+    color: #1b7a30;
+  }
+
+  .btn-approve:hover {
+    background: rgba(52, 168, 83, 0.3);
+  }
+
+  .btn-reject {
+    background: rgba(255, 152, 0, 0.15);
+    color: #8a6d00;
+  }
+
+  .btn-reject:hover {
+    background: rgba(255, 152, 0, 0.3);
   }
 
   .toast {

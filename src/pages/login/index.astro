@@ -180,6 +180,7 @@ import Base from '../../layouts/Base.astro';
       oauth_no_code: 'Google OAuth failed — no authorization code',
       oauth_token_failed: 'Google authentication failed',
       oauth_no_email: 'Google account has no email',
+      banned: 'This account has been suspended',
     };
     errorEl.textContent = messages[oauthError] || 'Google sign-in failed';
   }
@@ -200,10 +201,19 @@ import Base from '../../layouts/Base.astro';
         }),
       });
       if (res.ok) {
-        window.location.href = '/';
+        const data = await res.json();
+        if (data.approvalStatus === 'pending') {
+          window.location.href = '/pending-approval';
+        } else {
+          window.location.href = '/';
+        }
       } else {
         const data = await res.json();
-        errorEl.textContent = data.error || 'Sign in failed';
+        if (data.error === 'banned') {
+          errorEl.textContent = 'This account has been suspended';
+        } else {
+          errorEl.textContent = data.error || 'Sign in failed';
+        }
       }
     } catch {
       errorEl.textContent = 'Network error';

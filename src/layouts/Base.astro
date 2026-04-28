@@ -18,7 +18,7 @@ if (sessionMatch) {
   const db = Astro.locals.runtime.env.DB as D1Database;
   const session = await queryFirst<any>(db, `SELECT user_id FROM sessions WHERE token = ?1 AND expires_at > datetime('now')`, sessionMatch[1]);
   if (session) {
-    user = await queryFirst<any>(db, `SELECT id, email, role, theme FROM users WHERE id = ?1`, session.user_id);
+    user = await queryFirst<any>(db, `SELECT id, email, role, theme, approved, banned FROM users WHERE id = ?1`, session.user_id);
     if (user) {
       pseuds = await queryAll<any>(db, `SELECT id, name FROM pseuds WHERE user_id = ?1 ORDER BY id`, user.id);
       const userLevel = ROLE_LEVEL[user.role as UserRole] ?? 0;

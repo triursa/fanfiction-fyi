@@ -57,5 +57,20 @@ export const PUT: APIRoute = async ({ params, request, locals }) => {
     return new Response(JSON.stringify({ ok: true, banned }), { headers: { 'Content-Type': 'application/json' } });
   }
 
-  return new Response(JSON.stringify({ error: 'No action specified. Send {role} or {banned}' }), { status: 400, headers: { 'Content-Type': 'application/json' } });
+  // Handle approve/reject toggle
+  if (body.approved !== undefined) {
+    const approved = body.approved ? 1 : 0;
+    const targetUser = await queryFirst<{ id: number; role: string }>(db, `SELECT id, role FROM users WHERE id = ?1`, userId);
+    if (!targetUser) {
+      return new Response(JSON.stringify({ error: 'User not found' }), { status: 404, headers: { 'Content-Type': 'application/json' } });
+    }
+    if (targetUser.role === UserRole.Founder) {
+      return new Response(JSON.stringify({ error: 'Cannot modify founder approval' }), { status: 403, headers: { 'Content-Type': 'application/json' } });
+    }
+
+    await run(db, `UPDATE users SET approved = ?1, updated_at = datetime('now') WHERE id = ?2`, approved, userId);
+    return new Response(JSON.stringify({ ok: true, approved }), { headers: { 'Content-Type': 'application/json' } });
+  }
+
+  return new Response(JSON.stringify({ error: 'No action specified. Send {role}, {banned}, or {approved}' }), { status: 400, headers: { 'Content-Type': 'application/json' } });
 };
