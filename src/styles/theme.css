@@ -120,14 +120,19 @@ html {
 body {
   margin: 0;
   min-height: 100vh;
+  overscroll-behavior: none;
+  padding-left: env(safe-area-inset-left);
+  padding-right: env(safe-area-inset-right);
 }
 
 a {
   color: var(--md-sys-color-primary);
   text-decoration: none;
 }
-a:hover {
-  text-decoration: underline;
+@media (hover: hover) {
+  a:hover {
+    text-decoration: underline;
+  }
 }
 
 /* ── Scrollbar ── */
@@ -165,5 +170,33 @@ a:hover {
   *, *::before, *::after {
     transition-duration: 0.01ms !important;
     animation-duration: 0.01ms !important;
+  }
+}
+
+/* ── Mobile / Responsive ── */
+body {
+  overscroll-behavior: none; /* Prevent pull-to-refresh on mobile */
+  padding-left: env(safe-area-inset-left);
+  padding-right: env(safe-area-inset-right);
+  padding-bottom: env(safe-area-inset-bottom);
+}
+
+/* Guard hover states on touch devices — prevent sticky :hover */
+@media (hover: none) {
+  .home-card:hover,
+  .result-card:hover,
+  .tag-card:hover,
+  .char-card:hover,
+  .appearance-card:hover,
+  .alt-version-card:hover,
+  .btn-primary:hover,
+  .btn-secondary:hover,
+  .btn-google:hover,
+  .search-btn:hover,
+  .fab-btn:hover {
+    background: unset;
+    color: unset;
+    border-color: unset;
+    box-shadow: unset;
   }
 }

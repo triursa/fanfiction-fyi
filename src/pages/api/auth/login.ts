@@ -1,7 +1,7 @@
 export const prerender = false;
 
 import { queryFirst, queryAll, run } from '@/lib/db';
-import { verifyPassword, createSession, setSessionCookie } from '@/lib/auth';
+import { verifyPassword, hashPassword, createSession, setSessionCookie } from '@/lib/auth';
 import { checkRateLimit, recordFailedAttempt, clearRateLimit } from '@/lib/rate-limit';
 import type { APIRoute } from 'astro';
 
@@ -33,10 +33,16 @@ export const POST: APIRoute = async ({ request, locals, clientAddress }) => {
     return new Response(JSON.stringify({ error: 'Invalid credentials' }), { status: 401, headers: { 'Content-Type': 'application/json' } });
   }
 
-  const valid = await verifyPassword(password, user.password_hash);
+  const { valid, needsRehash } = await verifyPassword(password, user.password_hash);
   if (!valid) {
     await recordFailedAttempt(db, email.toLowerCase(), 'login');
     return new Response(JSON.stringify({ error: 'Invalid credentials' }), { status: 401, headers: { 'Content-Type': 'application/json' } });
+  }
+
+  // Transparently upgrade legacy SHA-256 hashes to PBKDF2 on successful login
+  if (needsRehash) {
+    const newHash = await hashPassword(password);
+    await run(db, `UPDATE users SET password_hash = ? WHERE id = ?`, newHash, user.id);
   }
 
   // Clear rate limit on successful login
