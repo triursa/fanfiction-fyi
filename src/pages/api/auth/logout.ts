@@ -13,7 +13,7 @@ export const POST: APIRoute = async ({ request, locals }) => {
     if (token) await deleteSession(db, token);
   }
   return new Response(null, {
-    status: 302,
+    status: 303,
     headers: {
       'Location': '/',
       'Set-Cookie': clearSessionCookie(),
