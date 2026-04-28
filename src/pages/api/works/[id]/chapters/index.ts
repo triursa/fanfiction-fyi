@@ -19,11 +19,9 @@ export const POST: APIRoute = async ({ params, request, locals }) => {
   const creatorship = await queryFirst<any>(db, `SELECT * FROM creatorships WHERE work_id = ?1 AND pseud_id IN (SELECT id FROM pseuds WHERE user_id = ?2)`, workId, auth.user.id);
   if (!creatorship) return new Response(JSON.stringify({ error: 'Forbidden: not a creator of this work' }), { status: 403, headers: { 'Content-Type': 'application/json' } });
 
-  let body2: any;
-  try { body2 = await request.json(); } catch {}
-
-  const title = body2?.title || 'Chapter';
-  const contentMd = body2?.content_md || '';
+  // Read title and content from the same body (first json() consumed the stream)
+  const title = body?.title || 'Chapter';
+  const contentMd = body?.content_md || '';
   const contentHtml = contentMd ? markdownToHtml(contentMd) : null;
   const wordCount = contentMd ? contentMd.split(/\s+/).filter(Boolean).length : 0;
 

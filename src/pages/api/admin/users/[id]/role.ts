@@ -13,12 +13,8 @@ export const PUT: APIRoute = async ({ params, request, locals }) => {
   }
 
   // Require admin+ role
-  let auth;
-  try {
-    auth = await requireRole(db, request, UserRole.Admin);
-  } catch (e: any) {
-    return new Response(JSON.stringify({ error: e.message || 'Unauthorized' }), { status: e.status || 401, headers: { 'Content-Type': 'application/json' } });
-  }
+  const auth = await requireRole(db, request, UserRole.Admin);
+  if (!auth) return new Response(JSON.stringify({ error: 'Unauthorized or insufficient role' }), { status: 401, headers: { 'Content-Type': 'application/json' } });
 
   let body: any;
   try { body = await request.json(); } catch {

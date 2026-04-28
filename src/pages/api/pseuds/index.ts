@@ -7,6 +7,7 @@ import type { APIRoute } from 'astro';
 export const GET: APIRoute = async ({ request, locals }) => {
   const db = locals.runtime.env.DB as D1Database;
   const auth = await requireAuth(db, request);
+  if (!auth) return new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401, headers: { 'Content-Type': 'application/json' } });
   const pseuds = await queryAll<any>(db, `SELECT * FROM pseuds WHERE user_id = ?1 ORDER BY id`, auth.user.id);
   return new Response(JSON.stringify(pseuds), { headers: { 'Content-Type': 'application/json' } });
 };
@@ -14,6 +15,7 @@ export const GET: APIRoute = async ({ request, locals }) => {
 export const POST: APIRoute = async ({ request, locals }) => {
   const db = locals.runtime.env.DB as D1Database;
   const auth = await requireAuth(db, request);
+  if (!auth) return new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401, headers: { 'Content-Type': 'application/json' } });
 
   let body: any;
   try { body = await request.json(); } catch {

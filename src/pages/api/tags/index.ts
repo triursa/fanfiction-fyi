@@ -32,6 +32,7 @@ export const GET: APIRoute = async ({ url, locals }) => {
 export const POST: APIRoute = async ({ request, locals }) => {
   const db = locals.runtime.env.DB as D1Database;
   const auth = await requireAuth(db, request);
+  if (!auth) return new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401, headers: { 'Content-Type': 'application/json' } });
 
   if (auth.user.role !== 'admin' && auth.user.role !== 'mod') {
     return new Response(JSON.stringify({ error: 'Forbidden: admin or mod role required' }), { status: 403, headers: { 'Content-Type': 'application/json' } });

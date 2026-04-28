@@ -8,6 +8,7 @@ import type { APIRoute } from 'astro';
 export const GET: APIRoute = async ({ request, locals }) => {
   const db = locals.runtime.env.DB as D1Database;
   const auth = await requireAuth(db, request);
+  if (!auth) return new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401, headers: { 'Content-Type': 'application/json' } });
   const pseudId = auth.pseuds[0]?.id;
   if (!pseudId) return new Response(JSON.stringify({ error: 'No pseud found' }), { status: 400, headers: { 'Content-Type': 'application/json' } });
 
@@ -33,6 +34,7 @@ export const GET: APIRoute = async ({ request, locals }) => {
 export const POST: APIRoute = async ({ request, locals }) => {
   const db = locals.runtime.env.DB as D1Database;
   const auth = await requireAuth(db, request);
+  if (!auth) return new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401, headers: { 'Content-Type': 'application/json' } });
 
   let body: any;
   try { body = await request.json(); } catch {
@@ -70,6 +72,7 @@ export const POST: APIRoute = async ({ request, locals }) => {
 export const DELETE: APIRoute = async ({ request, locals }) => {
   const db = locals.runtime.env.DB as D1Database;
   const auth = await requireAuth(db, request);
+  if (!auth) return new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401, headers: { 'Content-Type': 'application/json' } });
 
   let body: any;
   try { body = await request.json(); } catch {
