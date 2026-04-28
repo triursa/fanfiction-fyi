@@ -22,6 +22,7 @@ export const GET: APIRoute = async ({ params, locals }) => {
 export const PUT: APIRoute = async ({ params, request, locals }) => {
   const db = locals.runtime.env.DB as D1Database;
   const auth = await requireAuth(db, request);
+  if (!auth) return new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401, headers: { 'Content-Type': 'application/json' } });
   const workId = Number(params.id);
   if (!workId) return new Response(JSON.stringify({ error: 'Not found' }), { status: 404, headers: { 'Content-Type': 'application/json' } });
 
@@ -81,6 +82,12 @@ export const PUT: APIRoute = async ({ params, request, locals }) => {
     await run(db, `UPDATE works SET ${fields.join(', ')} WHERE id = ?`, ...values);
   }
 
+  // When publishing, also publish all draft chapters
+  if (body.publish) {
+    await run(db, `UPDATE chapters SET draft = 0, updated_at = datetime('now') WHERE work_id = ?1 AND draft = 1`, workId);
+    await run(db, `UPDATE works SET word_count = (SELECT COALESCE(SUM(word_count), 0) FROM chapters WHERE work_id = ?1 AND draft = 0) WHERE id = ?1`, workId);
+  }
+
   const work = await queryFirst<any>(db, `SELECT * FROM works WHERE id = ?1`, workId);
   return new Response(JSON.stringify(work), { headers: { 'Content-Type': 'application/json' } });
 };
@@ -88,6 +95,7 @@ export const PUT: APIRoute = async ({ params, request, locals }) => {
 export const DELETE: APIRoute = async ({ params, request, locals }) => {
   const db = locals.runtime.env.DB as D1Database;
   const auth = await requireAuth(db, request);
+  if (!auth) return new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401, headers: { 'Content-Type': 'application/json' } });
   const workId = Number(params.id);
   if (!workId) return new Response(JSON.stringify({ error: 'Not found' }), { status: 404, headers: { 'Content-Type': 'application/json' } });
 

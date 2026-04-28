@@ -83,34 +83,27 @@ export async function getAuth(
   return getUserFromSession(db, token);
 }
 
-// Require auth for API routes (returns 401 if missing)
+// Require auth for API routes (returns null if missing — callers must check and return 401)
 export async function requireAuth(
   db: D1Database,
   request: Request
-): Promise<{ user: User; pseuds: Pseud[] }> {
+): Promise<{ user: User; pseuds: Pseud[] } | null> {
   const auth = await getAuth(db, request);
-  if (!auth) {
-    const err = new Error('Unauthorized');
-    (err as any).status = 401;
-    throw err;
-  }
   return auth;
 }
 
 // Require a minimum role level (founder > admin > mod > user)
+// Returns null if unauthenticated, or { auth, forbidden } if role is insufficient
 export async function requireRole(
   db: D1Database,
   request: Request,
   minimumRole: UserRole
-): Promise<{ user: User; pseuds: Pseud[] }> {
+): Promise<{ user: User; pseuds: Pseud[] } | null> {
   const auth = await requireAuth(db, request);
+  if (!auth) return null;
   const userLevel = ROLE_LEVEL[auth.user.role as UserRole] ?? 0;
   const requiredLevel = ROLE_LEVEL[minimumRole] ?? 0;
-  if (userLevel < requiredLevel) {
-    const err = new Error('Forbidden');
-    (err as any).status = 403;
-    throw err;
-  }
+  if (userLevel < requiredLevel) return null; // Caller checks and returns 403
   return auth;
 }
 

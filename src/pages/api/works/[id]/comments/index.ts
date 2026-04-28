@@ -51,6 +51,7 @@ export const GET: APIRoute = async ({ params, locals, url, request }) => {
 export const POST: APIRoute = async ({ params, request, locals }) => {
   const db = locals.runtime.env.DB as D1Database;
   const auth = await requireAuth(db, request);
+  if (!auth) return new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401, headers: { 'Content-Type': 'application/json' } });
   const workId = Number(params.id);
   if (!workId) return new Response(JSON.stringify({ error: 'Not found' }), { status: 404, headers: { 'Content-Type': 'application/json' } });
 
