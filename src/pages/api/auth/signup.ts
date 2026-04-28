@@ -13,8 +13,11 @@ export const POST: APIRoute = async ({ request, locals }) => {
   }
 
   const { invite_code, email, password, display_name } = body || {};
-  if (!invite_code || !email || !password || !display_name || password.length < 8 || password.length > 128) {
+  if (!invite_code || !email || !password || !display_name) {
     return new Response(JSON.stringify({ error: 'Missing fields' }), { status: 400, headers: { 'Content-Type': 'application/json' } });
+  }
+  if (password.length < 8 || password.length > 128) {
+    return new Response(JSON.stringify({ error: 'Password must be 8–128 characters' }), { status: 400, headers: { 'Content-Type': 'application/json' } });
   }
 
   const invite = await queryFirst<{ id: number; used_by: number | null }>(db, `SELECT id, used_by FROM invite_codes WHERE code = ?1`, invite_code);
