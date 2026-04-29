@@ -58,7 +58,13 @@ export const onRequest = defineMiddleware(async (context, next) => {
   const cookie = context.request.headers.get('cookie') ?? '';
   const sessionMatch = cookie.match(/session=([a-f0-9]+)/);
   if (!sessionMatch) {
-    // Not authenticated — redirect to login for protected paths
+    // Not authenticated — return 401 JSON for API routes, redirect for pages
+    if (pathname.startsWith('/api/')) {
+      return new Response(JSON.stringify({ error: 'Unauthorized' }), {
+        status: 401,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
     return context.redirect('/login');
   }
 
@@ -72,7 +78,13 @@ export const onRequest = defineMiddleware(async (context, next) => {
   );
 
   if (!session) {
-    // Invalid/expired session — clear cookie and redirect to login
+    // Invalid/expired session
+    if (pathname.startsWith('/api/')) {
+      return new Response(JSON.stringify({ error: 'Unauthorized' }), {
+        status: 401,
+        headers: { 'Content-Type': 'application/json', 'Set-Cookie': 'session=; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=0' },
+      });
+    }
     return new Response(null, {
       status: 302,
       headers: {
@@ -89,7 +101,13 @@ export const onRequest = defineMiddleware(async (context, next) => {
   );
 
   if (!user) {
-    // User deleted but session exists — clear and redirect
+    // User deleted but session exists
+    if (pathname.startsWith('/api/')) {
+      return new Response(JSON.stringify({ error: 'Unauthorized' }), {
+        status: 401,
+        headers: { 'Content-Type': 'application/json', 'Set-Cookie': 'session=; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=0' },
+      });
+    }
     return new Response(null, {
       status: 302,
       headers: {

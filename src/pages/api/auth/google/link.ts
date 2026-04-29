@@ -42,6 +42,11 @@ export const POST: APIRoute = async ({ locals, request, url }) => {
   // predictable state=link_{userId} value.
   const nonce = crypto.randomUUID().replace(/-/g, '').slice(0, 16);
   const state = `link_${auth.user.id}_${nonce}`;
+
+  // Store the nonce in D1 so the callback can validate it
+  // expires in 10 minutes
+  await run(db, `INSERT INTO oauth_states (state, user_id, created_at) VALUES (?1, ?2, datetime('now'))`, state, auth.user.id);
+
   const params = new URLSearchParams({
     client_id: clientId,
     redirect_uri: redirectUri,

@@ -16,7 +16,8 @@ let total = 0;
 
 if (query) {
   // Sanitize FTS5 query — strip special operators that cause SQL errors
-  const sanitizedQ = query.replace(/["()*]/g, '').replace(/\b(AND|OR|NOT|NEAR)\b/gi, '').trim();
+  const words = query.split(/\s+/).filter(w => /^[\w\u4e00-\u9fff\u3040-\u309f\u30a0-\u30ff\uac00-\ud7af]+$/.test(w));
+  const sanitizedQ = words.join(' ').trim();
 
   let countSql = `SELECT COUNT(*) as total FROM works_fts f JOIN works w ON f.rowid = w.id WHERE works_fts MATCH ? AND w.published_at IS NOT NULL`;
   let dataSql = `SELECT w.id, w.title, w.summary, w.word_count, w.published_at FROM works_fts f JOIN works w ON f.rowid = w.id WHERE works_fts MATCH ? AND w.published_at IS NOT NULL`;

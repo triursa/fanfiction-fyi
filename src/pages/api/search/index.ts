@@ -19,10 +19,10 @@ export const GET: APIRoute = async ({ url, locals, request }) => {
       headers: { 'Content-Type': 'application/json', ...cors },
     });
   }
-  // Sanitize FTS5 query — strip special operators that cause SQL errors
-  // Strips: quotes, parens, asterisks, plus, minus, caret, colon (column filter)
-  // AND/OR/NOT/NEAR are also FTS5 operators
-  const sanitizedQ = rawQ.replace(/["()*+^:]/g, '').replace(/\b(AND|OR|NOT|NEAR)\b/gi, '').trim();
+  // Sanitize FTS5 query — whitelist only safe word characters
+  // Split into words, keep only alphanumeric/CJK, rejoin with AND
+  const words = rawQ.split(/\s+/).filter(w => /^[\w\u4e00-\u9fff\u3040-\u309f\u30a0-\u30ff\uac00-\ud7af]+$/.test(w));
+  const sanitizedQ = words.join(' ').trim();
   if (!sanitizedQ) {
     return new Response(
       JSON.stringify({ error: 'Query parameter "q" must contain searchable terms' }),
