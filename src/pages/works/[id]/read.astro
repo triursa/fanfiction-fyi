@@ -2,6 +2,7 @@
 export const prerender = false;
 import { queryFirst, queryAll } from '../../../lib/db';
 import { markdownToHtml } from '../../../lib/markdown';
+import { THEMES } from '../../../styles/themes';
 
 const workId = Number(Astro.params.id);
 if (!workId) return Astro.redirect('/works');
@@ -126,7 +127,7 @@ const moodCSS = (!moodDisabled && currentMood && MOOD_PALETTES[currentMood])
   </script>
 
   <!-- Serialized theme colors for client-side -->
-  <script type="application/json" id="ff-themes-data" set:html={JSON.stringify({})} />
+  <script type="application/json" id="ff-themes-data" set:html={JSON.stringify(Object.fromEntries(Object.entries(THEMES).map(([k, v]) => [k, v.colors])))} />
 
   <style is:global>
     @import '../../../styles/theme.css';

@@ -1,9 +1,13 @@
 /**
  * CORS helpers for the read-only API.
  *
- * - Access-Control-Allow-Origin: value of API_ALLOWED_ORIGIN env var, or "*"
+ * - Access-Control-Allow-Origin: value of API_ALLOWED_ORIGIN env var,
+ *   or the request's Origin header, or fallback to https://fanfiction.fyi
  * - Access-Control-Allow-Methods: GET, OPTIONS
  * - Access-Control-Allow-Headers: Content-Type, Authorization
+ *
+ * For production, always set API_ALLOWED_ORIGIN to prevent any origin
+ * from making credentialed cross-origin requests.
  */
 
 function getAllowedOrigin(request: Request): string {

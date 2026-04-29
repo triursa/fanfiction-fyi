@@ -23,8 +23,9 @@ export const GET: APIRoute = async ({ params, locals }) => {
       collectionId
     );
   } catch (err) {
-    return new Response(JSON.stringify({ error: 'Collection not found' }), {
-      status: 404,
+    console.error('DB error fetching collection:', err);
+    return new Response(JSON.stringify({ error: 'Internal server error' }), {
+      status: 500,
       headers: { 'Content-Type': 'application/json' }
     });
   }

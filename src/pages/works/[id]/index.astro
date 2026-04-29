@@ -325,7 +325,7 @@ const commentsJson = JSON.stringify(allComments);
             <div class="comment-body">
               <span class="comment-author">{comment.pseud_name}</span>
               <span class="comment-date">{new Date(comment.created_at).toLocaleDateString()}</span>
-              <div class="comment-content" set:html={comment.content_html || comment.content} />
+              <div class="comment-content" set:html={comment.content_html || markdownToHtml(comment.content || '')} />
               {authUser && (
                 <button class="reply-btn" data-comment-id={comment.id} data-pseud-name={comment.pseud_name}>Reply</button>
               )}
@@ -336,7 +336,7 @@ const commentsJson = JSON.stringify(allComments);
                   <div class="comment-body">
                     <span class="comment-author">{reply.pseud_name}</span>
                     <span class="comment-date">{new Date(reply.created_at).toLocaleDateString()}</span>
-                    <div class="comment-content" set:html={reply.content_html || reply.content} />
+                    <div class="comment-content" set:html={reply.content_html || markdownToHtml(reply.content || '')} />
                   </div>
                 </div>
               ))}

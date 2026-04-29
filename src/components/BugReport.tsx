@@ -74,7 +74,7 @@ export default function BugReport() {
       <dialog ref={dialogRef} class="bug-report-dialog" onClose={handleClose}>
         <div class="bug-report-content">
           <div class="bug-report-header">
-            <h2>Report a Bug</h2>
+            <h2 aria-hidden="true">Report a Bug</h2>
             <button class="bug-report-close" onClick={handleClose} aria-label="Close">
               ✕
             </button>

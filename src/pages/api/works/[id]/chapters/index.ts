@@ -1,6 +1,6 @@
 export const prerender = false;
 
-import { queryFirst, run, queryAll } from '@/lib/db';
+import { queryFirst, queryAll, run } from '@/lib/db';
 import { getAuth } from '@/lib/auth';
 import { markdownToHtml } from '@/lib/markdown';
 import type { APIRoute } from 'astro';
@@ -38,6 +38,16 @@ export const POST: APIRoute = async ({ params, request, locals }) => {
 export const GET: APIRoute = async ({ url, locals }) => {
   const db = locals.runtime.env.DB as D1Database;
   const workId = Number(url.pathname.split('/')[3]);
-  const chapters = await queryAll<any>(db, `SELECT * FROM chapters WHERE work_id = ?1 ORDER BY position`, workId);
+  if (!workId || isNaN(workId)) {
+    return new Response(JSON.stringify({ error: 'Invalid work ID' }), { status: 400, headers: { 'Content-Type': 'application/json' } });
+  }
+  const work = await queryFirst<any>(db, `SELECT id, published_at FROM works WHERE id = ?1`, workId);
+  if (!work) {
+    return new Response(JSON.stringify({ error: 'Work not found' }), { status: 404, headers: { 'Content-Type': 'application/json' } });
+  }
+  if (!work.published_at) {
+    return new Response(JSON.stringify({ error: 'Work not found' }), { status: 404, headers: { 'Content-Type': 'application/json' } });
+  }
+  const chapters = await queryAll<any>(db, `SELECT * FROM chapters WHERE work_id = ?1 AND draft = 0 ORDER BY position`, workId);
   return new Response(JSON.stringify(chapters), { headers: { 'Content-Type': 'application/json' } });
 };

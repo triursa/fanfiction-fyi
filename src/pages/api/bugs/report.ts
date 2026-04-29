@@ -1,15 +1,11 @@
 export const prerender = false;
 
 import type { APIRoute } from 'astro';
+import { checkRateLimit, recordFailedAttempt } from '@/lib/rate-limit';
 
 const GITHUB_REPO_OWNER = 'triursa';
 const GITHUB_REPO_NAME = 'fanfiction-fyi';
 const MAX_DESCRIPTION_LENGTH = 2000;
-const RATE_LIMIT_WINDOW = 60 * 1000; // 1 minute
-const MAX_REPORTS_PER_WINDOW = 3;
-
-// In-memory rate limit (per-isolate; good enough for small scale)
-const recentReports = new Map<string, number[]>();
 
 function getClientIP(request: Request): string {
   // Cloudflare provides the real IP in CF-Connecting-IP
@@ -18,32 +14,25 @@ function getClientIP(request: Request): string {
          'unknown';
 }
 
-function isRateLimited(ip: string): boolean {
-  const now = Date.now();
-  const timestamps = recentReports.get(ip) ?? [];
-  // Filter to only timestamps within the window
-  const recent = timestamps.filter(t => now - t < RATE_LIMIT_WINDOW);
-  recentReports.set(ip, recent);
-  return recent.length >= MAX_REPORTS_PER_WINDOW;
-}
-
 function sanitizeForGitHub(text: string): string {
   // Remove any null bytes and trim
   return text.replace(/\0/g, '').trim();
 }
 
 export const POST: APIRoute = async ({ request, locals }) => {
+  const db = locals.runtime.env.DB as D1Database;
   const ip = getClientIP(request);
 
-  // Rate limit check
-  if (isRateLimited(ip)) {
+  // D1-backed rate limit check (3 bug reports per 5 minutes per IP)
+  const rl = await checkRateLimit(db, ip, 'bug-report');
+  if (!rl.allowed) {
     return new Response(JSON.stringify({ 
-      error: 'Too many reports. Please wait a minute before submitting another.' 
+      error: 'Too many reports. Please wait before submitting another.' 
     }), { 
       status: 429, 
       headers: { 
         'Content-Type': 'application/json',
-        'Retry-After': '60' 
+        'Retry-After': String(rl.retryAfterSeconds)
       } 
     });
   }
@@ -127,11 +116,8 @@ export const POST: APIRoute = async ({ request, locals }) => {
 
     const issue = await ghResponse.json();
 
-    // Record this report for rate limiting
-    const now = Date.now();
-    const timestamps = recentReports.get(ip) ?? [];
-    timestamps.push(now);
-    recentReports.set(ip, timestamps);
+    // Record this report for D1 rate limiting
+    await recordFailedAttempt(db, ip, 'bug-report');
 
     return new Response(JSON.stringify({ 
       ok: true, 
