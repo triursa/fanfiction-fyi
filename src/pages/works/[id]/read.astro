@@ -3,6 +3,7 @@ export const prerender = false;
 import { queryFirst, queryAll } from '../../../lib/db';
 import { markdownToHtml } from '../../../lib/markdown';
 import { THEMES } from '../../../styles/themes';
+import ReadingMode from '../../../components/ReadingMode';
 
 const workId = Number(Astro.params.id);
 if (!workId) return Astro.redirect('/works');
@@ -605,36 +606,6 @@ const moodCSS = (!moodDisabled && currentMood && MOOD_PALETTES[currentMood])
 <body data-theme={authUser?.theme || 'obsidian'} data-mood={moodDisabled ? 'off' : currentMood || 'none'}>
   {moodCSS && <style>{`:root { ${moodCSS} }`}</style>}
 
-  <!-- Mood Ambient Glow -->
-  {moodCSS && <div class={`mood-glow active`}></div>}
-  <!-- Reading Progress Bar -->
-  <div class="reading-progress-bar" id="reading-progress" data-mood={moodDisabled ? 'off' : currentMood || 'none'}></div>
-
-  <!-- Ambient Header (shows on scroll up) -->
-  <header class="reading-header" id="reading-header">
-    <button class="reading-toolbar-btn" id="chapters-toggle" aria-label="Chapters">☰</button>
-    <div class="reading-header-title">{work.title}</div>
-    <div class="reading-header-chapter">Ch. {currentChapter.position} of {chapters.length}</div>
-    <a href={`/works/${work.id}`} class="reading-header-exit">Exit Reading</a>
-  </header>
-
-  <!-- Chapter Drawer -->
-  <div class="reading-drawer-overlay" id="drawer-overlay"></div>
-  <nav class="reading-chapters-drawer" id="chapters-drawer" aria-label="Chapter list">
-    <div class="reading-drawer-title">
-      <span>Chapters</span>
-      <button class="reading-drawer-close" id="drawer-close" aria-label="Close chapter list">&times;</button>
-    </div>
-    <ol class="reading-drawer-list">
-      {chapters.map((c: any) => (
-        <li class={`reading-drawer-item ${c.id === currentChapter.id ? 'current' : ''}`}>
-          <a href={`/works/${work.id}/read?chapter=${c.id}`}>{c.position}. {c.title}</a>
-          <span class="chapter-words">{c.word_count?.toLocaleString() || '?'} words</span>
-        </li>
-      ))}
-    </ol>
-  </nav>
-
   <!-- Main Reading Area -->
   <main class="reading-container" data-font-size={fontSizeClass} data-mood={moodDisabled ? 'off' : currentMood || 'none'}>
     <!-- Work Metadata -->
@@ -691,23 +662,21 @@ const moodCSS = (!moodDisabled && currentMood && MOOD_PALETTES[currentMood])
         {!currentChapterData.content_html && !currentChapterData.content_md && <p>No content available for this chapter.</p>}
       </div>
 
-      <!-- Chapter Reactions -->
-      {authUser && (
-        <div class="reading-reactions" data-chapter-id={currentChapter.id}>
-          <span class="reading-reactions-label">React:</span>
-          <button class="reaction-btn" data-reaction="fire" data-mine={myReactions.includes('fire') ? '1' : '0'}>🔥 <span class="reaction-count">{reactionCounts['fire'] || 0}</span></button>
-          <button class="reaction-btn" data-reaction="cry" data-mine={myReactions.includes('cry') ? '1' : '0'}>😭 <span class="reaction-count">{reactionCounts['cry'] || 0}</span></button>
-          <button class="reaction-btn" data-reaction="heartbreak" data-mine={myReactions.includes('heartbreak') ? '1' : '0'}>💔 <span class="reaction-count">{reactionCounts['heartbreak'] || 0}</span></button>
-          <button class="reaction-btn" data-reaction="swords" data-mine={myReactions.includes('swords') ? '1' : '0'}>⚔️ <span class="reaction-count">{reactionCounts['swords'] || 0}</span></button>
-          <button class="reaction-btn" data-reaction="heart" data-mine={myReactions.includes('heart') ? '1' : '0'}>❤️ <span class="reaction-count">{reactionCounts['heart'] || 0}</span></button>
-          <button class="reaction-btn" data-reaction="mindblown" data-mine={myReactions.includes('mindblown') ? '1' : '0'}>🤯 <span class="reaction-count">{reactionCounts['mindblown'] || 0}</span></button>
-        </div>
-      )}
-      {!authUser && (
-        <div class="reading-reactions">
-          <span class="reading-reactions-label"><a href="/login">Sign in</a> to react</span>
-        </div>
-      )}
+      <!-- Chapter Reactions (handled by ReadingMode island below) -->
+      <ReadingMode client:load
+        workId={workId}
+        chapters={chapters}
+        currentChapterId={currentChapter.id}
+        currentChapterPosition={currentChapter.position}
+        authed={!!authUser}
+        moodCSS={moodCSS}
+        currentMood={currentMood || ''}
+        moodDisabled={moodDisabled}
+        reactionCounts={reactionCounts}
+        myReactions={myReactions}
+        fontSize={fontSizeClass}
+        workTitle={work.title}
+      />
     </section>
 
     <!-- End Notes (last chapter) -->
@@ -739,169 +708,5 @@ const moodCSS = (!moodDisabled && currentMood && MOOD_PALETTES[currentMood])
       </div>
     </div>
   </main>
-
-  <!-- Bottom Toolbar (appears on scroll down) -->
-  <div class="reading-toolbar" id="reading-toolbar">
-    {prevChapter && <a href={`/works/${work.id}/read?chapter=${prevChapter.id}`} class="reading-toolbar-btn">← Prev</a>}
-    <button class="reading-toolbar-btn" id="toc-btn">☰ Ch. {currentChapter.position}/{chapters.length}</button>
-    <a href={`/works/${work.id}`} class="reading-toolbar-btn">✕ Exit</a>
-    {nextChapter && <a href={`/works/${work.id}/read?chapter=${nextChapter.id}`} class="reading-toolbar-btn">Next →</a>}
-  </div>
-
-  <!-- Keyboard Shortcuts Hint (fades out) -->
-  <div class="reading-shortcuts" id="shortcuts-hint">
-    <kbd>←</kbd> <kbd>→</kbd> chapters · <kbd>Esc</kbd> exit reading · <kbd>C</kbd> chapters
-  </div>
-
-  <script define:vars={{ workId, chapterId: currentChapter.id, authed: !!authUser }}>
-    // ── Progress Bar ──
-    const progressBar = document.getElementById('reading-progress');
-    function updateProgress() {
-      const winH = window.innerHeight;
-      const docH = document.documentElement.scrollHeight;
-      const scrolled = window.scrollY;
-      const pct = docH <= winH ? 100 : Math.min(100, (scrolled / (docH - winH)) * 100);
-      if (progressBar) progressBar.style.width = pct + '%';
-    }
-    window.addEventListener('scroll', updateProgress, { passive: true });
-    updateProgress();
-
-    // ── Ambient Header (show on scroll up, hide on scroll down) ──
-    const header = document.getElementById('reading-header');
-    let lastScrollY = window.scrollY;
-    let headerVisible = false;
-    function showHeader() { if (!headerVisible) { header?.classList.add('visible'); headerVisible = true; } }
-    function hideHeader() { if (headerVisible) { header?.classList.remove('visible'); headerVisible = false; } }
-
-    window.addEventListener('scroll', () => {
-      const delta = window.scrollY - lastScrollY;
-      if (delta < -10) showHeader();
-      else if (delta > 10) hideHeader();
-      lastScrollY = window.scrollY;
-      // Also show/hide bottom toolbar
-      const toolbar = document.getElementById('reading-toolbar');
-      if (window.scrollY > 300) {
-        toolbar?.classList.add('visible');
-      } else {
-        toolbar?.classList.remove('visible');
-      }
-    }, { passive: true });
-
-    // ── Chapter Drawer ──
-    const drawer = document.getElementById('chapters-drawer');
-    const overlay = document.getElementById('drawer-overlay');
-    const toggleBtn = document.getElementById('chapters-toggle');
-    const tocBtn = document.getElementById('toc-btn');
-    const closeBtn = document.getElementById('drawer-close');
-
-    function openDrawer() {
-      drawer?.classList.add('open');
-      overlay?.classList.add('open');
-    }
-    function closeDrawer() {
-      drawer?.classList.remove('open');
-      overlay?.classList.remove('open');
-    }
-    toggleBtn?.addEventListener('click', openDrawer);
-    tocBtn?.addEventListener('click', openDrawer);
-    overlay?.addEventListener('click', closeDrawer);
-    closeBtn?.addEventListener('click', closeDrawer);
-
-    // ── Keyboard Shortcuts ──
-    const prevLink = document.querySelector('.reading-nav-link[href*="chapter"]');
-    const allNavLinks = document.querySelectorAll('.reading-nav-link');
-    // Find prev/next by text content
-    let prevHref = null, nextHref = null;
-    allNavLinks.forEach(link => {
-      if (link.textContent.includes('←') || link.textContent.includes('Prev')) prevHref = link.getAttribute('href');
-      if (link.textContent.includes('→') || link.textContent.includes('Next')) nextHref = link.getAttribute('href');
-    });
-
-    document.addEventListener('keydown', (e) => {
-      // Don't intercept when typing in inputs
-      if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
-      
-      if (e.key === 'ArrowLeft' && prevHref) {
-        window.location.href = prevHref;
-      } else if (e.key === 'ArrowRight' && nextHref) {
-        window.location.href = nextHref;
-      } else if (e.key === 'Escape') {
-        window.location.href = `/works/${workId}`;
-      } else if (e.key === 'c' || e.key === 'C') {
-        if (drawer?.classList.contains('open')) closeDrawer();
-        else openDrawer();
-      }
-    });
-
-    // ── Shortcuts hint (fade out after 5s) ──
-    const hints = document.getElementById('shortcuts-hint');
-    if (hints) {
-      hints.classList.add('visible');
-      setTimeout(() => hints.classList.remove('visible'), 5000);
-    }
-
-    // ── Reading Progress (auto-track on page load) ──
-    if (authed) {
-      fetch(`/api/works/${workId}/progress`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ last_chapter: chapterId }),
-      }).catch(() => {});
-
-      // Also track scroll depth every 30s
-      let maxScrollPct = 0;
-      setInterval(() => {
-        const winH = window.innerHeight;
-        const docH = document.documentElement.scrollHeight;
-        if (docH <= winH) return;
-        const pct = Math.round((window.scrollY / (docH - winH)) * 100);
-        if (pct > maxScrollPct) {
-          maxScrollPct = pct;
-          // Could persist scroll depth to DB in future
-        }
-      }, 30000);
-    }
-
-    // ── Reactions ──
-    const reactionsContainer = document.querySelector('.reading-reactions');
-    if (reactionsContainer && authed) {
-      reactionsContainer.addEventListener('click', async (e) => {
-        const btn = e.target.closest('.reaction-btn');
-        if (!btn) return;
-        const reaction = btn.dataset.reaction;
-        if (!reaction) return;
-
-        const isMine = btn.dataset.mine === '1';
-        const countEl = btn.querySelector('.reaction-count');
-        let count = parseInt(countEl?.textContent || '0', 10);
-
-        // Optimistic
-        if (isMine) { btn.dataset.mine = '0'; count = Math.max(0, count - 1); }
-        else { btn.dataset.mine = '1'; count = count + 1; }
-        if (countEl) countEl.textContent = String(count);
-
-        try {
-          const res = await fetch(`/api/works/${workId}/chapters/${chapterId}/reactions`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ reaction }),
-          });
-          if (!res.ok) {
-            // Revert
-            if (isMine) { btn.dataset.mine = '1'; count = count + 1; }
-            else { btn.dataset.mine = '0'; count = Math.max(0, count - 1); }
-            if (countEl) countEl.textContent = String(count);
-          }
-        } catch {
-          if (isMine) { btn.dataset.mine = '1'; count = count + 1; }
-          else { btn.dataset.mine = '0'; count = Math.max(0, count - 1); }
-          if (countEl) countEl.textContent = String(count);
-        }
-      });
-    }
-
-    // ── Scroll to top on fresh visit, but to last position on resume ──
-    // (Future: could store last scroll position per work in localStorage)
-  </script>
 </body>
 </html>
