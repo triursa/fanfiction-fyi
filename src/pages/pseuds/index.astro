@@ -1,0 +1,129 @@
+---
+export const prerender = false;
+import Base from '../../layouts/Base.astro';
+import { queryAll } from '../../lib/db';
+
+const db = Astro.locals.runtime.env.DB as D1Database;
+
+// Get all pseuds that have published works
+const pseuds = await queryAll<any>(db, `
+  SELECT p.id, p.name, p.description, p.icon_key, COUNT(c.id) as work_count
+  FROM pseuds p
+  JOIN creatorships c ON c.pseud_id = p.id
+  JOIN works w ON c.work_id = w.id AND w.published_at IS NOT NULL
+  GROUP BY p.id
+  HAVING work_count > 0
+  ORDER BY work_count DESC, p.name ASC
+`);
+---
+
+<Base title="Authors — fanfiction.fyi">
+  <div class="pseuds-page">
+    <h1 class="page-title">Authors</h1>
+    {pseuds.length === 0 ? (
+      <p class="empty-state">No authors with published works yet.</p>
+    ) : (
+      <div class="pseuds-grid">
+        {pseuds.map(p => {
+          const iconUrl = p.icon_key ? `/api/storage/${encodeURIComponent(p.icon_key)}` : null;
+          return (
+            <a href={`/pseuds/${p.id}`} class="pseud-card" key={p.id}>
+              <div class="pseud-card-avatar">
+                {iconUrl ? (
+                  <img src={iconUrl} alt={p.name} />
+                ) : (
+                  <div class="pseud-card-initial">{p.name.charAt(0).toUpperCase()}</div>
+                )}
+              </div>
+              <div class="pseud-card-info">
+                <div class="pseud-card-name">{p.name}</div>
+                {p.description && <div class="pseud-card-desc">{p.description.length > 80 ? p.description.substring(0, 80) + '…' : p.description}</div>}
+                <div class="pseud-card-works">{p.work_count} work{p.work_count !== 1 ? 's' : ''}</div>
+              </div>
+            </a>
+          );
+        })}
+      </div>
+    )}
+  </div>
+</Base>
+
+<style>
+  .pseuds-page {
+    max-width: 900px;
+    margin: 0 auto;
+    padding: 1rem var(--md-sys-typescale-body-large-tracking, 1rem) 3rem;
+  }
+  .page-title {
+    font-size: 1.5rem;
+    font-weight: 700;
+    margin: 0 0 1.5rem;
+    color: var(--md-sys-color-on-surface);
+    font-family: 'Inter', sans-serif;
+  }
+  .empty-state {
+    text-align: center;
+    padding: 3rem;
+    color: var(--md-sys-color-on-surface-variant);
+  }
+  .pseuds-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+    gap: 1rem;
+  }
+  .pseud-card {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 0.85rem 1rem;
+    background: var(--md-sys-color-surface-container);
+    border-radius: 12px;
+    text-decoration: none;
+    border: 1px solid var(--md-sys-color-outline-variant);
+    transition: background 0.15s;
+  }
+  .pseud-card:hover {
+    background: var(--md-sys-color-surface-container-high);
+  }
+  .pseud-card-avatar {
+    flex-shrink: 0;
+  }
+  .pseud-card-avatar img {
+    width: 44px;
+    height: 44px;
+    border-radius: 50%;
+    object-fit: cover;
+  }
+  .pseud-card-initial {
+    width: 44px;
+    height: 44px;
+    border-radius: 50%;
+    background: var(--md-sys-color-primary-container);
+    color: var(--md-sys-color-on-primary-container);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.2rem;
+    font-weight: 600;
+    font-family: 'Inter', sans-serif;
+  }
+  .pseud-card-info {
+    min-width: 0;
+  }
+  .pseud-card-name {
+    font-size: 0.95rem;
+    font-weight: 600;
+    color: var(--md-sys-color-on-surface);
+    font-family: 'Inter', sans-serif;
+  }
+  .pseud-card-desc {
+    font-size: 0.8rem;
+    color: var(--md-sys-color-on-surface-variant);
+    margin-top: 0.15rem;
+  }
+  .pseud-card-works {
+    font-size: 0.75rem;
+    color: var(--md-sys-color-on-surface-variant);
+    margin-top: 0.2rem;
+  }
+</style>

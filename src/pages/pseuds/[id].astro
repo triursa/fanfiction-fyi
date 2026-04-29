@@ -1,0 +1,29 @@
+---
+export const prerender = false;
+import Base from '../../layouts/Base.astro';
+import { queryFirst } from '../../lib/db';
+import PseudPortfolio from '../../components/PseudPortfolio';
+
+const pseudId = Number(Astro.params.id);
+if (!pseudId) return Astro.redirect('/');
+
+const db = Astro.locals.runtime.env.DB as D1Database;
+
+// Verify pseud exists
+const pseud = await queryFirst<any>(db, `SELECT id, name FROM pseuds WHERE id = ?1`, pseudId);
+if (!pseud) return Astro.redirect('/');
+---
+
+<Base title={`${pseud.name} — Author Page`}>
+  <div class="pseud-page">
+    <PseudPortfolio client:load pseudId={pseudId} />
+  </div>
+</Base>
+
+<style>
+  .pseud-page {
+    max-width: 900px;
+    margin: 0 auto;
+    padding: 0 var(--md-sys-typescale-body-large-tracking, 1rem) 3rem;
+  }
+</style>

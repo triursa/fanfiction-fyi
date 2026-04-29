@@ -283,6 +283,27 @@ const themesJSON = JSON.stringify(
       <label for="edit-pseud-desc" class="form-label">Description <span class="form-hint" style="display:inline">(optional)</span></label>
       <input type="text" id="edit-pseud-desc" class="form-input" maxlength="200" />
     </div>
+    <div class="form-group">
+      <label class="form-label">Banner Image</label>
+      <div class="pseud-banner-upload">
+        <div class="pseud-banner-preview" id="edit-pseud-banner-preview">
+          <img id="edit-pseud-banner-img" src="" alt="Pseud banner" />
+        </div>
+        <div class="pseud-icon-actions">
+          <label for="edit-pseud-banner-file" class="btn-outlined pseud-icon-btn">Upload Banner</label>
+          <input type="file" id="edit-pseud-banner-file" accept="image/gif,image/png,image/jpeg,image/webp" style="display:none" />
+          <button type="button" class="btn-text btn-text--danger" id="edit-pseud-banner-remove" style="display:none">Remove Banner</button>
+        </div>
+        <p class="form-hint">Wide image displayed at the top of your author page. Max 5 MB.</p>
+      </div>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Pinned Works <span class="form-hint" style="display:inline">(up to 6)</span></label>
+      <div id="edit-pseud-pins-list" class="pinned-works-edit-list">
+        <!-- populated by JS -->
+      </div>
+      <p class="form-hint">Choose works to feature on your author portfolio page.</p>
+    </div>
     <div class="form-actions">
       <button type="button" class="btn-filled" id="save-pseud-btn">Save</button>
       <button type="button" class="btn-outlined" id="cancel-pseud-btn">Cancel</button>
@@ -799,6 +820,8 @@ const themesJSON = JSON.stringify(
   var editPseudFeedback = document.getElementById('edit-pseud-feedback');
 
   var editingPseudIconKey = null; // tracks current R2 key for pseud icon being edited
+  var editingPseudBannerKey = null; // tracks current R2 key for pseud banner
+  var editingPseudPinnedIds = []; // tracks pinned work IDs
 
   function openEditModal(pseud) {
     document.getElementById('edit-pseud-id').value = pseud.id;
@@ -820,6 +843,26 @@ const themesJSON = JSON.stringify(
       iconFallback.style.display = '';
       iconRemoveBtn.style.display = 'none';
     }
+
+    // Update banner preview
+    editingPseudBannerKey = pseud.banner_key || null;
+    var bannerImg = document.getElementById('edit-pseud-banner-img');
+    var bannerRemoveBtn = document.getElementById('edit-pseud-banner-remove');
+    if (pseud.banner_key) {
+      bannerImg.src = '/api/storage/' + encodeURIComponent(pseud.banner_key);
+      bannerImg.style.display = 'block';
+      bannerRemoveBtn.style.display = '';
+    } else {
+      bannerImg.style.display = 'none';
+      bannerRemoveBtn.style.display = 'none';
+    }
+
+    // Load pinned works
+    try {
+      editingPseudPinnedIds = JSON.parse(pseud.pinned_work_ids || '[]');
+      if (!Array.isArray(editingPseudPinnedIds)) editingPseudPinnedIds = [];
+    } catch { editingPseudPinnedIds = []; }
+    loadPinnedWorks(pseud.id);
 
     editPseudFeedback.textContent = '';
     editPseudFeedback.className = 'inline-feedback';
@@ -906,6 +949,132 @@ const themesJSON = JSON.stringify(
     .catch(function() { showToast('Network error.', 'error'); });
   });
 
+  // ─── Pseud banner upload ──────────────────────────────────────
+  var pseudBannerFileInput = document.getElementById('edit-pseud-banner-file');
+
+  pseudBannerFileInput.addEventListener('change', function() {
+    var file = pseudBannerFileInput.files[0];
+    if (!file) return;
+
+    var allowedTypes = ['image/gif', 'image/png', 'image/jpeg', 'image/webp'];
+    if (allowedTypes.indexOf(file.type) === -1) {
+      showToast('Invalid file type. Use GIF, PNG, JPG, or WebP.', 'error');
+      return;
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      showToast('File too large. Maximum 5 MB.', 'error');
+      return;
+    }
+
+    var pseudId = document.getElementById('edit-pseud-id').value;
+    if (!pseudId) return;
+
+    var formData = new FormData();
+    formData.append('file', file);
+    formData.append('type', 'banner');
+    formData.append('id', pseudId);
+
+    fetch('/api/upload', { method: 'POST', body: formData })
+      .then(function(res) { return res.json().then(function(d) { return { ok: res.ok, data: d }; }); })
+      .then(function(result) {
+        if (result.ok) {
+          editingPseudBannerKey = result.data.key;
+          var bannerImg = document.getElementById('edit-pseud-banner-img');
+          var bannerRemoveBtn = document.getElementById('edit-pseud-banner-remove');
+          bannerImg.src = result.data.url;
+          bannerImg.style.display = 'block';
+          bannerRemoveBtn.style.display = '';
+          showToast('Banner uploaded!');
+        } else {
+          showToast(result.data.error || 'Upload failed.', 'error');
+        }
+      })
+      .catch(function() { showToast('Network error during upload.', 'error'); });
+  });
+
+  document.getElementById('edit-pseud-banner-remove').addEventListener('click', function() {
+    var pseudId = document.getElementById('edit-pseud-id').value;
+    if (!pseudId) return;
+
+    fetch('/api/upload', {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ type: 'banner', id: parseInt(pseudId, 10) }),
+    })
+    .then(function(res) { return res.json().then(function(d) { return { ok: res.ok, data: d }; }); })
+    .then(function(result) {
+      if (result.ok) {
+        editingPseudBannerKey = null;
+        var bannerImg = document.getElementById('edit-pseud-banner-img');
+        var bannerRemoveBtn = document.getElementById('edit-pseud-banner-remove');
+        bannerImg.style.display = 'none';
+        bannerRemoveBtn.style.display = 'none';
+        pseudBannerFileInput.value = '';
+        showToast('Banner removed.');
+      } else {
+        showToast(result.data.error || 'Failed to remove banner.', 'error');
+      }
+    })
+    .catch(function() { showToast('Network error.', 'error'); });
+  });
+
+  // ─── Pinned works management ───────────────────────────────
+  var pseudWorksCache = []; // all works by this pseud
+
+  function loadPinnedWorks(pseudId) {
+    var pinsList = document.getElementById('edit-pseud-pins-list');
+    pinsList.innerHTML = '<span class="form-hint">Loading works…</span>';
+
+    // Fetch this pseud's public data to get their works
+    fetch('/api/pseuds/' + pseudId + '/public')
+      .then(function(res) { return res.json(); })
+      .then(function(data) {
+        pseudWorksCache = data.works || [];
+        renderPinnedWorksList();
+      })
+      .catch(function() {
+        pinsList.innerHTML = '<span class="form-hint">Could not load works.</span>';
+      });
+  }
+
+  function renderPinnedWorksList() {
+    var pinsList = document.getElementById('edit-pseud-pins-list');
+    if (pseudWorksCache.length === 0) {
+      pinsList.innerHTML = '<span class="form-hint">No published works to pin.</span>';
+      return;
+    }
+
+    var html = '';
+    pseudWorksCache.forEach(function(w) {
+      var isPinned = editingPseudPinnedIds.indexOf(w.id) !== -1;
+      html += '<label class="pin-work-item">';
+      html += '  <input type="checkbox" class="pin-work-checkbox" data-work-id="' + w.id + '"' + (isPinned ? ' checked' : '') + ' />';
+      html += '  <span class="pin-work-title">' + escapeHtml(w.title) + '</span>';
+      html += '  <span class="pin-work-meta">' + w.word_count.toLocaleString() + ' words</span>';
+      html += '</label>';
+    });
+    pinsList.innerHTML = html;
+
+    // Bind checkboxes
+    pinsList.querySelectorAll('.pin-work-checkbox').forEach(function(cb) {
+      cb.addEventListener('change', function() {
+        var workId = parseInt(cb.dataset.workId, 10);
+        if (cb.checked) {
+          if (editingPseudPinnedIds.length >= 6) {
+            cb.checked = false;
+            showToast('Maximum 6 pinned works.', 'error');
+            return;
+          }
+          if (editingPseudPinnedIds.indexOf(workId) === -1) {
+            editingPseudPinnedIds.push(workId);
+          }
+        } else {
+          editingPseudPinnedIds = editingPseudPinnedIds.filter(function(id) { return id !== workId; });
+        }
+      });
+    });
+  }
+
   // Close modal on overlay click
   editModal.addEventListener('click', function(e) {
     if (e.target === editModal) closeEditModal();
@@ -932,7 +1101,13 @@ const themesJSON = JSON.stringify(
     fetch('/api/pseuds/' + encodeURIComponent(pseudId), {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name: name, description: desc || null }),
+      body: JSON.stringify({
+        name: name,
+        description: desc || null,
+        icon_key: editingPseudIconKey,
+        banner_key: editingPseudBannerKey,
+        pinned_work_ids: editingPseudPinnedIds,
+      }),
     })
     .then(function(res) { return res.json().then(function(data) { return { ok: res.ok, data: data }; }); })
     .then(function(result) {
@@ -1267,6 +1442,72 @@ const themesJSON = JSON.stringify(
   .pseud-icon-btn {
     cursor: pointer;
     font-size: var(--md-sys-typescale-label-medium-size, 12px);
+  }
+
+  /* ─── Banner upload ───────────────────────────────── */
+  .pseud-banner-upload {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2, 8px);
+  }
+
+  .pseud-banner-preview {
+    width: 100%;
+    max-width: 400px;
+    height: 80px;
+    border-radius: 8px;
+    overflow: hidden;
+    background: var(--md-sys-color-surface-container-highest);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .pseud-banner-preview img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
+
+  /* ─── Pinned works ────────────────────────────────── */
+  .pinned-works-edit-list {
+    max-height: 240px;
+    overflow-y: auto;
+    border: 1px solid var(--md-sys-color-outline-variant);
+    border-radius: 8px;
+    padding: 0.5rem;
+  }
+
+  .pin-work-item {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.4rem 0.35rem;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 0.85rem;
+  }
+
+  .pin-work-item:hover {
+    background: var(--md-sys-color-surface-container-high);
+  }
+
+  .pin-work-checkbox {
+    flex-shrink: 0;
+  }
+
+  .pin-work-title {
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--md-sys-color-on-surface);
+  }
+
+  .pin-work-meta {
+    color: var(--md-sys-color-on-surface-variant);
+    font-size: 0.75rem;
+    flex-shrink: 0;
   }
 
   .pseud-icon {

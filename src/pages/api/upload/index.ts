@@ -57,8 +57,8 @@ export const POST: APIRoute = async ({ locals, request }) => {
   }
 
   const type = fields.get('type');
-  if (!type || (type !== 'avatar' && type !== 'pseud' && type !== 'chapter')) {
-    return new Response(JSON.stringify({ error: 'Invalid type. Must be "avatar", "pseud", or "chapter".' }), {
+  if (!type || (type !== 'avatar' && type !== 'pseud' && type !== 'chapter' && type !== 'banner')) {
+    return new Response(JSON.stringify({ error: 'Invalid type. Must be "avatar", "pseud", "chapter", or "banner".' }), {
       status: 400,
       headers: { 'Content-Type': 'application/json' },
     });
@@ -194,6 +194,53 @@ export const POST: APIRoute = async ({ locals, request }) => {
       });
     }
 
+    if (type === 'banner') {
+      const pseudIdStr = fields.get('id');
+      if (!pseudIdStr) {
+        return new Response(JSON.stringify({ error: 'Pseud ID required for banner uploads.' }), {
+          status: 400,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+      const pseudId = parseInt(pseudIdStr, 10);
+      if (isNaN(pseudId)) {
+        return new Response(JSON.stringify({ error: 'Invalid pseud ID.' }), {
+          status: 400,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+
+      // Verify pseud ownership
+      const pseud = await queryFirst<any>(db, 'SELECT banner_key FROM pseuds WHERE id = ? AND user_id = ?', pseudId, auth.user.id);
+      if (!pseud) {
+        return new Response(JSON.stringify({ error: 'Pseud not found or not yours.' }), {
+          status: 404,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+
+      // Upload banner — stored under pseuds/ prefix (same bucket, different convention)
+      // Banners are wider images, 5MB limit is fine
+      const result = await uploadImage(bucket, 'pseuds', pseudId, {
+        arrayBuffer: async () => file.data,
+        type: file.type,
+        size: file.size,
+      });
+
+      // Clean up old banner
+      if (pseud.banner_key) {
+        await deleteImage(bucket, pseud.banner_key).catch(() => {});
+      }
+
+      // Update DB
+      await run(db, 'UPDATE pseuds SET banner_key = ? WHERE id = ? AND user_id = ?', result.key, pseudId, auth.user.id);
+
+      return new Response(JSON.stringify({ key: result.key, url: `/api/storage/${result.key}` }), {
+        status: 201,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
+
     return new Response(JSON.stringify({ error: 'Invalid upload type' }), {
       status: 400,
       headers: { 'Content-Type': 'application/json' },
@@ -253,7 +300,7 @@ export const DELETE: APIRoute = async ({ locals, request }) => {
         headers: { 'Content-Type': 'application/json' },
       });
     }
-    const pseud = await queryFirst<any>(db, 'SELECT icon_key FROM pseuds WHERE id = ? AND user_id = ?', pseudId, auth.user.id);
+    const pseud = await queryFirst<any>(db, 'SELECT icon_key, banner_key FROM pseuds WHERE id = ? AND user_id = ?', pseudId, auth.user.id);
     if (!pseud) {
       return new Response(JSON.stringify({ error: 'Pseud not found' }), {
         status: 404,
@@ -263,6 +310,29 @@ export const DELETE: APIRoute = async ({ locals, request }) => {
     if (pseud.icon_key) {
       await deleteImage(bucket, pseud.icon_key);
       await run(db, 'UPDATE pseuds SET icon_key = NULL WHERE id = ? AND user_id = ?', pseudId, auth.user.id);
+    }
+    return new Response(JSON.stringify({ success: true }), {
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+
+  if (type === 'banner') {
+    if (!pseudId) {
+      return new Response(JSON.stringify({ error: 'Pseud ID required' }), {
+        status: 400,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
+    const pseud = await queryFirst<any>(db, 'SELECT banner_key FROM pseuds WHERE id = ? AND user_id = ?', pseudId, auth.user.id);
+    if (!pseud) {
+      return new Response(JSON.stringify({ error: 'Pseud not found' }), {
+        status: 404,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
+    if (pseud.banner_key) {
+      await deleteImage(bucket, pseud.banner_key);
+      await run(db, 'UPDATE pseuds SET banner_key = NULL WHERE id = ? AND user_id = ?', pseudId, auth.user.id);
     }
     return new Response(JSON.stringify({ success: true }), {
       headers: { 'Content-Type': 'application/json' },
@@ -332,7 +402,7 @@ export const DELETE: APIRoute = async ({ locals, request }) => {
     });
   }
 
-  return new Response(JSON.stringify({ error: 'Invalid type. Must be "avatar", "pseud", or "chapter".' }), {
+  return new Response(JSON.stringify({ error: 'Invalid type. Must be "avatar", "pseud", "banner", or "chapter".' }), {
     status: 400,
     headers: { 'Content-Type': 'application/json' },
   });
