@@ -36,6 +36,25 @@ const categoryTag = tags.find(t => t.type === 'category');
 const warningTag = tags.find(t => t.type === 'warning');
 
 const initialTagsJson = JSON.stringify(initialTagState);
+
+// Fetch existing relations for this work
+const existingRelations = await queryAll<any>(
+  db,
+  `SELECT wr.id, wr.related_work_id, wr.relation_type, w.title as related_title
+   FROM work_relations wr JOIN works w ON w.id = wr.related_work_id
+   WHERE wr.work_id = ?1 ORDER BY wr.created_at DESC`,
+  workId
+);
+const existingRelationsJson = JSON.stringify(existingRelations);
+
+const RELATION_TYPES = [
+  { value: 'inspired_by', label: 'Inspired by' },
+  { value: 'remix_of', label: 'Remix of' },
+  { value: 'response_to', label: 'Response to' },
+  { value: 'alternate_pov', label: 'Alternate POV of' },
+  { value: 'continuation_of', label: 'Continuation of' },
+  { value: 'fix_it_for', label: 'Fix-it for' },
+];
 ---
 
 <Base title={`Settings: ${work.title} — fanfiction.fyi`}>
@@ -120,6 +139,35 @@ const initialTagsJson = JSON.stringify(initialTagState);
         </div>
       </div>
 
+      <!-- Card 4: Lineage (Relations) -->
+      <div class="m3-card">
+        <h2 class="m3-card-title">Lineage</h2>
+        <p class="m3-card-desc">Link this work to others it's related to — inspirations, remixes, continuations.</p>
+
+        <div id="existing-relations" class="relations-list" data-work-id={workId}>
+          {existingRelations.length === 0 && <p class="m3-hint">No relations yet. Add one below.</p>}
+          {existingRelations.map(r => {
+            const typeLabel = RELATION_TYPES.find(t => t.value === r.relation_type)?.label || r.relation_type;
+            return (
+              <div class="relation-row" data-relation-id={r.id}>
+                <span class="relation-type-badge">{typeLabel}</span>
+                <a href={`/works/${r.related_work_id}`} class="relation-work-link">{r.related_title}</a>
+                <button type="button" class="relation-remove-btn" data-relation-id={r.id} data-work-id={workId} title="Remove relation">✕</button>
+              </div>
+            );
+          })}
+        </div>
+
+        <div class="add-relation-form">
+          <select id="relation-type" class="m3-select">
+            {RELATION_TYPES.map(t => <option value={t.value}>{t.label}</option>)}
+          </select>
+          <input type="number" id="relation-work-id" class="m3-input" placeholder="Work ID" min="1" />
+          <button type="button" id="add-relation-btn" class="m3-btn-filled">Add Relation</button>
+        </div>
+        <p class="m3-hint">Enter the ID of the work you want to link. You can find it in the work's URL.</p>
+      </div>
+
       <div class="form-actions">
         <a href={`/works/${workId}/draft`} class="m3-btn-outlined">Back to Writing</a>
         <button type="submit" class="m3-btn-filled" id="save-btn">Save Changes</button>
@@ -162,6 +210,87 @@ const initialTagsJson = JSON.stringify(initialTagState);
 
   .tag-chips-field {
     position: relative;
+  }
+
+  .m3-card-desc {
+    font: var(--md-sys-typescale-body-medium);
+    color: var(--md-sys-color-on-surface-variant);
+    margin: 0 0 var(--space-4) 0;
+  }
+
+  .relations-list {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+    margin-bottom: var(--space-4);
+  }
+
+  .relation-row {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    background: var(--md-sys-color-surface-container);
+    border-radius: var(--md-sys-shape-corner-medium);
+    padding: var(--space-2) var(--space-3);
+  }
+
+  .relation-type-badge {
+    font: var(--md-sys-typescale-label-medium);
+    background: var(--md-sys-color-tertiary-container);
+    color: var(--md-sys-color-on-tertiary-container);
+    padding: 2px var(--space-2);
+    border-radius: var(--md-sys-shape-corner-full);
+    white-space: nowrap;
+  }
+
+  .relation-work-link {
+    font: var(--md-sys-typescale-body-medium);
+    color: var(--md-sys-color-primary);
+    text-decoration: none;
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .relation-work-link:hover { text-decoration: underline; }
+
+  .relation-remove-btn {
+    background: none;
+    border: none;
+    color: var(--md-sys-color-error);
+    cursor: pointer;
+    font-size: 16px;
+    padding: 4px;
+    border-radius: var(--md-sys-shape-corner-full);
+    line-height: 1;
+  }
+
+  .relation-remove-btn:hover {
+    background: var(--md-sys-color-error-container);
+    color: var(--md-sys-color-on-error-container);
+  }
+
+  .add-relation-form {
+    display: flex;
+    gap: var(--space-2);
+    align-items: center;
+    flex-wrap: wrap;
+  }
+
+  .add-relation-form .m3-select {
+    min-width: 160px;
+  }
+
+  .add-relation-form .m3-input {
+    width: 120px;
+  }
+
+  .m3-hint {
+    font: var(--md-sys-typescale-body-small);
+    color: var(--md-sys-color-outline);
+    margin: var(--space-2) 0 0 0;
   }
 </style>
 
@@ -244,6 +373,67 @@ const initialTagsJson = JSON.stringify(initialTagState);
       } else {
         const data = await res.json();
         errorEl.textContent = data.error || 'Failed to delete work';
+      }
+    } catch {
+      errorEl.textContent = 'Network error';
+    }
+  });
+
+  // Lineage: Add relation
+  const addRelationBtn = document.getElementById('add-relation-btn');
+  const relationTypeSelect = document.getElementById('relation-type') as HTMLSelectElement;
+  const relationWorkIdInput = document.getElementById('relation-work-id') as HTMLInputElement;
+  const relationsContainer = document.getElementById('existing-relations')!;
+
+  if (addRelationBtn) {
+    addRelationBtn.addEventListener('click', async () => {
+      const relatedWorkId = Number(relationWorkIdInput.value);
+      const relationType = relationTypeSelect.value;
+      if (!relatedWorkId || relatedWorkId <= 0) {
+        errorEl.textContent = 'Enter a valid Work ID';
+        return;
+      }
+      try {
+        const res = await fetch(`/api/works/${workId}/relations`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ related_work_id: relatedWorkId, relation_type: relationType }),
+        });
+        if (res.ok) {
+          relationWorkIdInput.value = '';
+          // Reload to refresh the relations list
+          window.location.reload();
+        } else {
+          const data = await res.json();
+          errorEl.textContent = data.error || 'Failed to add relation';
+        }
+      } catch {
+        errorEl.textContent = 'Network error';
+      }
+    });
+  }
+
+  // Lineage: Remove relation
+  relationsContainer.addEventListener('click', async (e) => {
+    const target = e.target as HTMLElement;
+    if (!target.classList.contains('relation-remove-btn')) return;
+    const relationId = target.getAttribute('data-relation-id');
+    const wid = target.getAttribute('data-work-id');
+    if (!relationId || !wid) return;
+    if (!confirm('Remove this relation?')) return;
+    try {
+      const res = await fetch(`/api/works/${wid}/relations/${relationId}`, { method: 'DELETE' });
+      if (res.ok) {
+        // Remove the row from the DOM
+        const row = target.closest('.relation-row') as HTMLElement;
+        if (row) row.remove();
+        // If no relations left, show the hint
+        if (!relationsContainer.querySelector('.relation-row')) {
+          const hint = document.createElement('p');
+          hint.className = 'm3-hint';
+          hint.textContent = 'No relations yet. Add one below.';
+          relationsContainer.appendChild(hint);
+        }
       }
     } catch {
       errorEl.textContent = 'Network error';

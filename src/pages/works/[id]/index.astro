@@ -46,6 +46,40 @@ const seriesLinks = await queryAll<any>(
   workId
 );
 
+// Work relations (lineage)
+const RELATION_LABELS: Record<string, string> = {
+  inspired_by: 'Inspired by',
+  remix_of: 'Remix of',
+  response_to: 'Response to',
+  alternate_pov: 'Alternate POV of',
+  continuation_of: 'Continuation of',
+  fix_it_for: 'Fix-it for',
+};
+const INVERSE_LABELS: Record<string, string> = {
+  inspired_by: 'Inspired',
+  remix_of: 'Remixed by',
+  response_to: 'Response by',
+  alternate_pov: 'Alternate POV',
+  continuation_of: 'Continued by',
+  fix_it_for: 'Fix-it for',
+};
+
+const outgoingRelations = await queryAll<any>(
+  db,
+  `SELECT wr.id, wr.related_work_id, wr.relation_type, w.title as related_title, w.published_at as related_published
+   FROM work_relations wr JOIN works w ON w.id = wr.related_work_id
+   WHERE wr.work_id = ?1 ORDER BY wr.created_at DESC`,
+  workId
+);
+const incomingRelations = await queryAll<any>(
+  db,
+  `SELECT wr.id, wr.work_id, wr.relation_type, w.title as source_title, w.published_at as source_published
+   FROM work_relations wr JOIN works w ON w.id = wr.work_id
+   WHERE wr.related_work_id = ?1 ORDER BY wr.created_at DESC`,
+  workId
+);
+const hasRelations = outgoingRelations.length > 0 || incomingRelations.length > 0;
+
 // Group tags by type
 const tagsByType: Record<string, string[]> = {};
 for (const t of tags) {
@@ -139,6 +173,27 @@ const commentsJson = JSON.stringify(allComments);
       )}
 
       {tagsByType.rating && <div class="tag-group"><span class="tag-label">Rating:</span> {tagsByType.rating.map(t => <span class="tag-pill tag-rating">{t}</span>)}</div>}
+
+      {hasRelations && (
+        <div class="work-relations">
+          <h4 class="relations-heading">Related Works</h4>
+          <ul class="relations-list">
+            {outgoingRelations.map(r => (
+              <li class="relation-item">
+                <span class="relation-label">{RELATION_LABELS[r.relation_type] || r.relation_type}</span>
+                <a href={`/works/${r.related_work_id}`} class="relation-link">{r.related_title}</a>
+              </li>
+            ))}
+            {incomingRelations.map(r => (
+              <li class="relation-item">
+                <span class="relation-label inverse">{INVERSE_LABELS[r.relation_type] || r.relation_type}</span>
+                <a href={`/works/${r.work_id}`} class="relation-link">{r.source_title}</a>
+              </li>
+            ))}
+          </ul>
+          <a href={`/works/${workId}/lineage`} class="lineage-link">View Lineage Graph ↗</a>
+        </div>
+      )}
       {tagsByType.warning && <div class="tag-group"><span class="tag-label">Warnings:</span> {tagsByType.warning.map(t => <span class="tag-pill tag-warning">{t}</span>)}</div>}
       {tagsByType.category && <div class="tag-group"><span class="tag-label">Category:</span> {tagsByType.category.map(t => <span class="tag-pill">{t}</span>)}</div>}
       {tagsByType.fandom && <div class="tag-group"><span class="tag-label">Fandom:</span> {tagsByType.fandom.map(t => <span class="tag-pill">{t}</span>)}</div>}
@@ -308,6 +363,17 @@ const commentsJson = JSON.stringify(allComments);
   .work-series { display: flex; flex-wrap: wrap; gap: var(--space-2); margin-top: var(--space-2); }
   .series-link { font: var(--md-sys-typescale-body-medium); color: var(--md-sys-color-on-surface-variant); }
   .series-link a { color: var(--md-sys-color-primary); }
+
+  .work-relations { margin-top: var(--space-3); }
+  .relations-heading { font: var(--md-sys-typescale-title-small); color: var(--md-sys-color-on-surface-variant); margin: 0 0 var(--space-2); }
+  .relations-list { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: var(--space-1); }
+  .relation-item { display: flex; align-items: center; gap: var(--space-2); flex-wrap: wrap; }
+  .relation-label { font: var(--md-sys-typescale-label-medium); background: var(--md-sys-color-tertiary-container); color: var(--md-sys-color-on-tertiary-container); padding: 1px var(--space-2); border-radius: var(--md-sys-shape-corner-full); white-space: nowrap; }
+  .relation-label.inverse { background: var(--md-sys-color-secondary-container); color: var(--md-sys-color-on-secondary-container); }
+  .relation-link { color: var(--md-sys-color-primary); font: var(--md-sys-typescale-body-medium); text-decoration: none; }
+  .relation-link:hover { text-decoration: underline; }
+  .lineage-link { font: var(--md-sys-typescale-label-medium); color: var(--md-sys-color-primary); display: inline-block; margin-top: var(--space-2); text-decoration: none; }
+  .lineage-link:hover { text-decoration: underline; }
 
   .tag-group { display: flex; flex-wrap: wrap; gap: var(--space-2); align-items: center; margin: var(--space-1) 0; }
   .tag-label { font: var(--md-sys-typescale-label-large); color: var(--md-sys-color-on-surface-variant); }
