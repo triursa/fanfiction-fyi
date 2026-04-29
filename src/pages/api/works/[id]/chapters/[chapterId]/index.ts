@@ -5,6 +5,18 @@ import { requireAuth } from '@/lib/auth';
 import { markdownToHtml } from '@/lib/markdown';
 import type { APIRoute } from 'astro';
 
+export const GET: APIRoute = async ({ params, locals }) => {
+  const db = locals.runtime.env.DB as D1Database;
+  const workId = Number(params.id);
+  const chapterId = Number(params.chapterId);
+  if (!workId || !chapterId) return new Response(JSON.stringify({ error: 'Not found' }), { status: 404, headers: { 'Content-Type': 'application/json' } });
+
+  const chapter = await queryFirst<any>(db, `SELECT * FROM chapters WHERE id = ?1 AND work_id = ?2`, chapterId, workId);
+  if (!chapter) return new Response(JSON.stringify({ error: 'Chapter not found' }), { status: 404, headers: { 'Content-Type': 'application/json' } });
+
+  return new Response(JSON.stringify(chapter), { headers: { 'Content-Type': 'application/json' } });
+};
+
 export const PUT: APIRoute = async ({ params, request, locals }) => {
   const db = locals.runtime.env.DB as D1Database;
   const auth = await requireAuth(db, request);

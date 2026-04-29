@@ -148,8 +148,8 @@ const commentsJson = JSON.stringify(allComments);
 
       {isOwner && (
         <div class="work-owner-actions">
-          <a href={`/works/${work.id}/edit`} class="btn-secondary">Edit Work</a>
-          <a href={`/works/${work.id}/edit`} class="btn-secondary">Add Chapter</a>
+          <a href={`/works/${work.id}/settings`} class="btn-secondary">Edit Work</a>
+          <a href={`/works/${work.id}/draft`} class="btn-secondary">Write / Add Chapter</a>
         </div>
       )}
     </header>

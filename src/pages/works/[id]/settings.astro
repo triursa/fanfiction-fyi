@@ -1,0 +1,242 @@
+---
+export const prerender = false;
+import Base from '../../../layouts/Base.astro';
+import TagChips from '../../../components/TagChips';
+import { queryFirst, queryAll } from '../../../lib/db';
+import { getAuth } from '../../../lib/auth';
+
+const workId = Number(Astro.params.id);
+if (!workId) return Astro.redirect('/works');
+
+const db = Astro.locals.runtime.env.DB as D1Database;
+
+const work = await queryFirst<any>(db, `SELECT * FROM works WHERE id = ?1`, workId);
+if (!work) return Astro.redirect('/works');
+
+const tags = await queryAll<any>(db, `SELECT t.id, t.name, t.type FROM tags t JOIN taggings tg ON t.id = tg.tag_id WHERE tg.work_id = ?1`, workId);
+const pseuds = await queryAll<any>(db, `SELECT p.*, c.role FROM pseuds p JOIN creatorships c ON p.id = c.pseud_id WHERE c.work_id = ?1`, workId);
+
+// Auth check
+const auth = await getAuth(db, Astro.request);
+if (!auth) return Astro.redirect('/login');
+const isOwner = auth.pseuds.some(p => pseuds.some(wp => wp.id === p.id));
+if (!isOwner) return Astro.redirect(`/works/${workId}`);
+
+// Group tags by type for pre-filling
+const initialTagState: Record<string, { id: number; name: string }[]> = {};
+for (const t of tags) {
+  if (['fandom', 'character', 'relationship', 'freeform'].includes(t.type)) {
+    if (!initialTagState[t.type]) initialTagState[t.type] = [];
+    initialTagState[t.type].push({ id: t.id, name: t.name });
+  }
+}
+
+const ratingTag = tags.find(t => t.type === 'rating');
+const categoryTag = tags.find(t => t.type === 'category');
+const warningTag = tags.find(t => t.type === 'warning');
+
+const initialTagsJson = JSON.stringify(initialTagState);
+---
+
+<Base title={`Settings: ${work.title} — fanfiction.fyi`}>
+  <section class="story-setup">
+    <h1 class="page-title">Story Settings</h1>
+    <p class="page-subtitle">Edit the metadata for your story. Writing happens in the <a href={`/works/${workId}/draft`} class="m3-link">draft workspace</a>.</p>
+
+    <form id="settings-form" class="form-stack">
+      <!-- Card 1: The Basics -->
+      <div class="m3-card">
+        <h2 class="m3-card-title">The Basics</h2>
+        <div class="form-stack" style="gap: var(--space-4)">
+          <div class="m3-form-field">
+            <label for="title">Title <span class="required">*</span></label>
+            <input type="text" id="title" name="title" required value={work.title} class="m3-input" />
+          </div>
+          <div class="m3-form-field">
+            <label for="summary">Summary</label>
+            <textarea id="summary" name="summary" rows="4" class="m3-textarea">{work.summary || ''}</textarea>
+          </div>
+          <div class="m3-form-field">
+            <label for="notes">Author's Notes</label>
+            <textarea id="notes" name="notes" rows="3" class="m3-textarea">{work.notes || ''}</textarea>
+          </div>
+          <div class="m3-form-field">
+            <label>
+              <input type="checkbox" id="complete" name="complete" checked={!!work.complete} style="accent-color: var(--md-sys-color-primary); margin-right: var(--space-2);" />
+              Mark as Complete
+            </label>
+          </div>
+        </div>
+      </div>
+
+      <!-- Card 2: Taxonomy -->
+      <div class="m3-card">
+        <h2 class="m3-card-title">Taxonomy</h2>
+        <div class="form-stack" style="gap: var(--space-4)">
+          <TagChips client:load type="fandom" label="Fandom" placeholder="e.g. Harry Potter, Marvel" initialTags={initialTagState.fandom || []} />
+          <TagChips client:load type="character" label="Characters" placeholder="e.g. Hermione Granger" initialTags={initialTagState.character || []} />
+          <TagChips client:load type="relationship" label="Relationships" placeholder="e.g. Harry Potter/Ginny Weasley" initialTags={initialTagState.relationship || []} />
+          <TagChips client:load type="freeform" label="Additional Tags" placeholder="e.g. Angst, Fluff, Slow Burn" initialTags={initialTagState.freeform || []} />
+        </div>
+      </div>
+
+      <!-- Card 3: Classification -->
+      <div class="m3-card">
+        <h2 class="m3-card-title">Classification</h2>
+        <div class="form-row">
+          <div class="m3-form-field">
+            <label for="rating">Rating</label>
+            <select id="rating" name="rating_tags" class="m3-select">
+              <option value="" selected={!ratingTag}>Not Rated</option>
+              <option value="General Audiences" selected={ratingTag?.name === 'General Audiences'}>General Audiences</option>
+              <option value="Teen And Up Audiences" selected={ratingTag?.name === 'Teen And Up Audiences'}>Teen And Up Audiences</option>
+              <option value="Mature" selected={ratingTag?.name === 'Mature'}>Mature</option>
+              <option value="Explicit" selected={ratingTag?.name === 'Explicit'}>Explicit</option>
+            </select>
+          </div>
+          <div class="m3-form-field">
+            <label for="category">Category</label>
+            <select id="category" name="category_tags" class="m3-select">
+              <option value="" selected={!categoryTag}>None</option>
+              <option value="F/F" selected={categoryTag?.name === 'F/F'}>F/F</option>
+              <option value="F/M" selected={categoryTag?.name === 'F/M'}>F/M</option>
+              <option value="Gen" selected={categoryTag?.name === 'Gen'}>Gen</option>
+              <option value="M/M" selected={categoryTag?.name === 'M/M'}>M/M</option>
+              <option value="Multi" selected={categoryTag?.name === 'Multi'}>Multi</option>
+              <option value="Other" selected={categoryTag?.name === 'Other'}>Other</option>
+            </select>
+          </div>
+          <div class="m3-form-field">
+            <label for="warning">Warnings</label>
+            <select id="warning" name="warning_tags" class="m3-select">
+              <option value="" selected={!warningTag}>No Archive Warnings Apply</option>
+              <option value="Choose Not To Use Archive Warnings" selected={warningTag?.name === 'Choose Not To Use Archive Warnings'}>Choose Not To Use Archive Warnings</option>
+              <option value="Graphic Depictions Of Violence" selected={warningTag?.name === 'Graphic Depictions Of Violence'}>Graphic Depictions Of Violence</option>
+              <option value="Major Character Death" selected={warningTag?.name === 'Major Character Death'}>Major Character Death</option>
+              <option value="Rape/Non-Con" selected={warningTag?.name === 'Rape/Non-Con'}>Rape/Non-Con</option>
+              <option value="Underage" selected={warningTag?.name === 'Underage'}>Underage</option>
+            </select>
+          </div>
+        </div>
+      </div>
+
+      <div class="form-actions">
+        <a href={`/works/${workId}/draft`} class="m3-btn-outlined">Back to Writing</a>
+        <button type="submit" class="m3-btn-filled" id="save-btn">Save Changes</button>
+        <button type="button" id="delete-btn" class="m3-btn-danger">Delete Work</button>
+      </div>
+
+      <div id="form-error" class="form-error" role="alert"></div>
+    </form>
+  </section>
+</Base>
+
+<style is:global>
+  @import '../../../styles/theme.css';
+  @import '../../../styles/composer.css';
+
+  .page-title {
+    font: var(--md-sys-typescale-headline-large);
+    color: var(--md-sys-color-on-surface);
+    margin: 0 0 var(--space-1) 0;
+  }
+
+  .page-subtitle {
+    font: var(--md-sys-typescale-body-medium);
+    color: var(--md-sys-color-on-surface-variant);
+    margin: 0 0 var(--space-6) 0;
+  }
+
+  .page-subtitle a {
+    color: var(--md-sys-color-primary);
+    text-decoration: none;
+  }
+
+  .page-subtitle a:hover {
+    text-decoration: underline;
+  }
+
+  .required {
+    color: var(--md-sys-color-error);
+  }
+
+  .tag-chips-field {
+    position: relative;
+  }
+</style>
+
+<script define:vars={{ workId, initialTagsJson }}>
+  const initialTags = JSON.parse(initialTagsJson);
+
+  const form = document.getElementById('settings-form') as HTMLFormElement;
+  const errorEl = document.getElementById('form-error')!;
+  const saveBtn = document.getElementById('save-btn') as HTMLButtonElement;
+  const deleteBtn = document.getElementById('delete-btn')!;
+
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    errorEl.textContent = '';
+    saveBtn.disabled = true;
+    saveBtn.textContent = 'Saving...';
+
+    const title = (document.getElementById('title') as HTMLInputElement).value;
+    const summary = (document.getElementById('summary') as HTMLTextAreaElement).value;
+    const notes = (document.getElementById('notes') as HTMLTextAreaElement).value;
+    const complete = (document.getElementById('complete') as HTMLInputElement).checked;
+    const rating = (document.getElementById('rating') as HTMLSelectElement).value;
+    const category = (document.getElementById('category') as HTMLSelectElement).value;
+    const warning = (document.getElementById('warning') as HTMLSelectElement).value;
+
+    // Gather tag IDs from hidden inputs created by TagChips
+    const tagIds: number[] = [];
+    document.querySelectorAll('input[name^="tag_"]').forEach((input) => {
+      const id = Number((input as HTMLInputElement).value);
+      if (id && !tagIds.includes(id)) tagIds.push(id);
+    });
+
+    try {
+      const res = await fetch(`/api/works/${workId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          title,
+          summary: summary || null,
+          notes: notes || null,
+          complete,
+          tag_ids: tagIds,
+          rating: rating || null,
+          category: category || null,
+          warning: warning || null,
+        }),
+      });
+      if (res.ok) {
+        window.location.href = `/works/${workId}/draft`;
+      } else {
+        const data = await res.json();
+        errorEl.textContent = data.error || 'Failed to save changes';
+        saveBtn.disabled = false;
+        saveBtn.textContent = 'Save Changes';
+      }
+    } catch {
+      errorEl.textContent = 'Network error';
+      saveBtn.disabled = false;
+      saveBtn.textContent = 'Save Changes';
+    }
+  });
+
+  // Delete work
+  deleteBtn.addEventListener('click', async () => {
+    if (!confirm('Are you sure you want to delete this work? This cannot be undone.')) return;
+    try {
+      const res = await fetch(`/api/works/${workId}`, { method: 'DELETE' });
+      if (res.ok) {
+        window.location.href = '/works';
+      } else {
+        const data = await res.json();
+        errorEl.textContent = data.error || 'Failed to delete work';
+      }
+    } catch {
+      errorEl.textContent = 'Network error';
+    }
+  });
+</script>
