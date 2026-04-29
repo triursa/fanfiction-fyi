@@ -212,3 +212,65 @@ export interface SerialWork {
   work_id: number;
   position: number;
 }
+
+// ─── Canon Layer ──────────────────────────────────
+
+export type LoreCategory = 'general' | 'magic' | 'history' | 'organization' | 'concept' | 'item' | 'event' | 'culture' | 'species';
+
+export type EntityType = 'character' | 'lore' | 'location';
+
+export interface LoreEntry {
+  id: number;
+  title: string;
+  slug: string;
+  body_md?: string | null;
+  body_html?: string | null;
+  category: LoreCategory;
+  fandom_tag_id?: number | null;
+  created_by?: number | null;
+  updated_by?: number | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface Location {
+  id: number;
+  name: string;
+  slug: string;
+  description_md?: string | null;
+  description_html?: string | null;
+  fandom_tag_id?: number | null;
+  parent_location_id?: number | null;
+  created_by?: number | null;
+  updated_by?: number | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface EntityReference {
+  id: number;
+  work_id: number;
+  entity_type: EntityType;
+  entity_id: number;
+  created_at: string;
+}
+
+export interface LoreEdit {
+  id: number;
+  lore_entry_id: number;
+  pseud_id?: number | null;
+  field: string;
+  old_value?: string | null;
+  new_value?: string | null;
+  created_at: string;
+}
+
+export interface LocationEdit {
+  id: number;
+  location_id: number;
+  pseud_id?: number | null;
+  field: string;
+  old_value?: string | null;
+  new_value?: string | null;
+  created_at: string;
+}
