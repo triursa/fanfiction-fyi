@@ -1,0 +1,310 @@
+---
+export const prerender = false;
+import Base from '../../../layouts/Base.astro';
+import { getAuth } from '../../../lib/auth';
+
+const db = Astro.locals.runtime.env.DB as D1Database;
+const auth = await getAuth(db, Astro.request);
+
+if (!auth) return Astro.redirect('/login');
+---
+
+<Base title="New Location — fanfiction.fyi">
+  <section class="location-new">
+    <h1 class="page-title">Create Location</h1>
+    <p class="page-subtitle">Add a new location to the Canon Layer atlas.</p>
+
+    <form id="location-form" class="form-stack">
+      <div class="m3-card">
+        <h2 class="m3-card-title">Details</h2>
+        <div class="form-stack" style="gap: var(--space-4)">
+          <div class="m3-form-field">
+            <label for="name">Name <span class="required">*</span></label>
+            <input type="text" id="name" name="name" required placeholder="e.g. Paris" class="m3-input" />
+          </div>
+
+          <div class="m3-form-field">
+            <label for="description">Description (Markdown)</label>
+            <textarea id="description" name="description_md" rows="12" placeholder="Describe this location in Markdown. Use [[:Location:Other Place]] for wiki-links.\n\ne.g. Located near [[:Location:London]], this city…" class="m3-textarea"></textarea>
+          </div>
+
+          <div class="m3-form-field">
+            <label for="fandom">Fandom <span class="required">*</span></label>
+            <div class="fandom-autocomplete-wrap">
+              <input type="text" id="fandom" name="fandom" required placeholder="Start typing a fandom…" class="m3-input" autocomplete="off" />
+              <ul id="fandom-suggestions" class="autocomplete-list" role="listbox"></ul>
+              <input type="hidden" id="fandom-value" name="fandom_value" />
+            </div>
+          </div>
+
+          <div class="m3-form-field">
+            <label for="parent">Parent Location</label>
+            <div class="parent-autocomplete-wrap">
+              <input type="text" id="parent" name="parent" placeholder="Search for a parent location…" class="m3-input" autocomplete="off" />
+              <ul id="parent-suggestions" class="autocomplete-list" role="listbox"></ul>
+              <input type="hidden" id="parent-id" name="parent_id" />
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="form-actions">
+        <a href="/canon?tab=locations" class="m3-btn-outlined">Cancel</a>
+        <button type="submit" class="m3-btn-filled" id="submit-btn">Create Location</button>
+      </div>
+
+      <div id="form-error" class="form-error" role="alert"></div>
+    </form>
+  </section>
+</Base>
+
+<style is:global>
+  @import '../../../styles/theme.css';
+
+  .location-new { max-width: 700px; margin: 0 auto; }
+
+  .page-title {
+    font: var(--md-sys-typescale-headline-large);
+    color: var(--md-sys-color-on-surface);
+    margin: 0 0 var(--space-1);
+  }
+  .page-subtitle {
+    font: var(--md-sys-typescale-body-medium);
+    color: var(--md-sys-color-on-surface-variant);
+    margin: 0 0 var(--space-6);
+  }
+  .required { color: var(--md-sys-color-error); }
+
+  .m3-card {
+    background: var(--md-sys-color-surface-container);
+    border: 1px solid var(--md-sys-color-outline-variant);
+    border-radius: var(--md-sys-shape-corner-large);
+    padding: var(--space-6);
+  }
+  .m3-card-title {
+    font: var(--md-sys-typescale-title-large);
+    color: var(--md-sys-color-on-surface);
+    margin: 0 0 var(--space-4);
+  }
+
+  .form-stack { display: flex; flex-direction: column; gap: var(--space-4); }
+  .m3-form-field { display: flex; flex-direction: column; gap: var(--space-1); }
+  .m3-form-field label {
+    font: var(--md-sys-typescale-label-large);
+    color: var(--md-sys-color-on-surface-variant);
+  }
+  .m3-input {
+    width: 100%;
+    background: var(--md-sys-color-surface-container);
+    color: var(--md-sys-color-on-surface);
+    border: 1px solid var(--md-sys-color-outline-variant);
+    border-radius: var(--md-sys-shape-corner-medium);
+    padding: var(--space-3) var(--space-4);
+    font: var(--md-sys-typescale-body-large);
+  }
+  .m3-input:focus {
+    outline: none;
+    border-color: var(--md-sys-color-primary);
+    box-shadow: 0 0 0 1px var(--md-sys-color-primary);
+  }
+  .m3-textarea {
+    width: 100%;
+    min-height: 200px;
+    background: var(--md-sys-color-surface-container);
+    color: var(--md-sys-color-on-surface);
+    border: 1px solid var(--md-sys-color-outline-variant);
+    border-radius: var(--md-sys-shape-corner-medium);
+    padding: var(--space-3) var(--space-4);
+    font: var(--md-sys-typescale-body-large);
+    font-family: var(--font-mono, monospace);
+    resize: vertical;
+  }
+  .m3-textarea:focus {
+    outline: none;
+    border-color: var(--md-sys-color-primary);
+    box-shadow: 0 0 0 1px var(--md-sys-color-primary);
+  }
+
+  .form-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: var(--space-3);
+  }
+  .form-error {
+    color: var(--md-sys-color-error);
+    font: var(--md-sys-typescale-body-small);
+  }
+
+  .m3-btn-filled {
+    font: var(--md-sys-typescale-label-large);
+    color: var(--md-sys-color-on-primary);
+    background: var(--md-sys-color-primary);
+    border: none;
+    border-radius: var(--md-sys-shape-corner-full);
+    padding: var(--space-2) var(--space-6);
+    cursor: pointer;
+  }
+  .m3-btn-filled:hover {
+    background: var(--md-sys-color-primary-container);
+    color: var(--md-sys-color-on-primary-container);
+  }
+  .m3-btn-outlined {
+    display: inline-block;
+    font: var(--md-sys-typescale-label-large);
+    color: var(--md-sys-color-primary);
+    background: transparent;
+    border: 1px solid var(--md-sys-color-outline);
+    border-radius: var(--md-sys-shape-corner-full);
+    padding: var(--space-2) var(--space-6);
+    cursor: pointer;
+    text-decoration: none;
+  }
+
+  /* Autocomplete */
+  .fandom-autocomplete-wrap,
+  .parent-autocomplete-wrap {
+    position: relative;
+  }
+  .autocomplete-list {
+    position: absolute;
+    top: 100%;
+    left: 0;
+    right: 0;
+    z-index: 10;
+    background: var(--md-sys-color-surface-container-high);
+    border: 1px solid var(--md-sys-color-outline-variant);
+    border-radius: var(--md-sys-shape-corner-medium);
+    max-height: 200px;
+    overflow-y: auto;
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: none;
+  }
+  .autocomplete-list--visible { display: block; }
+  .autocomplete-list li {
+    padding: var(--space-2) var(--space-4);
+    cursor: pointer;
+    font: var(--md-sys-typescale-body-medium);
+    color: var(--md-sys-color-on-surface);
+  }
+  .autocomplete-list li:hover {
+    background: var(--md-sys-color-surface-container-highest);
+  }
+</style>
+
+<script>
+  const form = document.getElementById('location-form') as HTMLFormElement;
+  const errorEl = document.getElementById('form-error')!;
+  const submitBtn = document.getElementById('submit-btn') as HTMLButtonElement;
+  const fandomInput = document.getElementById('fandom') as HTMLInputElement;
+  const fandomSuggestions = document.getElementById('fandom-suggestions') as HTMLUListElement;
+  const parentInput = document.getElementById('parent') as HTMLInputElement;
+  const parentHidden = document.getElementById('parent-id') as HTMLInputElement;
+  const parentSuggestions = document.getElementById('parent-suggestions') as HTMLUListElement;
+
+  let debounceTimer: ReturnType<typeof setTimeout>;
+
+  // Generic autocomplete helper
+  function setupAutocomplete(
+    input: HTMLInputElement,
+    suggestionsEl: HTMLUListElement,
+    fetchUrl: (q: string) => string,
+    onSelect: (item: any) => void
+  ) {
+    input.addEventListener('input', () => {
+      clearTimeout(debounceTimer);
+      const query = input.value.trim();
+      if (!query) {
+        suggestionsEl.classList.remove('autocomplete-list--visible');
+        return;
+      }
+      debounceTimer = setTimeout(async () => {
+        try {
+          const res = await fetch(fetchUrl(query));
+          if (!res.ok) return;
+          const items = await res.json();
+          suggestionsEl.innerHTML = '';
+          for (const item of items.slice(0, 10)) {
+            const li = document.createElement('li');
+            li.textContent = item.name || item.tag || item;
+            li.setAttribute('role', 'option');
+            li.addEventListener('click', () => {
+              onSelect(item);
+              suggestionsEl.classList.remove('autocomplete-list--visible');
+            });
+            suggestionsEl.appendChild(li);
+          }
+          suggestionsEl.classList.toggle('autocomplete-list--visible', items.length > 0);
+        } catch {
+          suggestionsEl.classList.remove('autocomplete-list--visible');
+        }
+      }, 300);
+    });
+
+    input.addEventListener('blur', () => {
+      setTimeout(() => suggestionsEl.classList.remove('autocomplete-list--visible'), 200);
+    });
+  }
+
+  // Fandom autocomplete
+  setupAutocomplete(
+    fandomInput,
+    fandomSuggestions,
+    (q) => `/api/tags?type=fandom&q=${encodeURIComponent(q)}`,
+    (tag) => { fandomInput.value = tag.name; }
+  );
+
+  // Parent location autocomplete (filtered by same fandom)
+  setupAutocomplete(
+    parentInput,
+    parentSuggestions,
+    (q) => `/api/canon/locations?q=${encodeURIComponent(q)}&fandom=${encodeURIComponent(fandomInput.value)}`,
+    (loc) => {
+      parentInput.value = loc.name;
+      parentHidden.value = loc.id;
+    }
+  );
+
+  // Form submission
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    errorEl.textContent = '';
+    submitBtn.disabled = true;
+    submitBtn.textContent = 'Creating…';
+
+    const name = (document.getElementById('name') as HTMLInputElement).value;
+    const descriptionMd = (document.getElementById('description') as HTMLTextAreaElement).value;
+    const fandom = fandomInput.value;
+    const parentId = parentHidden.value ? Number(parentHidden.value) : null;
+
+    if (!name || !fandom) {
+      errorEl.textContent = 'Name and fandom are required.';
+      submitBtn.disabled = false;
+      submitBtn.textContent = 'Create Location';
+      return;
+    }
+
+    try {
+      const res = await fetch('/api/canon/locations', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name, fandom, description_md: descriptionMd || null, parent_id: parentId }),
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        window.location.href = `/canon/locations/${data.id}`;
+      } else {
+        const data = await res.json();
+        errorEl.textContent = data.error || 'Failed to create location';
+        submitBtn.disabled = false;
+        submitBtn.textContent = 'Create Location';
+      }
+    } catch {
+      errorEl.textContent = 'Network error — please try again';
+      submitBtn.disabled = false;
+      submitBtn.textContent = 'Create Location';
+    }
+  });
+</script>

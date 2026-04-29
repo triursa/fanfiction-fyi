@@ -1,9 +1,16 @@
 import { marked } from 'marked';
 import TurndownService from 'turndown';
 import sanitizeHtml from 'sanitize-html';
+import { parseWikiLinks } from './wiki-links';
 
 export function markdownToHtml(md: string): string {
-  const raw = marked.parse(md, { async: false, gfm: true }) as string;
+  // Step 1: Parse wiki-links BEFORE markdown → HTML conversion
+  const withWikiLinks = parseWikiLinks(md);
+
+  // Step 2: Convert markdown to HTML
+  const raw = marked.parse(withWikiLinks, { async: false, gfm: true }) as string;
+
+  // Step 3: Sanitize HTML, allowing wiki-link attributes and classes
   return sanitizeHtml(raw, {
     allowedTags: [
       'h1','h2','h3','h4','h5','h6','p','br','hr','blockquote','pre','code',
@@ -11,10 +18,13 @@ export function markdownToHtml(md: string): string {
       'img','figure','figcaption','sup','sub','details','summary','input',
     ],
     allowedAttributes: {
-      'a': ['href', 'title', 'target', 'rel'],
+      'a': ['href', 'title', 'target', 'rel', 'data-entity', 'data-type'],
       'img': ['src', 'alt', 'title', 'width', 'height'],
       'input': ['checked', 'disabled', 'type'],
       '*': ['class', 'id'],
+    },
+    allowedClasses: {
+      'a': ['wiki-link', 'wiki-link-location', 'wiki-link-lore'],
     },
     allowedSchemes: ['http', 'https', 'mailto'],
     // Allow data URIs for images only (base64 inline images from editor paste)
