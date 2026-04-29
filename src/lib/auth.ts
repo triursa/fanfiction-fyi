@@ -53,7 +53,8 @@ export async function hashPassword(password: string): Promise<string> {
   return `${salt}$${PBKDF2_ITERATIONS}$${hash}`;
 }
 
-export async function verifyPassword(password: string, stored: string): Promise<{ valid: boolean; needsRehash: boolean }> {
+export async function verifyPassword(password: string, stored: string | null): Promise<{ valid: boolean; needsRehash: boolean }> {
+  if (!stored) return { valid: false, needsRehash: false };
   const parts = stored.split('$');
 
   if (parts.length === 3) {

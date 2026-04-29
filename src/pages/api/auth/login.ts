@@ -33,6 +33,11 @@ export const POST: APIRoute = async ({ request, locals, clientAddress }) => {
     return new Response(JSON.stringify({ error: 'Invalid credentials' }), { status: 401, headers: { 'Content-Type': 'application/json' } });
   }
 
+  // OAuth-only users have no password set — guide them to sign in with Google
+  if (user.password_hash === null) {
+    return new Response(JSON.stringify({ error: 'no_password', message: 'This account uses Google sign-in' }), { status: 401, headers: { 'Content-Type': 'application/json' } });
+  }
+
   const { valid, needsRehash } = await verifyPassword(password, user.password_hash);
   if (!valid) {
     await recordFailedAttempt(db, email.toLowerCase(), 'login');
