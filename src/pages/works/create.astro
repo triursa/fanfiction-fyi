@@ -1,0 +1,218 @@
+---
+export const prerender = false;
+import Base from '../../layouts/Base.astro';
+import TagChips from '../../components/TagChips';
+import { getAuth } from '../../lib/auth';
+
+const db = Astro.locals.runtime.env.DB as D1Database;
+const auth = await getAuth(db, Astro.request);
+
+// Redirect unauthenticated users to login
+if (!auth) return Astro.redirect('/login');
+
+const { user, pseuds } = auth;
+
+// Default pseud: match display_name, else first pseud
+const defaultPseudId = pseuds.find(p => p.name === user.display_name)?.id ?? pseuds[0]?.id ?? '';
+---
+
+<Base title="New Work — fanfiction.fyi">
+  <section class="story-setup">
+    <h1 class="page-title">Create a New Work</h1>
+    <p class="page-subtitle">Set up the metadata for your story. You'll write chapters in the next step.</p>
+
+    <form id="create-work-form" class="form-stack">
+      <!-- Card 1: The Basics -->
+      <div class="m3-card">
+        <h2 class="m3-card-title">The Basics</h2>
+        <div class="form-stack" style="gap: var(--space-4)">
+          <div class="m3-form-field">
+            <label for="title">Title <span class="required">*</span></label>
+            <input type="text" id="title" name="title" required placeholder="Give your work a title" class="m3-input" />
+          </div>
+          <div class="m3-form-field">
+            <label for="summary">Summary</label>
+            <textarea id="summary" name="summary" rows="4" placeholder="A brief summary that appears in listings" class="m3-textarea"></textarea>
+          </div>
+          <div class="m3-form-field">
+            <label for="notes">Author's Notes</label>
+            <textarea id="notes" name="notes" rows="3" placeholder="Notes displayed before chapter 1 (optional)" class="m3-textarea"></textarea>
+          </div>
+        </div>
+      </div>
+
+      <!-- Card 2: Taxonomy -->
+      <div class="m3-card">
+        <h2 class="m3-card-title">Taxonomy</h2>
+        <div class="form-stack" style="gap: var(--space-4)">
+          <TagChips client:load type="fandom" label="Fandom" placeholder="e.g. Harry Potter, Marvel" />
+          <TagChips client:load type="character" label="Characters" placeholder="e.g. Hermione Granger" />
+          <TagChips client:load type="relationship" label="Relationships" placeholder="e.g. Harry Potter/Ginny Weasley" />
+          <TagChips client:load type="freeform" label="Additional Tags" placeholder="e.g. Angst, Fluff, Slow Burn" />
+        </div>
+      </div>
+
+      <!-- Card 3: Classification -->
+      <div class="m3-card">
+        <h2 class="m3-card-title">Classification</h2>
+        <div class="form-row">
+          <div class="m3-form-field">
+            <label for="rating">Rating</label>
+            <select id="rating" name="rating_tags" class="m3-select">
+              <option value="">Not Rated</option>
+              <option value="General Audiences">General Audiences</option>
+              <option value="Teen And Up Audiences">Teen And Up Audiences</option>
+              <option value="Mature">Mature</option>
+              <option value="Explicit">Explicit</option>
+            </select>
+          </div>
+          <div class="m3-form-field">
+            <label for="category">Category</label>
+            <select id="category" name="category_tags" class="m3-select">
+              <option value="">None</option>
+              <option value="F/F">F/F</option>
+              <option value="F/M">F/M</option>
+              <option value="Gen">Gen</option>
+              <option value="M/M">M/M</option>
+              <option value="Multi">Multi</option>
+              <option value="Other">Other</option>
+            </select>
+          </div>
+          <div class="m3-form-field">
+            <label for="warning">Warnings</label>
+            <select id="warning" name="warning_tags" class="m3-select">
+              <option value="">No Archive Warnings Apply</option>
+              <option value="Choose Not To Use Archive Warnings">Choose Not To Use Archive Warnings</option>
+              <option value="Graphic Depictions Of Violence">Graphic Depictions Of Violence</option>
+              <option value="Major Character Death">Major Character Death</option>
+              <option value="Rape/Non-Con">Rape/Non-Con</option>
+              <option value="Underage">Underage</option>
+            </select>
+          </div>
+        </div>
+      </div>
+
+      <!-- Post As pseud selector -->
+      <div class="m3-form-field" style="max-width: 300px">
+        <label for="pseud">Post As</label>
+        <select id="pseud" name="pseud_id" class="m3-select">
+          {pseuds.map(p => (
+            <option value={p.id} selected={p.id === defaultPseudId}>{p.name}</option>
+          ))}
+        </select>
+      </div>
+
+      <div class="form-actions">
+        <a href="/works" class="m3-btn-outlined">Cancel</a>
+        <button type="submit" class="m3-btn-filled" id="create-btn">Create Story & Start Writing</button>
+      </div>
+
+      <div id="form-error" class="form-error" role="alert"></div>
+    </form>
+  </section>
+</Base>
+
+<style is:global>
+  @import '../../styles/theme.css';
+  @import '../../styles/composer.css';
+
+  .page-title {
+    font: var(--md-sys-typescale-headline-large);
+    color: var(--md-sys-color-on-surface);
+    margin: 0 0 var(--space-1) 0;
+  }
+
+  .page-subtitle {
+    font: var(--md-sys-typescale-body-medium);
+    color: var(--md-sys-color-on-surface-variant);
+    margin: 0 0 var(--space-6) 0;
+  }
+
+  .required {
+    color: var(--md-sys-color-error);
+  }
+
+  /* Make TagChips wrapper position:relative for dropdown positioning */
+  .tag-chips-field {
+    position: relative;
+  }
+</style>
+
+<script>
+  // Collect tag data from TagChips hidden inputs
+  const form = document.getElementById('create-work-form') as HTMLFormElement;
+  const errorEl = document.getElementById('form-error')!;
+  const createBtn = document.getElementById('create-btn') as HTMLButtonElement;
+
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    errorEl.textContent = '';
+    createBtn.disabled = true;
+    createBtn.textContent = 'Creating...';
+
+    const title = (document.getElementById('title') as HTMLInputElement).value;
+    const summary = (document.getElementById('summary') as HTMLTextAreaElement).value;
+    const notes = (document.getElementById('notes') as HTMLTextAreaElement).value;
+    const pseudSelect = document.getElementById('pseud') as HTMLSelectElement;
+    const pseudId = pseudSelect.value ? Number(pseudSelect.value) : null;
+    const rating = (document.getElementById('rating') as HTMLSelectElement).value;
+    const category = (document.getElementById('category') as HTMLSelectElement).value;
+    const warning = (document.getElementById('warning') as HTMLSelectElement).value;
+
+    // Gather tag data from hidden inputs created by TagChips
+    const tagIds: number[] = [];
+    const tagNames: { name: string; type: string }[] = [];
+    document.querySelectorAll('input[name="tag_id"]').forEach((input) => {
+      const id = Number((input as HTMLInputElement).value);
+      if (id > 0 && !tagIds.includes(id)) tagIds.push(id);
+    });
+    document.querySelectorAll('input[name="tag_name"]').forEach((input) => {
+      try {
+        const tn = JSON.parse((input as HTMLInputElement).value);
+        if (tn.name && tn.type && !tagNames.some(t => t.name === tn.name && t.type === tn.type)) {
+          tagNames.push(tn);
+        }
+      } catch {}
+    });
+
+    if (!pseudId) {
+      errorEl.textContent = 'Please select a pseud (alias) to post as.';
+      createBtn.disabled = false;
+      createBtn.textContent = 'Create Story & Start Writing';
+      return;
+    }
+
+    try {
+      const res = await fetch('/api/works', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          title,
+          summary: summary || null,
+          notes: notes || null,
+          pseud_id: pseudId,
+          skip_chapter: true,  // Create work without initial chapter
+          tag_ids: tagIds,
+          tag_names: tagNames,
+          rating: rating || null,
+          category: category || null,
+          warning: warning || null,
+        }),
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        window.location.href = `/works/${data.work.id}/draft`;
+      } else {
+        const data = await res.json();
+        errorEl.textContent = data.error || 'Failed to create work';
+        createBtn.disabled = false;
+        createBtn.textContent = 'Create Story & Start Writing';
+      }
+    } catch {
+      errorEl.textContent = 'Network error — please try again';
+      createBtn.disabled = false;
+      createBtn.textContent = 'Create Story & Start Writing';
+    }
+  });
+</script>

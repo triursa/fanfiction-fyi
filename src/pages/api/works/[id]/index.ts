@@ -49,10 +49,31 @@ export const PUT: APIRoute = async ({ params, request, locals }) => {
   let body: any;
   try { body = await request.json(); } catch { return new Response(JSON.stringify({ error: 'Invalid JSON' }), { status: 400, headers: { 'Content-Type': 'application/json' } }); }
 
-  // Handle tag updates: clear existing and re-add
-  if (Array.isArray(body.tag_ids)) {
+  // Handle tag updates: resolve tag_names + tag_ids, then clear and re-add
+  const resolvedTagIds: number[] = [...(Array.isArray(body.tag_ids) ? body.tag_ids.filter((id: any) => typeof id === 'number' && id > 0) : [])];
+  
+  if (Array.isArray(body.tag_names)) {
+    const validTypes = ['fandom', 'character', 'relationship', 'freeform'];
+    for (const tn of body.tag_names) {
+      if (!tn.name || !tn.type || !validTypes.includes(tn.type)) continue;
+      const existing = await queryFirst<any>(db, `SELECT id FROM tags WHERE name = ?1 AND type = ?2`, tn.name, tn.type);
+      if (existing) {
+        if (!resolvedTagIds.includes(existing.id)) resolvedTagIds.push(existing.id);
+      } else {
+        const tagResult = await run(db, `INSERT OR IGNORE INTO tags (name, type) VALUES (?1, ?2)`, tn.name, tn.type);
+        if (tagResult.meta.last_row_id && !resolvedTagIds.includes(tagResult.meta.last_row_id)) {
+          resolvedTagIds.push(tagResult.meta.last_row_id);
+        } else {
+          const reFetched = await queryFirst<any>(db, `SELECT id FROM tags WHERE name = ?1 AND type = ?2`, tn.name, tn.type);
+          if (reFetched && !resolvedTagIds.includes(reFetched.id)) resolvedTagIds.push(reFetched.id);
+        }
+      }
+    }
+  }
+
+  if (resolvedTagIds.length > 0 || Array.isArray(body.tag_ids) || Array.isArray(body.tag_names)) {
     await run(db, `DELETE FROM taggings WHERE work_id = ?1`, workId);
-    for (const tagId of body.tag_ids) {
+    for (const tagId of resolvedTagIds) {
       await run(db, `INSERT OR IGNORE INTO taggings (tag_id, work_id) VALUES (?1, ?2)`, tagId, workId);
     }
   }

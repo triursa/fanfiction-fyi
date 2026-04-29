@@ -1,0 +1,638 @@
+---
+export const prerender = false;
+import Base from '../../../layouts/Base.astro';
+import Editor from '../../../components/Editor';
+import { queryFirst, queryAll } from '../../../lib/db';
+import { getAuth } from '../../../lib/auth';
+import { htmlToMarkdown } from '../../../lib/markdown';
+
+const workId = Number(Astro.params.id);
+if (!workId) return Astro.redirect('/works');
+
+const db = Astro.locals.runtime.env.DB as D1Database;
+
+const work = await queryFirst<any>(db, `SELECT * FROM works WHERE id = ?1`, workId);
+if (!work) return Astro.redirect('/works');
+
+const chapters = await queryAll<any>(db, `SELECT id, position, title, draft, mood, word_count, content_md, content_html FROM chapters WHERE work_id = ?1 ORDER BY position`, workId);
+
+// Auth check — verify the user owns this work
+const auth = await getAuth(db, Astro.request);
+if (!auth) return Astro.redirect('/login');
+const creatorships = await queryAll<any>(db, `SELECT * FROM creatorships WHERE work_id = ?1 AND pseud_id IN (${auth.pseuds.map(() => '?').join(',')})`, workId, ...auth.pseuds.map(p => p.id));
+if (creatorships.length === 0) return Astro.redirect(`/works/${workId}`);
+
+// If no chapters exist, auto-create one
+if (chapters.length === 0) {
+  await db.prepare(`INSERT INTO chapters (work_id, position, title, content_md, content_html, draft, word_count, created_at, updated_at) VALUES (?1, 1, 'Chapter 1', '', NULL, 1, 0, datetime('now'), datetime('now'))`).bind(workId).run();
+  const newChapter = await queryFirst<any>(db, `SELECT id, position, title, draft, mood, word_count, content_md, content_html FROM chapters WHERE work_id = ?1 ORDER BY position LIMIT 1`, workId);
+  if (newChapter) chapters.push(newChapter);
+}
+
+// Prepare initial chapter data for the editor
+const initialChapter = chapters[0] || null;
+const initialContent = initialChapter?.content_md || '';
+const initialContentHtml = initialChapter?.content_html || '';
+
+const pseuds = auth.pseuds;
+const defaultPseudId = pseuds.find(p => p.name === auth.user.display_name)?.id ?? pseuds[0]?.id ?? '';
+
+const workData = JSON.stringify({
+  id: work.id,
+  title: work.title,
+  chapters: chapters.map(c => ({
+    id: c.id,
+    position: c.position,
+    title: c.title,
+    draft: c.draft,
+    word_count: c.word_count,
+    mood: c.mood || null,
+  })),
+});
+
+const initialChapterData = JSON.stringify({
+  id: initialChapter?.id || null,
+  title: initialChapter?.title || 'Chapter 1',
+  content_md: initialContent,
+  word_count: initialChapter?.word_count || 0,
+});
+---
+
+<Base title={`Draft: ${work.title} — fanfiction.fyi`}>
+  <div id="draft-workspace" class="draft-workspace">
+    <!-- Top App Bar -->
+    <header class="draft-topbar">
+      <a href={`/works/${work.id}/settings`} class="draft-back-link" aria-label="Back to story settings">
+        ← Settings
+      </a>
+      <span class="draft-topbar-title">{work.title}</span>
+      <div class="draft-topbar-actions">
+        <label for="pseud-select" class="draft-topbar-label">Post as</label>
+        <select id="pseud-select" class="m3-select m3-select-compact">
+          {pseuds.map(p => (
+            <option value={p.id} selected={p.id === defaultPseudId}>{p.name}</option>
+          ))}
+        </select>
+        <button type="button" id="focus-mode-btn" class="m3-btn-text" title="Toggle Focus Mode">⛶</button>
+      </div>
+    </header>
+
+    <div class="draft-body">
+      <!-- Left: Chapter Navigation -->
+      <aside class="draft-sidebar" id="draft-sidebar">
+        <div class="draft-sidebar-header">
+          <h2 class="draft-sidebar-title">Chapters</h2>
+          <button type="button" id="add-chapter-btn" class="m3-btn-text" title="Add new chapter">+ Add</button>
+        </div>
+        <nav class="draft-chapter-list" id="chapter-list" role="list">
+          {chapters.map((c, i) => (
+            <button
+              type="button"
+              class={`draft-chapter-item ${i === 0 ? 'draft-chapter-item--active' : ''} ${c.draft ? 'draft-chapter-item--draft' : ''}`}
+              data-chapter-id={c.id}
+              data-position={c.position}
+              role="listitem"
+            >
+              <span class="draft-chapter-item-title">Ch. {c.position}: {c.title}</span>
+              <span class={`m3-badge ${c.draft ? 'm3-badge-draft' : 'm3-badge-published'}`}>
+                {c.draft ? 'Draft' : 'Published'}
+              </span>
+            </button>
+          ))}
+        </nav>
+      </aside>
+
+      <!-- Center: Canvas -->
+      <main class="draft-canvas">
+        <div class="draft-canvas-inner">
+          <div class="m3-form-field">
+            <input type="text" id="chapter-title" class="m3-input m3-input-title" placeholder="Chapter Title" value={initialChapter?.title || 'Chapter 1'} />
+          </div>
+
+          <div id="editor-mount" class="draft-editor-mount">
+            <Editor client:load placeholder="Start writing your story…" workId={workId} content={initialContentHtml || ''} />
+          </div>
+        </div>
+      </main>
+    </div>
+
+    <!-- Sticky Bottom Bar -->
+    <div class="draft-bottombar" id="draft-bottombar">
+      <div class="draft-bottombar-left">
+        <span id="word-count" class="draft-wordcount">{initialChapter?.word_count || 0} words</span>
+        <span id="autosave-status" class="draft-autosave-status"></span>
+      </div>
+      <div class="draft-bottombar-right">
+        <button type="button" id="save-draft-btn" class="m3-btn-tonal">Save Draft</button>
+        <button type="button" id="publish-btn" class="m3-btn-filled">Publish Chapter</button>
+      </div>
+    </div>
+  </div>
+</Base>
+
+<style is:global>
+  @import '../../../styles/theme.css';
+  @import '../../../styles/composer.css';
+  @import '../../../styles/tiptap.css';
+
+  .draft-workspace {
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+    height: 100dvh;
+    overflow: hidden;
+  }
+
+  /* ── Top App Bar ── */
+  .draft-topbar {
+    display: flex;
+    align-items: center;
+    gap: var(--space-4);
+    padding: var(--space-2) var(--space-4);
+    background: var(--md-sys-color-surface-container);
+    border-bottom: 1px solid var(--md-sys-color-outline-variant);
+    flex-shrink: 0;
+    z-index: 10;
+  }
+
+  .draft-back-link {
+    font: var(--md-sys-typescale-label-large);
+    color: var(--md-sys-color-primary);
+    text-decoration: none;
+    padding: var(--space-1) var(--space-2);
+    border-radius: var(--md-sys-shape-corner-full);
+    transition: background var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard);
+  }
+
+  .draft-back-link:hover {
+    background: var(--md-sys-color-primary-container);
+    color: var(--md-sys-color-on-primary-container);
+  }
+
+  .draft-topbar-title {
+    flex: 1;
+    font: var(--md-sys-typescale-title-medium);
+    color: var(--md-sys-color-on-surface);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .draft-topbar-actions {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+  }
+
+  .draft-topbar-label {
+    font: var(--md-sys-typescale-label-medium);
+    color: var(--md-sys-color-on-surface-variant);
+  }
+
+  .m3-select-compact {
+    padding: var(--space-1) var(--space-3);
+    font: var(--md-sys-typescale-body-medium);
+  }
+
+  /* ── Body (sidebar + canvas) ── */
+  .draft-body {
+    display: flex;
+    flex: 1;
+    overflow: hidden;
+  }
+
+  /* ── Sidebar ── */
+  .draft-sidebar {
+    width: 260px;
+    flex-shrink: 0;
+    background: var(--md-sys-color-surface-container-low);
+    border-right: 1px solid var(--md-sys-color-outline-variant);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    transition: width var(--md-sys-motion-duration-medium2) var(--md-sys-motion-easing-standard),
+                opacity var(--md-sys-motion-duration-medium2) var(--md-sys-motion-easing-standard);
+  }
+
+  .draft-sidebar-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: var(--space-3) var(--space-4);
+    border-bottom: 1px solid var(--md-sys-color-outline-variant);
+  }
+
+  .draft-sidebar-title {
+    font: var(--md-sys-typescale-title-small);
+    color: var(--md-sys-color-on-surface);
+    margin: 0;
+  }
+
+  .draft-chapter-list {
+    flex: 1;
+    overflow-y: auto;
+    padding: var(--space-1) 0;
+  }
+
+  .draft-chapter-item {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    width: 100%;
+    text-align: left;
+    background: none;
+    border: none;
+    border-radius: 0;
+    padding: var(--space-3) var(--space-4);
+    cursor: pointer;
+    color: var(--md-sys-color-on-surface-variant);
+    transition: background var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard);
+  }
+
+  .draft-chapter-item:hover {
+    background: var(--md-sys-color-surface-container);
+  }
+
+  .draft-chapter-item--active {
+    background: var(--md-sys-color-primary-container);
+    color: var(--md-sys-color-on-primary-container);
+  }
+
+  .draft-chapter-item-title {
+    flex: 1;
+    font: var(--md-sys-typescale-body-medium);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  /* ── Canvas ── */
+  .draft-canvas {
+    flex: 1;
+    overflow-y: auto;
+    background: var(--md-sys-color-surface);
+  }
+
+  .draft-canvas-inner {
+    max-width: 780px;
+    margin: 0 auto;
+    padding: var(--space-6) var(--space-4) var(--space-24) var(--space-4);
+  }
+
+  .m3-input-title {
+    font: var(--md-sys-typescale-headline-medium) !important;
+    font-weight: 600 !important;
+    border: none !important;
+    background: transparent !important;
+    padding: var(--space-2) 0 !important;
+    box-shadow: none !important;
+    border-bottom: 2px solid var(--md-sys-color-outline-variant) !important;
+    border-radius: 0 !important;
+    margin-bottom: var(--space-4);
+    transition: border-bottom-color var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard);
+  }
+
+  .m3-input-title:focus {
+    border-bottom-color: var(--md-sys-color-primary) !important;
+  }
+
+  .m3-input-title::placeholder {
+    color: var(--md-sys-color-on-surface-variant);
+    opacity: 0.5;
+  }
+
+  .draft-editor-mount {
+    margin-top: var(--space-2);
+  }
+
+  /* Override TipTap for draft mode — borderless, immersive */
+  .draft-canvas .tiptap-wrapper {
+    border: none;
+    border-radius: 0;
+    background: var(--md-sys-color-surface);
+    box-shadow: none;
+  }
+
+  .draft-canvas .tiptap-wrapper--focused {
+    border-color: transparent;
+    box-shadow: none;
+  }
+
+  .draft-canvas .tiptap-editor-area {
+    min-height: 500px;
+    background: var(--md-sys-color-surface);
+  }
+
+  .draft-canvas .tiptap-footer {
+    display: none;
+  }
+
+  /* ── Bottom Bar ── */
+  .draft-bottombar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: var(--space-2) var(--space-4);
+    background: var(--md-sys-color-surface-container);
+    border-top: 1px solid var(--md-sys-color-outline-variant);
+    flex-shrink: 0;
+  }
+
+  .draft-bottombar-left {
+    display: flex;
+    align-items: center;
+    gap: var(--space-4);
+  }
+
+  .draft-bottombar-right {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+  }
+
+  .draft-wordcount {
+    font: var(--md-sys-typescale-body-small);
+    color: var(--md-sys-color-on-surface-variant);
+  }
+
+  .draft-autosave-status {
+    font: var(--md-sys-typescale-body-small);
+    color: var(--md-sys-color-outline);
+  }
+
+  /* ── Focus Mode ── */
+  .draft-workspace.focus-mode .draft-sidebar {
+    width: 0;
+    opacity: 0;
+    overflow: hidden;
+    border-right: none;
+    padding: 0;
+  }
+
+  .draft-workspace.focus-mode .draft-topbar {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.2s ease;
+    z-index: 100;
+  }
+
+  .draft-workspace.focus-mode .draft-topbar:hover {
+    opacity: 1;
+    pointer-events: auto;
+  }
+
+  .draft-workspace.focus-mode .draft-canvas-inner {
+    max-width: 680px;
+  }
+
+  /* ── Mobile ── */
+  @media (max-width: 768px) {
+    .draft-sidebar {
+      width: 0;
+      opacity: 0;
+      overflow: hidden;
+      border-right: none;
+      padding: 0;
+    }
+
+    .draft-sidebar.open {
+      width: 260px;
+      opacity: 1;
+      position: fixed;
+      top: 0;
+      bottom: 0;
+      left: 0;
+      z-index: 20;
+      border-right: 1px solid var(--md-sys-color-outline-variant);
+    }
+
+    .draft-topbar-title {
+      font: var(--md-sys-typescale-title-small);
+    }
+
+    .draft-canvas-inner {
+      padding: var(--space-4) var(--space-3) var(--space-20) var(--space-3);
+    }
+
+    .draft-topbar-actions .draft-topbar-label {
+      display: none;
+    }
+  }
+</style>
+
+<script define:vars={{ workId, workData, initialChapterData }}>
+  const work = JSON.parse(workData);
+  const initialChapter = JSON.parse(initialChapterData);
+  let currentChapterId = initialChapter.id;
+  let currentChapterPosition = 1;
+
+  const chapterList = document.getElementById('chapter-list')!;
+  const chapterTitle = document.getElementById('chapter-title') as HTMLInputElement;
+  const wordCountEl = document.getElementById('word-count')!;
+  const autosaveStatus = document.getElementById('autosave-status')!;
+  const saveDraftBtn = document.getElementById('save-draft-btn') as HTMLButtonElement;
+  const publishBtn = document.getElementById('publish-btn') as HTMLButtonElement;
+  const addChapterBtn = document.getElementById('add-chapter-btn')!;
+  const focusModeBtn = document.getElementById('focus-mode-btn')!;
+  const workspace = document.getElementById('draft-workspace')!;
+
+  // Set initial word count from server data
+  wordCountEl.textContent = `${initialChapter.word_count || 0} words`;
+
+  // ── Chapter Navigation ──
+  function selectChapter(chapterId: number) {
+    // Save current chapter before switching
+    if (currentChapterId && currentChapterId !== chapterId) {
+      saveChapter(true, true); // silent save
+    }
+
+    currentChapterId = chapterId;
+    const chapter = work.chapters.find((c: any) => c.id === chapterId);
+    if (!chapter) return;
+
+    currentChapterPosition = chapter.position;
+    chapterTitle.value = chapter.title;
+
+    // Update active state in sidebar
+    document.querySelectorAll('.draft-chapter-item').forEach(el => {
+      el.classList.toggle('draft-chapter-item--active', Number((el as HTMLElement).dataset.chapterId) === chapterId);
+    });
+
+    // Load chapter content via API
+    fetch(`/api/works/${workId}/chapters/${chapterId}`)
+      .then(res => res.ok ? res.json() : null)
+      .then(data => {
+        if (!data) return;
+        // Set content in editor
+        const contentMd = data.content_md || '';
+        if ((window as any).__editorSetContent) {
+          (window as any).__editorSetContent(contentMd);
+        }
+        // Update word count
+        const words = contentMd.split(/\s+/).filter(Boolean).length;
+        wordCountEl.textContent = `${words} words`;
+      });
+  }
+
+  // Bind chapter click handlers
+  document.querySelectorAll('.draft-chapter-item').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const id = Number((btn as HTMLElement).dataset.chapterId);
+      selectChapter(id);
+    });
+  });
+
+  // ── Add Chapter ──
+  addChapterBtn.addEventListener('click', async () => {
+    try {
+      const nextPos = work.chapters.length > 0
+        ? Math.max(...work.chapters.map((c: any) => c.position)) + 1
+        : 1;
+      const res = await fetch(`/api/works/${workId}/chapters`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ work_id: workId, title: `Chapter ${nextPos}`, draft: true }),
+      });
+      if (res.ok) {
+        const chapter = await res.json();
+        work.chapters.push({ id: chapter.id, position: chapter.position, title: chapter.title, draft: true, word_count: 0 });
+        renderChapterList();
+        selectChapter(chapter.id);
+      }
+    } catch {
+      // silent
+    }
+  });
+
+  function renderChapterList() {
+    chapterList.innerHTML = work.chapters
+      .sort((a: any, b: any) => a.position - b.position)
+      .map((c: any) => `
+        <button type="button" class="draft-chapter-item ${c.id === currentChapterId ? 'draft-chapter-item--active' : ''} ${c.draft ? '' : ''}"
+          data-chapter-id="${c.id}" data-position="${c.position}" role="listitem">
+          <span class="draft-chapter-item-title">Ch. ${c.position}: ${c.title}</span>
+          <span class="m3-badge ${c.draft ? 'm3-badge-draft' : 'm3-badge-published'}">${c.draft ? 'Draft' : 'Published'}</span>
+        </button>
+      `).join('');
+    // Re-bind click handlers
+    document.querySelectorAll('.draft-chapter-item').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const id = Number((btn as HTMLElement).dataset.chapterId);
+        selectChapter(id);
+      });
+    });
+  }
+
+  // ── Save / Publish ──
+  let saveTimeout: ReturnType<typeof setTimeout>;
+
+  async function saveChapter(draft: boolean = true, silent: boolean = false) {
+    if (!currentChapterId) return;
+
+    const contentMd = (window as any).__editorMarkdown || '';
+    const title = chapterTitle.value || `Chapter ${currentChapterPosition}`;
+
+    if (!silent) {
+      saveDraftBtn.disabled = true;
+    }
+
+    try {
+      const res = await fetch(`/api/works/${workId}/chapters/${currentChapterId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title, content_md: contentMd, draft: draft ? 1 : 0 }),
+      });
+      if (res.ok) {
+        if (!silent) {
+          autosaveStatus.textContent = draft ? 'Saved' : 'Published!';
+          autosaveStatus.style.color = 'var(--md-sys-color-primary)';
+        }
+        // Update local chapter data
+        const ch = work.chapters.find((c: any) => c.id === currentChapterId);
+        if (ch) {
+          ch.title = title;
+          ch.draft = draft;
+          ch.word_count = contentMd.split(/\s+/).filter(Boolean).length;
+        }
+        renderChapterList();
+        const words = contentMd.split(/\s+/).filter(Boolean).length;
+        wordCountEl.textContent = `${words} words`;
+      } else if (!silent) {
+        autosaveStatus.textContent = 'Save failed';
+        autosaveStatus.style.color = 'var(--md-sys-color-error)';
+      }
+    } catch {
+      if (!silent) {
+        autosaveStatus.textContent = 'Network error';
+        autosaveStatus.style.color = 'var(--md-sys-color-error)';
+      }
+    } finally {
+      saveDraftBtn.disabled = false;
+    }
+  }
+
+  saveDraftBtn.addEventListener('click', () => saveChapter(true));
+  publishBtn.addEventListener('click', async () => {
+    await saveChapter(false);
+    // Also publish the work if it's still a draft
+    const workRes = await fetch(`/api/works/${workId}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ publish: true }),
+    });
+    if (workRes.ok) {
+      autosaveStatus.textContent = 'Published!';
+      autosaveStatus.style.color = 'var(--md-sys-color-primary)';
+    }
+  });
+
+  // ── Autosave (5s debounce after last keystroke) ──
+  function scheduleAutosave() {
+    clearTimeout(saveTimeout);
+    autosaveStatus.textContent = 'Editing…';
+    autosaveStatus.style.color = 'var(--md-sys-color-on-surface-variant)';
+    saveTimeout = setTimeout(() => {
+      saveChapter(true, true);
+      autosaveStatus.textContent = 'Auto-saved';
+      autosaveStatus.style.color = 'var(--md-sys-color-outline)';
+    }, 5000);
+  }
+
+  // Hook into editor content changes via the global callback
+  const originalOnContentChange = (window as any).__editorOnContentChange;
+  (window as any).__editorOnContentChange = (md: string) => {
+    const words = md.split(/\s+/).filter(Boolean).length;
+    wordCountEl.textContent = `${words} words`;
+    scheduleAutosave();
+    if (originalOnContentChange) originalOnContentChange(md);
+  };
+
+  // ── Focus Mode ──
+  let focusMode = false;
+  focusModeBtn.addEventListener('click', () => {
+    focusMode = !focusMode;
+    workspace.classList.toggle('focus-mode', focusMode);
+    focusModeBtn.textContent = focusMode ? '⛶ Exit' : '⛶';
+    focusModeBtn.title = focusMode ? 'Exit Focus Mode' : 'Toggle Focus Mode';
+  });
+
+  // ── Keyboard shortcut for focus mode ──
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && focusMode) {
+      focusMode = false;
+      workspace.classList.remove('focus-mode');
+      focusModeBtn.textContent = '⛶';
+      focusModeBtn.title = 'Toggle Focus Mode';
+    }
+  });
+
+  // ── View work link ──
+  // After publishing, offer to view the work
+  publishBtn.addEventListener('dblclick', () => {
+    window.location.href = `/works/${workId}`;
+  });
+</script>

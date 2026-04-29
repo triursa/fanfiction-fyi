@@ -9,6 +9,7 @@ import CodeBlockLowlight from '@tiptap/extension-code-block-lowlight';
 import Image from '@tiptap/extension-image';
 import { common, createLowlight } from 'lowlight';
 import { markdownToHtml, htmlToMarkdown } from '@/lib/markdown';
+import LinkDialog from './LinkDialog';
 
 const lowlight = createLowlight(common);
 
@@ -93,6 +94,21 @@ export default function TipTapEditor({
     }
   }, []);
 
+  // Expose setContent for external chapter loading (used by draft workspace)
+  useEffect(() => {
+    (window as any).__editorSetContent = (mdOrHtml: string) => {
+      if (!editorRef.current) return;
+      // If it looks like HTML, set directly; otherwise convert from markdown
+      const html = mdOrHtml.includes('<') ? mdOrHtml : markdownToHtml(mdOrHtml);
+      editorRef.current.commands.setContent(html);
+      // Update global state
+      const md = htmlToMarkdown(editorRef.current.getHTML());
+      (window as any).__editorMarkdown = md;
+      (window as any).__editorContent = md;
+    };
+    return () => { (window as any).__editorSetContent = undefined; };
+  }, []);
+
   useEffect(() => {
     if (!mountRef.current) return;
 
@@ -127,6 +143,10 @@ export default function TipTapEditor({
         (window as any).__editorMarkdown = md;
         (window as any).__editorContent = md;
         onContentChangeRef.current?.(md);
+        // Call global autosave hook if set (used by draft workspace)
+        if ((window as any).__editorOnContentChange) {
+          (window as any).__editorOnContentChange(md);
+        }
       },
       onFocus: ({ editor: e }) => {
         const el = e.options.element?.closest('.tiptap-wrapper');
@@ -295,16 +315,28 @@ export default function TipTapEditor({
     URL.revokeObjectURL(url);
   }, []);
 
-  // ── Link prompt ──
-  const promptLink = useCallback((editor: Editor) => {
+  const [linkDialogOpen, setLinkDialogOpen] = useState(false);
+  const [linkDialogUrl, setLinkDialogUrl] = useState('');
+
+  // ── Link dialog ──
+  const openLinkDialog = useCallback((editor: Editor) => {
     const prev = editor.getAttributes('link').href as string | undefined;
-    const url = window.prompt('URL', prev || 'https://');
-    if (url === null) return;
+    setLinkDialogUrl(prev || 'https://');
+    setLinkDialogOpen(true);
+  }, []);
+
+  const handleLinkConfirm = useCallback((url: string) => {
+    setLinkDialogOpen(false);
+    if (!editorRef.current) return;
     if (url === '') {
-      editor.chain().focus().extendMarkRange('link').unsetLink().run();
+      editorRef.current.chain().focus().extendMarkRange('link').unsetLink().run();
     } else {
-      editor.chain().focus().extendMarkRange('link').setLink({ href: url }).run();
+      editorRef.current.chain().focus().extendMarkRange('link').setLink({ href: url }).run();
     }
+  }, []);
+
+  const handleLinkCancel = useCallback(() => {
+    setLinkDialogOpen(false);
   }, []);
 
   // ── Toolbar definition ──
@@ -344,7 +376,7 @@ export default function TipTapEditor({
     {
       label: '🔗',
       title: 'Insert Link',
-      action: (e) => promptLink(e),
+      action: (e) => openLinkDialog(e),
       isActive: (e) => e.isActive('link'),
     },
     {
@@ -431,6 +463,13 @@ export default function TipTapEditor({
           {editor ? editor.storage.characterCount?.words?.() ?? countWords(editor.getText()) : 0} words
         </span>
       </div>
+
+      <LinkDialog
+        open={linkDialogOpen}
+        initialUrl={linkDialogUrl}
+        onConfirm={handleLinkConfirm}
+        onCancel={handleLinkCancel}
+      />
     </div>
   );
 }

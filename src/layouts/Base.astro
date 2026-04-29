@@ -107,7 +107,7 @@ const title = Astro.props.title ?? 'fanfiction.fyi';
           <div class="user-menu">
             <span class="user-name">{pseuds[0]?.name || user.email}</span>
             <a href="/settings" class="btn-nav" aria-label="Settings">⚙️</a>
-            <a href="/works/new" class="btn-nav-accent">New Work</a>
+            <a href="/works/create" class="btn-nav-accent">New Work</a>
             <form action="/api/auth/logout" method="post" class="logout-form">
               <button type="submit" class="btn-nav">Sign Out</button>
             </form>
