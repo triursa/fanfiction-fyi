@@ -2,6 +2,7 @@
 export const prerender = false;
 import Base from '../../../layouts/Base.astro';
 import Editor from '../../../components/Editor';
+import Toast from '../../../components/Toast';
 import { queryFirst, queryAll } from '../../../lib/db';
 import { getAuth } from '../../../lib/auth';
 import { htmlToMarkdown } from '../../../lib/markdown';
@@ -128,6 +129,8 @@ const initialChapterData = JSON.stringify({
       </div>
     </div>
   </div>
+
+  <Toast client:load />
 </Base>
 
 <style is:global>
@@ -443,11 +446,32 @@ const initialChapterData = JSON.stringify({
   // Set initial word count from server data
   wordCountEl.textContent = `${initialChapter.word_count || 0} words`;
 
+  // ── Toast helper ──
+  function showToast(message: string, type: 'success' | 'error' | 'info' | 'warning' = 'info') {
+    if ((window as any).showToast) {
+      (window as any).showToast(message, type);
+    }
+  }
+
+  // ── Unsaved changes guard ──
+  let hasUnsavedChanges = false;
+  let isSaving = false;
+  let savePromise: Promise<any> | null = null;
+
+  window.addEventListener('beforeunload', (e) => {
+    if (hasUnsavedChanges) {
+      e.preventDefault();
+      e.returnValue = '';
+    }
+  });
+
   // ── Chapter Navigation ──
-  function selectChapter(chapterId: number) {
-    // Save current chapter before switching
-    if (currentChapterId && currentChapterId !== chapterId) {
-      saveChapter(true, true); // silent save
+  async function selectChapter(chapterId: number) {
+    if (currentChapterId === chapterId) return;
+
+    // Save current chapter before switching (await to prevent data loss)
+    if (currentChapterId) {
+      await saveChapter(true, true);
     }
 
     currentChapterId = chapterId;
@@ -463,19 +487,20 @@ const initialChapterData = JSON.stringify({
     });
 
     // Load chapter content via API
-    fetch(`/api/works/${workId}/chapters/${chapterId}`)
-      .then(res => res.ok ? res.json() : null)
-      .then(data => {
-        if (!data) return;
-        // Set content in editor
+    try {
+      const res = await fetch(`/api/works/${workId}/chapters/${chapterId}`);
+      if (res.ok) {
+        const data = await res.json();
         const contentMd = data.content_md || '';
         if ((window as any).__editorSetContent) {
           (window as any).__editorSetContent(contentMd);
         }
-        // Update word count
         const words = contentMd.split(/\s+/).filter(Boolean).length;
         wordCountEl.textContent = `${words} words`;
-      });
+      }
+    } catch {
+      // Content loaded from cache, editor already populated
+    }
   }
 
   // Bind chapter click handlers
@@ -502,9 +527,13 @@ const initialChapterData = JSON.stringify({
         work.chapters.push({ id: chapter.id, position: chapter.position, title: chapter.title, draft: true, word_count: 0 });
         renderChapterList();
         selectChapter(chapter.id);
+        showToast('Chapter added', 'success');
+      } else {
+        const data = await res.json().catch(() => ({}));
+        showToast(data.error || 'Failed to add chapter', 'error');
       }
     } catch {
-      // silent
+      showToast('Network error — could not add chapter', 'error');
     }
   });
 
@@ -518,7 +547,7 @@ const initialChapterData = JSON.stringify({
     chapterList.innerHTML = work.chapters
       .sort((a: any, b: any) => a.position - b.position)
       .map((c: any) => `
-        <button type="button" class="draft-chapter-item ${c.id === currentChapterId ? 'draft-chapter-item--active' : ''} ${c.draft ? '' : ''}"
+        <button type="button" class="draft-chapter-item ${c.id === currentChapterId ? 'draft-chapter-item--active' : ''} ${c.draft ? 'draft-chapter-item--draft' : ''}"
           data-chapter-id="${escapeHtml(String(c.id))}" data-position="${escapeHtml(String(c.position))}" role="listitem">
           <span class="draft-chapter-item-title">Ch. ${escapeHtml(String(c.position))}: ${escapeHtml(c.title)}</span>
           <span class="m3-badge ${c.draft ? 'm3-badge-draft' : 'm3-badge-published'}">${c.draft ? 'Draft' : 'Published'}</span>
@@ -536,14 +565,26 @@ const initialChapterData = JSON.stringify({
   // ── Save / Publish ──
   let saveTimeout: ReturnType<typeof setTimeout>;
 
-  async function saveChapter(draft: boolean = true, silent: boolean = false) {
-    if (!currentChapterId) return;
+  async function saveChapter(draft: boolean = true, silent: boolean = false): Promise<boolean> {
+    if (!currentChapterId) return false;
 
     const contentMd = (window as any).__editorMarkdown || '';
     const title = chapterTitle.value || `Chapter ${currentChapterPosition}`;
 
+    if (isSaving) {
+      // Queue save behind current one
+      if (savePromise) {
+        await savePromise;
+      }
+    }
+
+    isSaving = true;
+
     if (!silent) {
       saveDraftBtn.disabled = true;
+      publishBtn.disabled = true;
+      autosaveStatus.textContent = draft ? 'Saving…' : 'Publishing…';
+      autosaveStatus.style.color = 'var(--md-sys-color-on-surface-variant)';
     }
 
     try {
@@ -553,9 +594,14 @@ const initialChapterData = JSON.stringify({
         body: JSON.stringify({ title, content_md: contentMd, draft: draft ? 1 : 0 }),
       });
       if (res.ok) {
+        hasUnsavedChanges = false;
         if (!silent) {
-          autosaveStatus.textContent = draft ? 'Saved' : 'Published!';
+          autosaveStatus.textContent = draft ? 'Draft saved' : 'Chapter published';
           autosaveStatus.style.color = 'var(--md-sys-color-primary)';
+          showToast(draft ? 'Draft saved' : 'Chapter published', 'success');
+        } else {
+          autosaveStatus.textContent = 'Auto-saved';
+          autosaveStatus.style.color = 'var(--md-sys-color-outline)';
         }
         // Update local chapter data
         const ch = work.chapters.find((c: any) => c.id === currentChapterId);
@@ -567,44 +613,90 @@ const initialChapterData = JSON.stringify({
         renderChapterList();
         const words = contentMd.split(/\s+/).filter(Boolean).length;
         wordCountEl.textContent = `${words} words`;
-      } else if (!silent) {
-        autosaveStatus.textContent = 'Save failed';
-        autosaveStatus.style.color = 'var(--md-sys-color-error)';
+        return true;
+      } else {
+        const data = await res.json().catch(() => ({}));
+        const errorMsg = data.error || `Error ${res.status}`;
+        if (!silent) {
+          autosaveStatus.textContent = 'Save failed';
+          autosaveStatus.style.color = 'var(--md-sys-color-error)';
+          showToast(`Save failed: ${errorMsg}`, 'error');
+        } else {
+          autosaveStatus.textContent = 'Auto-save failed';
+          autosaveStatus.style.color = 'var(--md-sys-color-error)';
+        }
+        return false;
       }
     } catch {
       if (!silent) {
         autosaveStatus.textContent = 'Network error';
         autosaveStatus.style.color = 'var(--md-sys-color-error)';
+        showToast('Network error — check your connection', 'error');
+      } else {
+        autosaveStatus.textContent = 'Auto-save failed';
+        autosaveStatus.style.color = 'var(--md-sys-color-error)';
       }
+      return false;
     } finally {
+      isSaving = false;
       saveDraftBtn.disabled = false;
+      publishBtn.disabled = false;
     }
   }
 
+  // ── Save Draft button ──
   saveDraftBtn.addEventListener('click', () => saveChapter(true));
+
+  // ── Publish Chapter button ──
   publishBtn.addEventListener('click', async () => {
-    await saveChapter(false);
+    // Disable button and show loading state
+    publishBtn.disabled = true;
+    publishBtn.textContent = 'Publishing…';
+    saveDraftBtn.disabled = true;
+
+    const savedOk = await saveChapter(false);
+
+    if (!savedOk) {
+      publishBtn.textContent = 'Publish Chapter';
+      return;
+    }
+
     // Also publish the work if it's still a draft
-    const workRes = await fetch(`/api/works/${workId}`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ publish: true }),
-    });
-    if (workRes.ok) {
-      autosaveStatus.textContent = 'Published!';
-      autosaveStatus.style.color = 'var(--md-sys-color-primary)';
+    try {
+      const workRes = await fetch(`/api/works/${workId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ publish: true }),
+      });
+      if (workRes.ok) {
+        showToast('Published! Redirecting to your work…', 'success');
+        // Short delay so user sees the toast before navigating
+        setTimeout(() => {
+          window.location.href = `/works/${workId}`;
+        }, 1200);
+      } else {
+        const data = await workRes.json().catch(() => ({}));
+        showToast(`Chapter saved, but work publish failed: ${data.error || 'Unknown error'}`, 'warning');
+        publishBtn.textContent = 'Publish Chapter';
+      }
+    } catch {
+      showToast('Chapter saved locally — network error publishing work', 'warning');
+      publishBtn.textContent = 'Publish Chapter';
     }
   });
 
   // ── Autosave (5s debounce after last keystroke) ──
   function scheduleAutosave() {
     clearTimeout(saveTimeout);
+    hasUnsavedChanges = true;
     autosaveStatus.textContent = 'Editing…';
     autosaveStatus.style.color = 'var(--md-sys-color-on-surface-variant)';
-    saveTimeout = setTimeout(() => {
-      saveChapter(true, true);
-      autosaveStatus.textContent = 'Auto-saved';
-      autosaveStatus.style.color = 'var(--md-sys-color-outline)';
+    saveTimeout = setTimeout(async () => {
+      const ok = await saveChapter(true, true);
+      if (!ok) {
+        // Retry after 10s on failure
+        setTimeout(() => saveChapter(true, true), 10000);
+      }
     }, 5000);
   }
 
@@ -626,19 +718,22 @@ const initialChapterData = JSON.stringify({
     focusModeBtn.title = focusMode ? 'Exit Focus Mode' : 'Toggle Focus Mode';
   });
 
-  // ── Keyboard shortcut for focus mode ──
+  // ── Keyboard shortcuts ──
   document.addEventListener('keydown', (e) => {
+    // Escape exits focus mode
     if (e.key === 'Escape' && focusMode) {
       focusMode = false;
       workspace.classList.remove('focus-mode');
       focusModeBtn.textContent = '⛶';
       focusModeBtn.title = 'Toggle Focus Mode';
     }
+    // Ctrl/Cmd+S saves draft
+    if ((e.ctrlKey || e.metaKey) && e.key === 's') {
+      e.preventDefault();
+      saveChapter(true);
+    }
   });
 
-  // ── View work link ──
-  // After publishing, offer to view the work
-  publishBtn.addEventListener('dblclick', () => {
-    window.location.href = `/works/${workId}`;
-  });
+  // ── Expose showToast to global scope for Toast component ──
+  // The Toast Preact island will register itself here
 </script>
