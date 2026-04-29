@@ -2,6 +2,7 @@
 export const prerender = false;
 import Base from '../../layouts/Base.astro';
 import TagChips from '../../components/TagChips';
+import Toast from '../../components/Toast';
 import { getAuth } from '../../lib/auth';
 
 const db = Astro.locals.runtime.env.DB as D1Database;
@@ -104,12 +105,15 @@ const defaultPseudId = pseuds.find(p => p.name === user.display_name)?.id ?? pse
 
       <div class="form-actions">
         <a href="/works" class="m3-btn-outlined">Cancel</a>
-        <button type="submit" class="m3-btn-filled" id="create-btn">Create Story & Start Writing</button>
+        <button type="submit" class="m3-btn-filled" id="create-btn">Create Story &amp; Start Writing</button>
       </div>
 
       <div id="form-error" class="form-error" role="alert"></div>
+      <div id="form-success" class="form-success" role="status" style="display:none;"></div>
     </form>
   </section>
+
+  <Toast client:load />
 </Base>
 
 <style is:global>
@@ -142,15 +146,37 @@ const defaultPseudId = pseuds.find(p => p.name === user.display_name)?.id ?? pse
   // Collect tag data from TagChips hidden inputs
   const form = document.getElementById('create-work-form') as HTMLFormElement;
   const errorEl = document.getElementById('form-error')!;
+  const successEl = document.getElementById('form-success')!;
   const createBtn = document.getElementById('create-btn') as HTMLButtonElement;
+  const titleInput = document.getElementById('title') as HTMLInputElement;
+
+  // Client-side validation on title blur
+  titleInput.addEventListener('blur', () => {
+    if (!titleInput.value.trim()) {
+      titleInput.style.borderColor = 'var(--md-sys-color-error)';
+    } else {
+      titleInput.style.borderColor = '';
+    }
+  });
 
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
     errorEl.textContent = '';
-    createBtn.disabled = true;
-    createBtn.textContent = 'Creating...';
+    successEl.style.display = 'none';
 
-    const title = (document.getElementById('title') as HTMLInputElement).value;
+    // Client-side validation
+    if (!titleInput.value.trim()) {
+      errorEl.textContent = 'Please enter a title for your work.';
+      titleInput.focus();
+      titleInput.style.borderColor = 'var(--md-sys-color-error)';
+      return;
+    }
+    titleInput.style.borderColor = '';
+
+    createBtn.disabled = true;
+    createBtn.textContent = 'Creating…';
+
+    const title = titleInput.value.trim();
     const summary = (document.getElementById('summary') as HTMLTextAreaElement).value;
     const notes = (document.getElementById('notes') as HTMLTextAreaElement).value;
     const pseudSelect = document.getElementById('pseud') as HTMLSelectElement;
@@ -202,15 +228,21 @@ const defaultPseudId = pseuds.find(p => p.name === user.display_name)?.id ?? pse
 
       if (res.ok) {
         const data = await res.json();
-        window.location.href = `/works/${data.work.id}/draft`;
+        successEl.textContent = 'Work created! Redirecting to editor…';
+        successEl.style.display = 'block';
+        successEl.style.color = 'var(--md-sys-color-primary)';
+        // Short delay so user sees the success message
+        setTimeout(() => {
+          window.location.href = `/works/${data.work.id}/draft`;
+        }, 800);
       } else {
-        const data = await res.json();
-        errorEl.textContent = data.error || 'Failed to create work';
+        const data = await res.json().catch(() => ({}));
+        errorEl.textContent = data.error || `Failed to create work (error ${res.status})`;
         createBtn.disabled = false;
         createBtn.textContent = 'Create Story & Start Writing';
       }
     } catch {
-      errorEl.textContent = 'Network error — please try again';
+      errorEl.textContent = 'Network error — please check your connection and try again';
       createBtn.disabled = false;
       createBtn.textContent = 'Create Story & Start Writing';
     }
