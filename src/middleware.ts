@@ -1,5 +1,6 @@
 import { defineMiddleware } from 'astro:middleware';
 import { queryFirst } from '@/lib/db';
+import { cspHeaders } from '@/lib/csp';
 
 // Paths accessible without authentication or approval
 const PUBLIC_PATHS = [
@@ -140,5 +141,10 @@ export const onRequest = defineMiddleware(async (context, next) => {
 
   // Approved user — set user info in locals and continue
   context.locals.user = user;
-  return next();
+
+  // Continue to the page/API handler, then add CSP headers to the response
+  const response = await next();
+  const csp = cspHeaders();
+  response.headers.set(Object.keys(csp)[0], Object.values(csp)[0]);
+  return response;
 });

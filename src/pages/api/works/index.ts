@@ -4,6 +4,7 @@ import { queryFirst, run, queryAll } from '@/lib/db';
 import { getAuth } from '@/lib/auth';
 import { markdownToHtml } from '@/lib/markdown';
 import { corsHeaders, handleCors } from '@/lib/cors';
+import { checkRateLimit, recordFailedAttempt } from '@/lib/rate-limit';
 import type { APIRoute } from 'astro';
 
 export const OPTIONS: APIRoute = async ({ request }) => {
@@ -47,6 +48,17 @@ export const POST: APIRoute = async ({ request, locals }) => {
   const db = locals.runtime.env.DB as D1Database;
   const auth = await getAuth(db, request);
   if (!auth) return new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401, headers: { 'Content-Type': 'application/json' } });
+
+  // Rate limit: 5 per 5min per user IP
+  const clientIp = request.headers.get('CF-Connecting-IP') || 'unknown';
+  const rl = await checkRateLimit(db, clientIp, 'create-work');
+  if (!rl.allowed) {
+    return new Response(JSON.stringify({ error: 'Rate limit exceeded. Try again later.' }), {
+      status: 429,
+      headers: { 'Content-Type': 'application/json', 'Retry-After': String(rl.retryAfterSeconds) },
+    });
+  }
+  await recordFailedAttempt(db, clientIp, 'create-work');
 
   let body: any;
   try { body = await request.json(); } catch { return new Response(JSON.stringify({ error: 'Invalid JSON' }), { status: 400, headers: { 'Content-Type': 'application/json' } }); }

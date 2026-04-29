@@ -257,7 +257,7 @@ if (!work) return Astro.redirect('/works');
         container.innerHTML = '';
         const empty = document.createElement('div');
         empty.className = 'graph-empty';
-        empty.innerHTML = `<p>This work has no relations yet.</p><p><a href="/works/${workId}/settings">Add relations in Settings</a></p>`;
+        empty.innerHTML = `<p>This work has no relations yet.</p><p><a href="/works/${encodeURIComponent(workId)}/settings">Add relations in Settings</a></p>`;
         container.appendChild(empty);
         return;
       }

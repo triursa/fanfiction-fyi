@@ -508,13 +508,19 @@ const initialChapterData = JSON.stringify({
     }
   });
 
+  function escapeHtml(str: string) {
+    const div = document.createElement('div');
+    div.textContent = str;
+    return div.innerHTML;
+  }
+
   function renderChapterList() {
     chapterList.innerHTML = work.chapters
       .sort((a: any, b: any) => a.position - b.position)
       .map((c: any) => `
         <button type="button" class="draft-chapter-item ${c.id === currentChapterId ? 'draft-chapter-item--active' : ''} ${c.draft ? '' : ''}"
-          data-chapter-id="${c.id}" data-position="${c.position}" role="listitem">
-          <span class="draft-chapter-item-title">Ch. ${c.position}: ${c.title}</span>
+          data-chapter-id="${escapeHtml(String(c.id))}" data-position="${escapeHtml(String(c.position))}" role="listitem">
+          <span class="draft-chapter-item-title">Ch. ${escapeHtml(String(c.position))}: ${escapeHtml(c.title)}</span>
           <span class="m3-badge ${c.draft ? 'm3-badge-draft' : 'm3-badge-published'}">${c.draft ? 'Draft' : 'Published'}</span>
         </button>
       `).join('');

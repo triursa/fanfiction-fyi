@@ -4,6 +4,7 @@ import type { APIRoute } from 'astro';
 import { requireAuth } from '@/lib/auth';
 import { queryFirst, run } from '@/lib/db';
 import { uploadImage, deleteImage, deleteImages, parseMultipart, UploadError } from '@/lib/storage';
+import { checkRateLimit, recordFailedAttempt } from '@/lib/rate-limit';
 
 /**
  * POST /api/upload — upload an image for user avatar, pseud icon, or chapter content
@@ -32,6 +33,17 @@ export const POST: APIRoute = async ({ locals, request }) => {
       headers: { 'Content-Type': 'application/json' },
     });
   }
+
+  // Rate limit: 5 per 5min per user ID
+  const rlKey = `user:${auth.user.id}`;
+  const rl = await checkRateLimit(db, rlKey, 'upload');
+  if (!rl.allowed) {
+    return new Response(JSON.stringify({ error: 'Rate limit exceeded. Try again later.' }), {
+      status: 429,
+      headers: { 'Content-Type': 'application/json', 'Retry-After': String(rl.retryAfterSeconds) },
+    });
+  }
+  await recordFailedAttempt(db, rlKey, 'upload');
 
   let files: Map<string, { data: ArrayBuffer; type: string; size: number; filename: string }>;
   let fields: Map<string, string>;
