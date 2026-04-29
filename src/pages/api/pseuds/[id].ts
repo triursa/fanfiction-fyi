@@ -37,10 +37,36 @@ export const PUT: APIRoute = async ({ request, locals, params }) => {
     return new Response(JSON.stringify({ error: 'Invalid JSON' }), { status: 400, headers: { 'Content-Type': 'application/json' } });
   }
 
-  const { name, description, icon_key } = body || {};
+  const { name, description, icon_key, pinned_work_ids, banner_key } = body || {};
   const newName = (typeof name === 'string' ? name.trim() : existing.name);
   const newDesc = (description !== undefined ? (typeof description === 'string' ? description : null) : existing.description);
   const newIconKey = (icon_key !== undefined ? (typeof icon_key === 'string' ? icon_key : null) : existing.icon_key);
+
+  // Pinned work IDs validation: must be array of max 6 integers
+  let newPinnedWorkIds = existing.pinned_work_ids || '[]';
+  if (pinned_work_ids !== undefined) {
+    if (!Array.isArray(pinned_work_ids)) {
+      return new Response(JSON.stringify({ error: 'pinned_work_ids must be an array' }), { status: 400, headers: { 'Content-Type': 'application/json' } });
+    }
+    if (pinned_work_ids.length > 6) {
+      return new Response(JSON.stringify({ error: 'Maximum 6 pinned works' }), { status: 400, headers: { 'Content-Type': 'application/json' } });
+    }
+    // Validate all are integers
+    const validIds = pinned_work_ids.filter((id: any) => Number.isInteger(id) && id > 0);
+    // Validate the pseud owns these works
+    if (validIds.length > 0) {
+      const placeholders = validIds.map(() => '?').join(',');
+      const ownedWorks = await queryAll<any>(db, `SELECT work_id FROM creatorships WHERE pseud_id = ?1 AND work_id IN (${placeholders})`, pseudId, ...validIds);
+      const ownedSet = new Set(ownedWorks.map((w: any) => w.work_id));
+      const filtered = validIds.filter((id: number) => ownedSet.has(id));
+      newPinnedWorkIds = JSON.stringify(filtered);
+    } else {
+      newPinnedWorkIds = '[]';
+    }
+  }
+
+  // Banner key validation
+  const newBannerKey = (banner_key !== undefined ? (typeof banner_key === 'string' ? banner_key : null) : existing.banner_key);
 
   // Name validation
   if (!newName || newName.length === 0) {
@@ -58,7 +84,7 @@ export const PUT: APIRoute = async ({ request, locals, params }) => {
     }
   }
 
-  await run(db, `UPDATE pseuds SET name = ?1, description = ?2, icon_key = ?3 WHERE id = ?4 AND user_id = ?5`, newName, newDesc, newIconKey, pseudId, auth.user.id);
+  await run(db, `UPDATE pseuds SET name = ?1, description = ?2, icon_key = ?3, pinned_work_ids = ?4, banner_key = ?5 WHERE id = ?6 AND user_id = ?7`, newName, newDesc, newIconKey, newPinnedWorkIds, newBannerKey, pseudId, auth.user.id);
 
   const updated = await queryFirst<any>(db, `SELECT * FROM pseuds WHERE id = ?1`, pseudId);
   return new Response(JSON.stringify(updated), { headers: { 'Content-Type': 'application/json' } });
@@ -101,13 +127,14 @@ export const DELETE: APIRoute = async ({ request, locals, params }) => {
   await run(db, `DELETE FROM bookmarks WHERE pseud_id = ?1`, pseudId);
   await run(db, `DELETE FROM readings WHERE pseud_id = ?1`, pseudId);
 
-  // Clean up R2 icon if present
-  if (existing.icon_key) {
-    try {
-      const bucket = locals.runtime.env.MEDIA as R2Bucket | undefined;
-      if (bucket) await bucket.delete(existing.icon_key);
-    } catch { /* non-critical */ }
-  }
+  // Clean up R2 icon + banner if present
+  try {
+    const bucket = locals.runtime.env.MEDIA as R2Bucket | undefined;
+    if (bucket) {
+      if (existing.icon_key) await bucket.delete(existing.icon_key);
+      if (existing.banner_key) await bucket.delete(existing.banner_key);
+    }
+  } catch { /* non-critical */ }
 
   // Delete the pseud itself
   await run(db, `DELETE FROM pseuds WHERE id = ?1 AND user_id = ?2`, pseudId, auth.user.id);
