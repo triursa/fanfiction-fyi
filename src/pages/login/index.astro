@@ -208,9 +208,18 @@ import Base from '../../layouts/Base.astro';
           window.location.href = '/';
         }
       } else {
-        const data = await res.json();
-        if (data.error === 'banned') {
+        let data: any;
+        try {
+          data = await res.json();
+        } catch {
+          data = {};
+        }
+        if (data.error === 'no_password') {
+          errorEl.textContent = 'Your account was created with Google. Please use the "Sign in with Google" button above.';
+        } else if (data.error === 'banned') {
           errorEl.textContent = 'This account has been suspended';
+        } else if (res.status >= 500) {
+          errorEl.textContent = 'Something went wrong. If you signed up with Google, try signing in with Google instead.';
         } else {
           errorEl.textContent = data.error || 'Sign in failed';
         }
