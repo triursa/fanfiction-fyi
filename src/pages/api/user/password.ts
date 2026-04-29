@@ -3,6 +3,7 @@ export const prerender = false;
 import type { APIRoute } from 'astro';
 import { requireAuth, hashPassword, verifyPassword } from '@/lib/auth';
 import { run } from '@/lib/db';
+import { checkRateLimit, recordFailedAttempt } from '@/lib/rate-limit';
 
 /**
  * POST /api/user/password — change or set password for authenticated user
@@ -20,6 +21,17 @@ export const POST: APIRoute = async ({ locals, request }) => {
       headers: { 'Content-Type': 'application/json' },
     });
   }
+
+  // Rate limit: 5 per 5min per user ID
+  const rlKey = `user:${auth.user.id}`;
+  const rl = await checkRateLimit(db, rlKey, 'change-password');
+  if (!rl.allowed) {
+    return new Response(JSON.stringify({ error: 'Rate limit exceeded. Try again later.' }), {
+      status: 429,
+      headers: { 'Content-Type': 'application/json', 'Retry-After': String(rl.retryAfterSeconds) },
+    });
+  }
+  await recordFailedAttempt(db, rlKey, 'change-password');
 
   let body: { current_password?: string; new_password?: string };
   try {

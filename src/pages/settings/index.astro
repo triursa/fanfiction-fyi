@@ -719,7 +719,7 @@ const themesJSON = JSON.stringify(
     var html = '';
     pseudsData.forEach(function(p) {
       var iconUrl = p.icon_key ? '/api/storage/' + encodeURIComponent(p.icon_key) : null;
-      html += '<div class="pseud-card" data-pseud-id="' + p.id + '">';
+      html += '<div class="pseud-card" data-pseud-id="' + escapeHtml(String(p.id)) + '">';
       html += '  <div class="pseud-info">';
       if (iconUrl) {
         html += '    <img class="pseud-icon" src="' + escapeHtml(iconUrl) + '" alt="" />';
@@ -730,10 +730,10 @@ const themesJSON = JSON.stringify(
       }
       html += '  </div>';
       html += '  <div class="pseud-actions">';
-      html += '    <button type="button" class="btn-icon pseud-edit-btn" data-pseud-id="' + p.id + '" title="Edit" aria-label="Edit ' + escapeHtml(p.name) + '">';
+      html += '    <button type="button" class="btn-icon pseud-edit-btn" data-pseud-id="' + escapeHtml(String(p.id)) + '" title="Edit" aria-label="Edit ' + escapeHtml(p.name) + '">';
       html += '      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/></svg>';
       html += '    </button>';
-      html += '    <button type="button" class="btn-icon btn-icon--danger pseud-delete-btn" data-pseud-id="' + p.id + '" data-pseud-name="' + escapeHtml(p.name) + '" title="Delete" aria-label="Delete ' + escapeHtml(p.name) + '">';
+      html += '    <button type="button" class="btn-icon btn-icon--danger pseud-delete-btn" data-pseud-id="' + escapeHtml(String(p.id)) + '" data-pseud-name="' + escapeHtml(p.name) + '" title="Delete" aria-label="Delete ' + escapeHtml(p.name) + '">';
       html += '      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></svg>';
       html += '    </button>';
       html += '  </div>';
@@ -1048,7 +1048,7 @@ const themesJSON = JSON.stringify(
     pseudWorksCache.forEach(function(w) {
       var isPinned = editingPseudPinnedIds.indexOf(w.id) !== -1;
       html += '<label class="pin-work-item">';
-      html += '  <input type="checkbox" class="pin-work-checkbox" data-work-id="' + w.id + '"' + (isPinned ? ' checked' : '') + ' />';
+      html += '  <input type="checkbox" class="pin-work-checkbox" data-work-id="' + escapeHtml(String(w.id)) + '"' + (isPinned ? ' checked' : '') + ' />';
       html += '  <span class="pin-work-title">' + escapeHtml(w.title) + '</span>';
       html += '  <span class="pin-work-meta">' + w.word_count.toLocaleString() + ' words</span>';
       html += '</label>';

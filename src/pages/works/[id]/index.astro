@@ -504,6 +504,12 @@ const commentsJson = JSON.stringify(allComments);
 </style>
 
 <script define:vars={{ workId, chapterId, authed: !!authUser }}>
+  function escapeHtml(str) {
+    const div = document.createElement('div');
+    div.textContent = str;
+    return div.innerHTML;
+  }
+
   // Kudos
   const kudosBtn = document.getElementById('kudos-btn');
   if (kudosBtn) {
@@ -568,7 +574,7 @@ const commentsJson = JSON.stringify(allComments);
             const reactionEmojis = { fire: '🔥', cry: '😭', heartbreak: '💔', swords: '⚔️', heart: '❤️', mindblown: '🤯' };
             const sortedReactions = Object.entries(data.counts).sort((a, b) => b[1] - a[1]);
             summaryEl.innerHTML = sortedReactions.map(([r, c]) =>
-              `<span class="reaction-pill">${reactionEmojis[r] || r} ${c}</span>`
+              `<span class="reaction-pill">${reactionEmojis[r] || escapeHtml(r)} ${c}</span>`
             ).join('');
           }
         } else {

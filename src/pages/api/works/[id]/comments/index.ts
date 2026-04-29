@@ -4,6 +4,7 @@ import { queryFirst, queryAll, run } from '@/lib/db';
 import { getAuth, requireAuth } from '@/lib/auth';
 import { markdownToHtml } from '@/lib/markdown';
 import { corsHeaders, handleCors } from '@/lib/cors';
+import { checkRateLimit, recordFailedAttempt } from '@/lib/rate-limit';
 import type { APIRoute } from 'astro';
 
 export const OPTIONS: APIRoute = async ({ request }) => {
@@ -52,6 +53,18 @@ export const POST: APIRoute = async ({ params, request, locals }) => {
   const db = locals.runtime.env.DB as D1Database;
   const auth = await requireAuth(db, request);
   if (!auth) return new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401, headers: { 'Content-Type': 'application/json' } });
+
+  // Rate limit: 5 per 5min per user ID
+  const rlKey = `user:${auth.user.id}`;
+  const rl = await checkRateLimit(db, rlKey, 'post-comment');
+  if (!rl.allowed) {
+    return new Response(JSON.stringify({ error: 'Rate limit exceeded. Try again later.' }), {
+      status: 429,
+      headers: { 'Content-Type': 'application/json', 'Retry-After': String(rl.retryAfterSeconds) },
+    });
+  }
+  await recordFailedAttempt(db, rlKey, 'post-comment');
+
   const workId = Number(params.id);
   if (!workId) return new Response(JSON.stringify({ error: 'Not found' }), { status: 404, headers: { 'Content-Type': 'application/json' } });
 
