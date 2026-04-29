@@ -51,7 +51,7 @@ export const POST: APIRoute = async ({ request, locals }) => {
   let body: any;
   try { body = await request.json(); } catch { return new Response(JSON.stringify({ error: 'Invalid JSON' }), { status: 400, headers: { 'Content-Type': 'application/json' } }); }
 
-  const { title, summary, notes, pseud_id, chapter_title, chapter_content, chapter_images, draft, tag_ids, rating, category, warning, skip_chapter } = body || {};
+  const { title, summary, notes, pseud_id, chapter_title, chapter_content, chapter_images, draft, tag_ids, tag_names, rating, category, warning, skip_chapter } = body || {};
   if (!title) return new Response(JSON.stringify({ error: 'Title is required' }), { status: 400, headers: { 'Content-Type': 'application/json' } });
 
   const pseudId = pseud_id || auth.pseuds[0]?.id;
@@ -59,6 +59,32 @@ export const POST: APIRoute = async ({ request, locals }) => {
 
   const isDraft = draft !== undefined ? (draft ? 1 : 0) : 1;
   const skipChapter = skip_chapter === true;
+
+  // Resolve tag_names (new/freeform tags with name+type) to tag_ids
+  // This allows users to create new tags during work creation without admin rights
+  const resolvedTagIds: number[] = [...(Array.isArray(tag_ids) ? tag_ids.filter((id: any) => typeof id === 'number' && id > 0) : [])];
+  
+  if (Array.isArray(tag_names)) {
+    const validTypes = ['fandom', 'character', 'relationship', 'freeform'];
+    for (const tn of tag_names) {
+      if (!tn.name || !tn.type || !validTypes.includes(tn.type)) continue;
+      // Look up existing tag
+      const existing = await queryFirst<any>(db, `SELECT id FROM tags WHERE name = ?1 AND type = ?2`, tn.name, tn.type);
+      if (existing) {
+        if (!resolvedTagIds.includes(existing.id)) resolvedTagIds.push(existing.id);
+      } else {
+        // Auto-create the tag
+        const tagResult = await run(db, `INSERT OR IGNORE INTO tags (name, type) VALUES (?1, ?2)`, tn.name, tn.type);
+        if (tagResult.meta.last_row_id && !resolvedTagIds.includes(tagResult.meta.last_row_id)) {
+          resolvedTagIds.push(tagResult.meta.last_row_id);
+        } else {
+          // INSERT OR IGNORE may not return last_row_id if it was a duplicate — re-fetch
+          const reFetched = await queryFirst<any>(db, `SELECT id FROM tags WHERE name = ?1 AND type = ?2`, tn.name, tn.type);
+          if (reFetched && !resolvedTagIds.includes(reFetched.id)) resolvedTagIds.push(reFetched.id);
+        }
+      }
+    }
+  }
 
   // Work-level insert (word_count will be 0 if skipping chapter, updated later if chapter included)
   const workResult = await run(db, `INSERT INTO works (title, summary, notes, language, word_count, complete, published_at, updated_at, created_at) VALUES (?1, ?2, ?3, 'en', 0, 0, ${isDraft ? 'NULL' : "CURRENT_TIMESTAMP"}, datetime('now'), datetime('now'))`,
@@ -89,10 +115,9 @@ export const POST: APIRoute = async ({ request, locals }) => {
     await run(db, `UPDATE works SET word_count = ?1 WHERE id = ?2`, wordCount, workId);
   }
 
-  if (Array.isArray(tag_ids)) {
-    for (const tagId of tag_ids) {
-      await run(db, `INSERT OR IGNORE INTO taggings (tag_id, work_id) VALUES (?1, ?2)`, tagId, workId);
-    }
+  // Apply resolved tag IDs
+  for (const tagId of resolvedTagIds) {
+    await run(db, `INSERT OR IGNORE INTO taggings (tag_id, work_id) VALUES (?1, ?2)`, tagId, workId);
   }
 
   // Auto-create rating/category/warning tags if provided

@@ -179,10 +179,15 @@ export default function TagChips({ type, label, placeholder, initialTags = [], o
           ))}
         </div>
       )}
-      {/* Hidden input for form submission */}
-      {selected.map(tag => (
-        <input type="hidden" name={`tag_${type}`} value={tag.id} key={`hidden-${tag.id}`} />
-      ))}
+      {/* Hidden inputs for form submission — split into tag_ids (existing) and tag_names (new) */}
+      {selected.map(tag => {
+        if (tag.id > 0) {
+          return <input type="hidden" name={`tag_id`} value={tag.id} key={`id-${tag.id}`} />;
+        } else {
+          // New tags: output as JSON name+type pair
+          return <input type="hidden" name={`tag_name`} value={JSON.stringify({ name: tag.name, type })} key={`name-${tag.id}`} />;
+        }
+      })}
     </div>
   );
 }
