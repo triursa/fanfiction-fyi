@@ -421,7 +421,7 @@ const defaultPseudId = pseuds.find(p => p.name === user.display_name)?.id ?? pse
   }
 </style>
 
-<script define:vars={{}}">
+<script>
   // Tag autocomplete logic
   const tagInputFields = document.querySelectorAll('.tag-input');
   const selectedTags: Record<string, { id: number; name: string }[]> = {};
