@@ -73,7 +73,7 @@ export const POST: APIRoute = async ({ request, locals }) => {
 
   const workId = workResult.meta.last_row_id;
 
-  await run(db, `INSERT INTO creatorships (pseud_id, work_id, role, created_at) VALUES (?1, ?2, 'author', datetime('now'))`, pseudId, workId);
+  await run(db, `INSERT INTO creatorships (pseud_id, work_id, role) VALUES (?1, ?2, 'author')`, pseudId, workId);
 
   const chapterResult = await run(db, `INSERT INTO chapters (work_id, position, title, content_md, content_html, draft, word_count, images, created_at, updated_at) VALUES (?1, 1, ?2, ?3, ?4, ?5, ?6, ?7, datetime('now'), datetime('now'))`,
     workId, chapter_title || 'Chapter 1', contentMd, contentHtml, isDraft, wordCount, imagesJson);
