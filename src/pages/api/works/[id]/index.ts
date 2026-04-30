@@ -133,10 +133,15 @@ export const PUT: APIRoute = async ({ params, request, locals }) => {
   if (body.publish) {
     await run(db, `UPDATE chapters SET draft = 0, updated_at = datetime('now') WHERE work_id = ?1 AND draft = 1`, workId);
     await run(db, `UPDATE works SET word_count = (SELECT COALESCE(SUM(word_count), 0) FROM chapters WHERE work_id = ?1 AND draft = 0) WHERE id = ?1`, workId);
-    await logPublishResult(db, workLogId, { status: 'success', httpStatus: 200, responseSummary: JSON.stringify({ published_at: work?.published_at }).slice(0,200) });
   }
 
   const work = await queryFirst<any>(db, `SELECT * FROM works WHERE id = ?1`, workId);
+
+  // Log publish result after fetching the updated work so we can include published_at
+  if (body.publish && workLogId) {
+    await logPublishResult(db, workLogId, { status: 'success', httpStatus: 200, responseSummary: JSON.stringify({ published_at: work?.published_at }).slice(0,200) });
+  }
+
   return new Response(JSON.stringify(work), { headers: { 'Content-Type': 'application/json' } });
   } catch (err) {
     console.error('[WORK_PUT] Error updating work:', workId, err);
