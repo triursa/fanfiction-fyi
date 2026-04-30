@@ -1,6 +1,6 @@
 export const prerender = false;
 
-import { queryAll } from '@/lib/db';
+import { queryAll, queryFirst } from '@/lib/db';
 import { corsHeaders, handleCors } from '@/lib/cors';
 import { markdownToHtml } from '@/lib/markdown';
 import type { APIRoute } from 'astro';
