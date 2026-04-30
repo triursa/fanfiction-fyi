@@ -687,19 +687,21 @@ const initialChapterData = JSON.stringify({
 
   // ── Publish Chapter button ──
   publishBtn.addEventListener('click', async () => {
-    // Disable button and show loading state
-    publishBtn.disabled = true;
     publishBtn.textContent = 'Publishing…';
-    saveDraftBtn.disabled = true;
 
     const savedOk = await saveChapter(false);
 
     if (!savedOk) {
       publishBtn.textContent = 'Publish Chapter';
+      // saveChapter's finally block already restored the button states
       return;
     }
 
     // Also publish the work if it's still a draft
+    // Disable buttons during work publish call (saveChapter's finally already re-enabled them)
+    publishBtn.disabled = true;
+    saveDraftBtn.disabled = true;
+    let publishSucceeded = false;
     try {
       const workRes = await fetch(`/api/works/${workId}`, {
         method: 'PUT',
@@ -707,6 +709,7 @@ const initialChapterData = JSON.stringify({
         body: JSON.stringify({ publish: true }),
       });
       if (workRes.ok) {
+        publishSucceeded = true;
         showToast('Published! Redirecting to your work…', 'success');
         // Short delay so user sees the toast before navigating
         setTimeout(() => {
@@ -715,11 +718,17 @@ const initialChapterData = JSON.stringify({
       } else {
         const data = await workRes.json().catch(() => ({}));
         showToast(`Chapter saved, but work publish failed: ${data.error || 'Unknown error'}`, 'warning');
-        publishBtn.textContent = 'Publish Chapter';
       }
     } catch {
       showToast('Chapter saved locally — network error publishing work', 'warning');
-      publishBtn.textContent = 'Publish Chapter';
+    } finally {
+      // On success, keep buttons disabled until the redirect completes.
+      // On failure, re-enable so the user can try again.
+      if (!publishSucceeded) {
+        publishBtn.textContent = 'Publish Chapter';
+        publishBtn.disabled = false;
+        saveDraftBtn.disabled = false;
+      }
     }
   });
 
