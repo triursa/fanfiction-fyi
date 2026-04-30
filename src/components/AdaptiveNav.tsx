@@ -31,6 +31,10 @@ const SECONDARY_NAV: NavItem[] = [
   { label: 'Search', href: '/search', icon: 'manage_search' },
 ];
 
+const STUDIO_NAV: NavItem[] = [
+  { label: 'Studio', href: '/studio', icon: 'studio' },
+];
+
 const ADMIN_NAV: NavItem[] = [
   { label: 'Admin', href: '/admin', icon: 'admin_panel_settings' },
 ];
@@ -51,6 +55,7 @@ const ICONS: Record<string, string> = {
   admin_panel_settings: 'M17 11c.34 0 .67.04 1 .09V6.27L10.5 3 3 6.27v4.91c0 4.54 3.15 8.79 7.5 9.82.39-.09.76-.21 1.13-.36-.38-.75-.63-1.58-.63-2.48 0-3.31 2.69-6 6-6z',
   menu: 'M3 18h18v-2H3v2zm0-5h18v-2H3v2zm0-7v2h18V6H3z',
   create: 'M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34a.9959.9959 0 00-.71-.29c-.26 0-.51.1-.7.29l-1.83 1.83 3.75 3.75 1.83-1.83z',
+  studio: 'M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm0 16H5V5h14v14zM7 10h2v7H7zm4-3h2v10h-2zm4 6h2v4h-2z',
   settings: 'M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58c.18-.14.23-.41.12-.61l-1.92-3.32c-.12-.22-.37-.29-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54c-.04-.24-.24-.41-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.07.62-.07.94s.02.64.07.94l-2.03 1.58c-.18.14-.23.41-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6A3.6 3.6 0 1115.6 12 3.61 3.61 0 0112 15.6z',
   close: 'M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z',
   logout: 'M17 7l-1.41 1.41L18.17 11H8v2h10.17l-2.58 2.58L17 17l5-5zM4 5h8V3H4c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h8v-2H4V5z',
@@ -116,7 +121,7 @@ function NavigationRail({ items, currentPath, onMenuClick }: { items: NavItem[];
         ))}
       </div>
       <div class="navigation-rail__spacer" />
-      <a href="/works/create" class="navigation-rail__create" aria-label="New Work" title="New Work">
+      <a href="/studio" class="navigation-rail__create" aria-label="Creator Studio" title="Studio">
         <SvgIcon name="create" size={24} />
       </a>
     </nav>
@@ -164,6 +169,10 @@ function NavigationDrawer({ items, secondaryItems, currentPath, userName }: {
       <div class="navigation-drawer__spacer" />
       {userName && (
         <div class="navigation-drawer__footer">
+          <a href="/studio" class={`navigation-drawer__item ${isActive('/studio', currentPath) ? 'navigation-drawer__item--active' : ''}`}>
+            <SvgIcon name="studio" size={24} />
+            <span>Studio</span>
+          </a>
           <a href="/works/create" class="navigation-drawer__create">
             <SvgIcon name="create" size={20} />
             <span>New Work</span>
@@ -257,6 +266,10 @@ function ModalDrawer({ isOpen, onClose, primaryItems, secondaryItems, currentPat
           <>
             <div class="modal-drawer__divider" />
             <div class="modal-drawer__section">
+              <a href="/studio" class="modal-drawer__item" onClick={onClose}>
+                <SvgIcon name="studio" size={24} />
+                <span>Studio</span>
+              </a>
               <a href="/works/create" class="modal-drawer__item modal-drawer__item--create" onClick={onClose}>
                 <SvgIcon name="create" size={24} />
                 <span>New Work</span>
@@ -296,8 +309,8 @@ function MobileAppBar({ onMenuClick, userName }: { onMenuClick: () => void; user
       <a href="/" class="mobile-app-bar__title">fanfiction.fyi</a>
       <div class="mobile-app-bar__actions">
         {userName ? (
-          <a href="/works/create" class="mobile-app-bar__create" aria-label="New Work">
-            <SvgIcon name="create" size={24} />
+          <a href="/studio" class="mobile-app-bar__create" aria-label="Creator Studio">
+            <SvgIcon name="studio" size={24} />
           </a>
         ) : (
           <a href="/login" class="mobile-app-bar__signin">Sign In</a>
@@ -348,6 +361,9 @@ export default function AdaptiveNav({ currentPath, userName, isAdmin, isReadingM
 
   // Build secondary nav for drawer/modal
   const secondaryNav = [...SECONDARY_NAV];
+  if (userName) {
+    secondaryNav.unshift(...STUDIO_NAV);
+  }
   if (isAdmin) {
     secondaryNav.push(...ADMIN_NAV);
   }
