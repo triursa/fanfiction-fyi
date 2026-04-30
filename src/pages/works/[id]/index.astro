@@ -1,6 +1,7 @@
 ---
 export const prerender = false;
 import Base from '../../../layouts/Base.astro';
+import TagCluster from '../../../components/TagCluster.tsx';
 import { queryFirst, queryAll } from '../../../lib/db';
 import { markdownToHtml } from '../../../lib/markdown';
 
@@ -80,12 +81,7 @@ const incomingRelations = await queryAll<any>(
 );
 const hasRelations = outgoingRelations.length > 0 || incomingRelations.length > 0;
 
-// Group tags by type
-const tagsByType: Record<string, string[]> = {};
-for (const t of tags) {
-  if (!tagsByType[t.type]) tagsByType[t.type] = [];
-  tagsByType[t.type].push(t.name);
-}
+// Tag grouping now handled by TagCluster Preact component on the client
 
 // Reading time estimation (230 wpm)
 const readingTimeMinutes = Math.max(1, Math.ceil((work.word_count || 0) / 230));
@@ -242,16 +238,9 @@ const commentsJson = JSON.stringify(allComments);
       </div>
 
       <!-- Tags -->
-      {(tagsByType.rating || tagsByType.warning || tagsByType.category || tagsByType.fandom || tagsByType.character || tagsByType.relationship || tagsByType.freeform) && (
+      {tags.length > 0 && (
         <div class="sidebar-card sidebar-tags">
-          <h4 class="sidebar-heading">Tags</h4>
-          {tagsByType.rating && <div class="tag-group"><span class="tag-label">Rating:</span> {tagsByType.rating.map(t => <span class="tag-pill tag-rating">{t}</span>)}</div>}
-          {tagsByType.warning && <div class="tag-group"><span class="tag-label">Warnings:</span> {tagsByType.warning.map(t => <span class="tag-pill tag-warning">{t}</span>)}</div>}
-          {tagsByType.category && <div class="tag-group"><span class="tag-label">Category:</span> {tagsByType.category.map(t => <span class="tag-pill">{t}</span>)}</div>}
-          {tagsByType.fandom && <div class="tag-group"><span class="tag-label">Fandom:</span> {tagsByType.fandom.map(t => <span class="tag-pill">{t}</span>)}</div>}
-          {tagsByType.character && <div class="tag-group"><span class="tag-label">Characters:</span> {tagsByType.character.map(t => <span class="tag-pill">{t}</span>)}</div>}
-          {tagsByType.relationship && <div class="tag-group"><span class="tag-label">Relationships:</span> {tagsByType.relationship.map(t => <span class="tag-pill">{t}</span>)}</div>}
-          {tagsByType.freeform && <div class="tag-group"><span class="tag-label">Additional Tags:</span> {tagsByType.freeform.map(t => <span class="tag-pill">{t}</span>)}</div>}
+          <TagCluster client:load tags={tags.map((t: any) => ({ id: t.id, name: t.name, type: t.type }))} />
         </div>
       )}
 
@@ -379,6 +368,8 @@ const commentsJson = JSON.stringify(allComments);
 </Base>
 
 <style is:global>
+  @import '../../../styles/composer.css';
+
   /* ── Layout: responsive CSS Grid ── */
   .work-layout {
     display: grid;
@@ -455,10 +446,6 @@ const commentsJson = JSON.stringify(allComments);
     margin-left: var(--space-2);
   }
 
-  .sidebar-tags .tag-group {
-    margin: var(--space-2) 0;
-  }
-
   .sidebar-actions {
     display: flex;
     flex-direction: column;
@@ -493,12 +480,7 @@ const commentsJson = JSON.stringify(allComments);
   .prose-content figure { margin: var(--space-4) 0; text-align: center; }
   .prose-content figcaption { font: var(--md-sys-typescale-body-small); color: var(--md-sys-color-on-surface-variant); margin-top: var(--space-1); }
 
-  /* ── Tags ── */
-  .tag-group { display: flex; flex-wrap: wrap; gap: var(--space-2); align-items: center; }
-  .tag-label { font: var(--md-sys-typescale-label-large); color: var(--md-sys-color-on-surface-variant); }
-  .tag-pill { font: var(--md-sys-typescale-body-small); background: var(--md-sys-color-secondary-container); color: var(--md-sys-color-on-secondary-container); padding: 2px var(--space-3); border-radius: var(--md-sys-shape-corner-full); }
-  .tag-rating { background: var(--md-sys-color-tertiary-container); color: var(--md-sys-color-on-tertiary-container); }
-  .tag-warning { background: var(--md-sys-color-error-container); color: var(--md-sys-color-on-error-container); }
+  /* ── Tags (handled by TagCluster component + composer.css) ── */
 
   /* ── Series ── */
   .series-link { font: var(--md-sys-typescale-body-medium); color: var(--md-sys-color-on-surface-variant); margin: var(--space-1) 0; }

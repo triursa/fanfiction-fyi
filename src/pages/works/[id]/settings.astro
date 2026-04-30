@@ -92,10 +92,10 @@ const RELATION_TYPES = [
       <div class="m3-card">
         <h2 class="m3-card-title">Taxonomy</h2>
         <div class="form-stack" style="gap: var(--space-4)">
-          <TagChips client:load type="fandom" label="Fandom" placeholder="e.g. Harry Potter, Marvel" initialTags={initialTagState.fandom || []} />
-          <TagChips client:load type="character" label="Characters" placeholder="e.g. Hermione Granger" initialTags={initialTagState.character || []} />
-          <TagChips client:load type="relationship" label="Relationships" placeholder="e.g. Harry Potter/Ginny Weasley" initialTags={initialTagState.relationship || []} />
-          <TagChips client:load type="freeform" label="Additional Tags" placeholder="e.g. Angst, Fluff, Slow Burn" initialTags={initialTagState.freeform || []} />
+          <TagChips client:load type="fandom" label="Fandom" placeholder="e.g. Harry Potter, Marvel" initialTags={initialTagState.fandom || []} maxTags={5} />
+          <TagChips client:load type="character" label="Characters" placeholder="e.g. Hermione Granger" initialTags={initialTagState.character || []} maxTags={20} />
+          <TagChips client:load type="relationship" label="Relationships" placeholder="e.g. Harry Potter/Ginny Weasley" initialTags={initialTagState.relationship || []} maxTags={10} />
+          <TagChips client:load type="freeform" label="Additional Tags" placeholder="e.g. Angst, Fluff, Slow Burn" initialTags={initialTagState.freeform || []} maxTags={30} />
         </div>
       </div>
 
