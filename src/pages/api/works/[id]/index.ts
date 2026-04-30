@@ -160,6 +160,11 @@ export const DELETE: APIRoute = async ({ params, request, locals }) => {
   const creatorship = await queryFirst<any>(db, `SELECT * FROM creatorships WHERE work_id = ?1 AND pseud_id IN (SELECT id FROM pseuds WHERE user_id = ?2)`, workId, auth.user.id);
   if (!creatorship) return new Response(JSON.stringify({ error: 'Forbidden' }), { status: 403, headers: { 'Content-Type': 'application/json' } });
 
-  await run(db, `DELETE FROM works WHERE id = ?1`, workId);
-  return new Response(JSON.stringify({ ok: true }), { headers: { 'Content-Type': 'application/json' } });
+  try {
+    await run(db, `DELETE FROM works WHERE id = ?1`, workId);
+    return new Response(JSON.stringify({ ok: true }), { headers: { 'Content-Type': 'application/json' } });
+  } catch (err) {
+    console.error('[WORK_DELETE] Error deleting work:', workId, err);
+    return new Response(JSON.stringify({ error: (err as any)?.message || 'Internal server error' }), { status: 500, headers: { 'Content-Type': 'application/json' } });
+  }
 };

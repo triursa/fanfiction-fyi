@@ -62,7 +62,7 @@ const RELATION_TYPES = [
     <h1 class="page-title">Story Settings</h1>
     <p class="page-subtitle">Edit the metadata for your story. Writing happens in the <a href={`/works/${workId}/draft`} class="m3-link">draft workspace</a>.</p>
 
-    <form id="settings-form" class="form-stack">
+    <form id="settings-form" class="form-stack" method="post">
       <!-- Card 1: The Basics -->
       <div class="m3-card">
         <h2 class="m3-card-title">The Basics</h2>
@@ -294,9 +294,7 @@ const RELATION_TYPES = [
   }
 </style>
 
-<script define:vars={{ workId, initialTagsJson }}>
-  const initialTags = JSON.parse(initialTagsJson);
-
+<script define:vars={{ workId }}>
   const form = document.getElementById('settings-form') as HTMLFormElement;
   const errorEl = document.getElementById('form-error')!;
   const saveBtn = document.getElementById('save-btn') as HTMLButtonElement;
@@ -349,7 +347,13 @@ const RELATION_TYPES = [
         }),
       });
       if (res.ok) {
-        window.location.href = `/works/${workId}/draft`;
+        // Try to read published_at from the response to choose the redirect destination.
+        // If parsing fails the save still succeeded; fall back to the draft workspace.
+        const updatedWork = await res.json().catch(() => null);
+        // Published works → show the public work page; drafts → back to writing
+        window.location.href = updatedWork?.published_at
+          ? `/works/${workId}`
+          : `/works/${workId}/draft`;
       } else {
         const data = await res.json();
         errorEl.textContent = data.error || 'Failed to save changes';
