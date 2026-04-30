@@ -135,11 +135,11 @@ const commentsJson = JSON.stringify(allComments);
 ---
 
 <Base title={`${work.title} — fanfiction.fyi`}>
-  <article class="work-display">
-    <header class="work-header">
-      <h1 class="work-title">{work.title}</h1>
-
-      <div class="work-meta">
+  <div class="work-layout">
+    <!-- Main content column -->
+    <div class="work-main">
+      <header class="work-header-main">
+        <h1 class="work-title">{work.title}</h1>
         <p class="work-authors">
           By {pseuds.map((p, i) => (
             <Fragment>
@@ -152,31 +152,123 @@ const commentsJson = JSON.stringify(allComments);
           ))}
         </p>
         {work.summary && <p class="work-summary">{work.summary}</p>}
-        <div class="work-stats">
-          <span>{work.word_count.toLocaleString()} words</span>
-          <span>·</span>
-          <span>~{readingTimeMinutes} min read</span>
-          <span>·</span>
-          <span>{publishedChapters.length} chapter{publishedChapters.length !== 1 ? 's' : ''}</span>
-          <span>·</span>
-          <span>{work.complete ? 'Complete' : 'Work in Progress'}</span>
-          {work.published_at && <><span>·</span><span>Published {new Date(work.published_at).toLocaleDateString()}</span></>}
+      </header>
+
+      {work.notes && (
+        <section class="work-notes">
+          <h3>Author's Notes</h3>
+          <div class="prose-content" set:html={markdownToHtml(work.notes)} />
+        </section>
+      )}
+
+      {chapter && (
+        <section class="chapter-content">
+          <h2 class="chapter-title">{chapter.title}</h2>
+          {chapter.content_html && <div class="prose-content" set:html={chapter.content_html} />}
+          {!chapter.content_html && chapter.content_md && <div class="prose-content" set:html={markdownToHtml(chapter.content_md)} />}
+          {!chapter.content_html && !chapter.content_md && <p class="placeholder-text">Content not available.</p>}
+        </section>
+      )}
+
+      {work.end_notes && (
+        <section class="work-notes">
+          <h3>End Notes</h3>
+          <div class="prose-content" set:html={markdownToHtml(work.end_notes)} />
+        </section>
+      )}
+
+      <!-- Comments Section -->
+      <section class="comments-section">
+        <h3 class="comments-title">Comments ({allComments.length})</h3>
+
+        {authUser ? (
+          <form id="comment-form" class="comment-form">
+            <input type="hidden" name="work_id" value={work.id} />
+            <input type="hidden" name="chapter_id" value={chapter?.id ?? ''} />
+            <input type="hidden" name="parent_id" id="reply-parent-id" value="" />
+            <div class="comment-form-header">
+              <span id="reply-indicator" class="reply-indicator" style="display:none;">
+                Replying to <span id="reply-to-name"></span>
+                <button type="button" id="cancel-reply" class="cancel-reply-btn">✕</button>
+              </span>
+            </div>
+            <textarea id="comment-content" name="content" placeholder="Leave a comment…" rows="3" required class="comment-textarea"></textarea>
+            <button type="submit" class="btn-primary">Post Comment</button>
+          </form>
+        ) : (
+          <p class="login-prompt"><a href="/login">Sign in</a> to leave a comment.</p>
+        )}
+
+        <div id="comments-thread" class="comments-thread" data-comments={commentsJson}>
+          {allComments.filter(c => !c.parent_id).map(comment => (
+            <div class="comment-item" data-comment-id={comment.id}>
+              <div class="comment-body">
+                <span class="comment-author">{comment.pseud_name}</span>
+                <span class="comment-date">{new Date(comment.created_at).toLocaleDateString()}</span>
+                <div class="comment-content" set:html={comment.content_html || markdownToHtml(comment.content || '')} />
+                {authUser && (
+                  <button class="reply-btn" data-comment-id={comment.id} data-pseud-name={comment.pseud_name}>Reply</button>
+                )}
+              </div>
+              <div class="comment-replies">
+                {allComments.filter(r => r.parent_id === comment.id).map(reply => (
+                  <div class="comment-item comment-reply" data-comment-id={reply.id}>
+                    <div class="comment-body">
+                      <span class="comment-author">{reply.pseud_name}</span>
+                      <span class="comment-date">{new Date(reply.created_at).toLocaleDateString()}</span>
+                      <div class="comment-content" set:html={reply.content_html || markdownToHtml(reply.content || '')} />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      </section>
+    </div>
+
+    <!-- Sticky sidebar on desktop -->
+    <aside class="work-sidebar">
+      <!-- Metadata -->
+      <div class="sidebar-card">
+        <h4 class="sidebar-heading">Metadata</h4>
+        <div class="sidebar-stats">
+          <div class="sidebar-stat"><span>Words</span><span class="sidebar-stat-value">{work.word_count.toLocaleString()}</span></div>
+          <div class="sidebar-stat"><span>Chapters</span><span class="sidebar-stat-value">{publishedChapters.length} / {chapters.length}</span></div>
+          <div class="sidebar-stat"><span>Reading time</span><span class="sidebar-stat-value">~{readingTimeMinutes} min</span></div>
+          <div class="sidebar-stat"><span>Status</span><span class="sidebar-stat-value">{work.complete ? 'Complete' : 'WIP'}</span></div>
+          {work.published_at && <div class="sidebar-stat"><span>Published</span><span class="sidebar-stat-value">{new Date(work.published_at).toLocaleDateString()}</span></div>}
         </div>
       </div>
 
+      <!-- Tags -->
+      {(tagsByType.rating || tagsByType.warning || tagsByType.category || tagsByType.fandom || tagsByType.character || tagsByType.relationship || tagsByType.freeform) && (
+        <div class="sidebar-card sidebar-tags">
+          <h4 class="sidebar-heading">Tags</h4>
+          {tagsByType.rating && <div class="tag-group"><span class="tag-label">Rating:</span> {tagsByType.rating.map(t => <span class="tag-pill tag-rating">{t}</span>)}</div>}
+          {tagsByType.warning && <div class="tag-group"><span class="tag-label">Warnings:</span> {tagsByType.warning.map(t => <span class="tag-pill tag-warning">{t}</span>)}</div>}
+          {tagsByType.category && <div class="tag-group"><span class="tag-label">Category:</span> {tagsByType.category.map(t => <span class="tag-pill">{t}</span>)}</div>}
+          {tagsByType.fandom && <div class="tag-group"><span class="tag-label">Fandom:</span> {tagsByType.fandom.map(t => <span class="tag-pill">{t}</span>)}</div>}
+          {tagsByType.character && <div class="tag-group"><span class="tag-label">Characters:</span> {tagsByType.character.map(t => <span class="tag-pill">{t}</span>)}</div>}
+          {tagsByType.relationship && <div class="tag-group"><span class="tag-label">Relationships:</span> {tagsByType.relationship.map(t => <span class="tag-pill">{t}</span>)}</div>}
+          {tagsByType.freeform && <div class="tag-group"><span class="tag-label">Additional Tags:</span> {tagsByType.freeform.map(t => <span class="tag-pill">{t}</span>)}</div>}
+        </div>
+      )}
+
+      <!-- Series -->
       {seriesLinks.length > 0 && (
-        <div class="work-series">
+        <div class="sidebar-card">
+          <h4 class="sidebar-heading">Series</h4>
           {seriesLinks.map(sl => (
-            <span class="series-link">Part {sl.position} of <a href={`/series/${sl.id}`}>{sl.title}</a></span>
+            <p class="series-link">Part {sl.position} of <a href={`/series/${sl.id}`}>{sl.title}</a></p>
           ))}
         </div>
       )}
 
-      {tagsByType.rating && <div class="tag-group"><span class="tag-label">Rating:</span> {tagsByType.rating.map(t => <span class="tag-pill tag-rating">{t}</span>)}</div>}
-
+      <!-- Related Works -->
       {hasRelations && (
-        <div class="work-relations">
-          <h4 class="relations-heading">Related Works</h4>
+        <div class="sidebar-card">
+          <h4 class="sidebar-heading">Related Works</h4>
           <ul class="relations-list">
             {outgoingRelations.map(r => (
               <li class="relation-item">
@@ -194,204 +286,203 @@ const commentsJson = JSON.stringify(allComments);
           <a href={`/works/${workId}/lineage`} class="lineage-link">View Lineage Graph ↗</a>
         </div>
       )}
-      {tagsByType.warning && <div class="tag-group"><span class="tag-label">Warnings:</span> {tagsByType.warning.map(t => <span class="tag-pill tag-warning">{t}</span>)}</div>}
-      {tagsByType.category && <div class="tag-group"><span class="tag-label">Category:</span> {tagsByType.category.map(t => <span class="tag-pill">{t}</span>)}</div>}
-      {tagsByType.fandom && <div class="tag-group"><span class="tag-label">Fandom:</span> {tagsByType.fandom.map(t => <span class="tag-pill">{t}</span>)}</div>}
-      {tagsByType.character && <div class="tag-group"><span class="tag-label">Characters:</span> {tagsByType.character.map(t => <span class="tag-pill">{t}</span>)}</div>}
-      {tagsByType.relationship && <div class="tag-group"><span class="tag-label">Relationships:</span> {tagsByType.relationship.map(t => <span class="tag-pill">{t}</span>)}</div>}
-      {tagsByType.freeform && <div class="tag-group"><span class="tag-label">Additional Tags:</span> {tagsByType.freeform.map(t => <span class="tag-pill">{t}</span>)}</div>}
 
-      {isOwner && (
-        <div class="work-owner-actions">
-          <a href={`/works/${work.id}/settings`} class="btn-secondary">Edit Work</a>
-          <a href={`/works/${work.id}/draft`} class="btn-secondary">Write / Add Chapter</a>
+      <!-- Chapter Nav -->
+      {publishedChapters.length > 1 && (
+        <div class="sidebar-card">
+          <h4 class="sidebar-heading">Chapters</h4>
+          <ol class="sidebar-chapter-list">
+            {publishedChapters.map(c => (
+              <li class={c.id === chapterId ? 'current' : ''}>
+                <a href={`/works/${work.id}?chapter=${c.id}`}>{c.title}</a>
+              </li>
+            ))}
+          </ol>
         </div>
       )}
-    </header>
 
-    {work.notes && (
-      <section class="work-notes">
-        <h3>Author's Notes</h3>
-        <div class="prose-content" set:html={markdownToHtml(work.notes)} />
-      </section>
-    )}
+      <!-- Chapter Reactions -->
+      {chapter && (
+        <div class="sidebar-card">
+          <h4 class="sidebar-heading">React to this chapter</h4>
+          <div class="chapter-reactions" data-chapter-id={chapter.id} data-authed={authUser ? 'true' : 'false'}>
+            <div class="reactions-bar">
+              <button class="reaction-btn" data-reaction="fire" data-mine={myReactions.includes('fire') ? '1' : '0'} title="Fire">🔥 <span class="reaction-count">{reactionCounts['fire'] || 0}</span></button>
+              <button class="reaction-btn" data-reaction="cry" data-mine={myReactions.includes('cry') ? '1' : '0'} title="Crying">😭 <span class="reaction-count">{reactionCounts['cry'] || 0}</span></button>
+              <button class="reaction-btn" data-reaction="heartbreak" data-mine={myReactions.includes('heartbreak') ? '1' : '0'} title="Heartbreak">💔 <span class="reaction-count">{reactionCounts['heartbreak'] || 0}</span></button>
+              <button class="reaction-btn" data-reaction="swords" data-mine={myReactions.includes('swords') ? '1' : '0'} title="Action">⚔️ <span class="reaction-count">{reactionCounts['swords'] || 0}</span></button>
+              <button class="reaction-btn" data-reaction="heart" data-mine={myReactions.includes('heart') ? '1' : '0'} title="Love">❤️ <span class="reaction-count">{reactionCounts['heart'] || 0}</span></button>
+              <button class="reaction-btn" data-reaction="mindblown" data-mine={myReactions.includes('mindblown') ? '1' : '0'} title="Mind blown">🤯 <span class="reaction-count">{reactionCounts['mindblown'] || 0}</span></button>
+            </div>
+          </div>
+        </div>
+      )}
 
-    {publishedChapters.length > 1 && (
-      <nav class="chapter-nav">
-        <h3>Chapters</h3>
-        <ol class="chapter-list">
-          {publishedChapters.map(c => (
-            <li class={c.id === chapterId ? 'current' : ''}>
-              <a href={`/works/${work.id}?chapter=${c.id}`}>{c.title}</a>
-            </li>
-          ))}
-        </ol>
-      </nav>
-    )}
-
-    {chapter && (
-      <section class="chapter-content">
-        <h2 class="chapter-title">{chapter.title}</h2>
-        {chapter.content_html && <div class="prose-content" set:html={chapter.content_html} />}
-        {!chapter.content_html && chapter.content_md && <div class="prose-content" set:html={markdownToHtml(chapter.content_md)} />}
-        {!chapter.content_html && !chapter.content_md && <p class="placeholder-text">Content not available.</p>}
-      </section>
-
-      <!-- Chapter Reactions Bar -->
-      <div class="chapter-reactions" data-chapter-id={chapter.id} data-authed={authUser ? 'true' : 'false'}>
-        <span class="reactions-label">React to this chapter:</span>
-        <div class="reactions-bar">
-          <button class="reaction-btn" data-reaction="fire" data-mine={myReactions.includes('fire') ? '1' : '0'} title="Fire">🔥 <span class="reaction-count">{reactionCounts['fire'] || 0}</span></button>
-          <button class="reaction-btn" data-reaction="cry" data-mine={myReactions.includes('cry') ? '1' : '0'} title="Crying">😭 <span class="reaction-count">{reactionCounts['cry'] || 0}</span></button>
-          <button class="reaction-btn" data-reaction="heartbreak" data-mine={myReactions.includes('heartbreak') ? '1' : '0'} title="Heartbreak">💔 <span class="reaction-count">{reactionCounts['heartbreak'] || 0}</span></button>
-          <button class="reaction-btn" data-reaction="swords" data-mine={myReactions.includes('swords') ? '1' : '0'} title="Action">⚔️ <span class="reaction-count">{reactionCounts['swords'] || 0}</span></button>
-          <button class="reaction-btn" data-reaction="heart" data-mine={myReactions.includes('heart') ? '1' : '0'} title="Love">❤️ <span class="reaction-count">{reactionCounts['heart'] || 0}</span></button>
-          <button class="reaction-btn" data-reaction="mindblown" data-mine={myReactions.includes('mindblown') ? '1' : '0'} title="Mind blown">🤯 <span class="reaction-count">{reactionCounts['mindblown'] || 0}</span></button>
+      <!-- Work Actions -->
+      <div class="sidebar-card">
+        <h4 class="sidebar-heading">Actions</h4>
+        <div class="sidebar-actions">
+          <button id="kudos-btn" class="btn-primary">❤️ Leave Kudos ({kudosCount})</button>
+          <a href={`/works/${work.id}/read${chapterId ? `?chapter=${chapterId}` : ''}`} class="btn-secondary">📖 Reading Mode</a>
+          {work.published_at && (
+            <a href={`/api/works/${work.id}/export?format=epub`} class="btn-secondary" download>📥 Export EPUB</a>
+          )}
+          {authUser && (
+            <Fragment>
+              <button id="bookmark-btn" class="btn-secondary" data-bookmarked={existingBookmark ? 'true' : 'false'} data-work-id={work.id}>
+                {existingBookmark ? '🔖 Bookmarked' : '🔖 Bookmark'}
+              </button>
+              <button id="mark-later-btn" class="btn-secondary" data-for-later={readingProgress?.for_later ? 'true' : 'false'} data-work-id={work.id}>
+                {readingProgress?.for_later ? '📋 Marked for Later' : '📋 Mark for Later'}
+              </button>
+            </Fragment>
+          )}
         </div>
       </div>
-    )}
 
-    {work.end_notes && (
-      <section class="work-notes">
-        <h3>End Notes</h3>
-        <div class="prose-content" set:html={markdownToHtml(work.end_notes)} />
-      </section>
-    )}
-
-    <div class="work-actions">
-      <button id="kudos-btn" class="btn-primary" data-work-id={work.id}>❤️ Leave Kudos ({kudosCount})</button>
-
+      <!-- Reaction Summary -->
       {workReactionSummary.length > 0 && (
-        <div class="work-reactions-summary">
-          {workReactionSummary.map(r => (
-            <span class="reaction-pill">
-              {r.reaction === 'fire' ? '🔥' : r.reaction === 'cry' ? '😭' : r.reaction === 'heartbreak' ? '💔' : r.reaction === 'swords' ? '⚔️' : r.reaction === 'heart' ? '❤️' : '🤯'} {r.cnt}
-            </span>
-          ))}
+        <div class="sidebar-card">
+          <h4 class="sidebar-heading">Reactions</h4>
+          <div class="work-reactions-summary">
+            {workReactionSummary.map(r => (
+              <span class="reaction-pill">
+                {r.reaction === 'fire' ? '🔥' : r.reaction === 'cry' ? '😭' : r.reaction === 'heartbreak' ? '💔' : r.reaction === 'swords' ? '⚔️' : r.reaction === 'heart' ? '❤️' : '🤯'} {r.cnt}
+              </span>
+            ))}
+          </div>
         </div>
       )}
 
-      <a href={`/works/${work.id}/read${chapterId ? `?chapter=${chapterId}` : ''}`} class="btn-secondary">📖 Reading Mode</a>
-
-      {work.published_at && (
-        <a href={`/api/works/${work.id}/export?format=epub`} class="btn-secondary" download>📥 Export EPUB</a>
-      )}
-
-      {authUser && (
-        <div class="user-work-actions" data-authed="true">
-          <button id="bookmark-btn" class="btn-secondary" data-bookmarked={existingBookmark ? 'true' : 'false'} data-work-id={work.id}>
-            {existingBookmark ? '🔖 Bookmarked' : '🔖 Bookmark'}
-          </button>
-          <button id="mark-later-btn" class="btn-secondary" data-for-later={readingProgress?.for_later ? 'true' : 'false'} data-work-id={work.id}>
-            {readingProgress?.for_later ? '📋 Marked for Later' : '📋 Mark for Later'}
-          </button>
+      <!-- Bookmark Info -->
+      {authUser && existingBookmark && (
+        <div class="sidebar-card bookmark-info-card">
+          <h4 class="sidebar-heading">Your Bookmark</h4>
+          <span class="bookmark-badge">🔖 Bookmarked</span>
+          {existingBookmark.private && <span class="badge-private-inline">Private</span>}
+          {existingBookmark.notes && <p class="bookmark-user-notes">"{existingBookmark.notes}"</p>}
         </div>
       )}
-    </div>
 
-    {authUser && existingBookmark && (
-      <div class="bookmark-info">
-        <span class="bookmark-badge">🔖 Bookmarked</span>
-        {existingBookmark.private && <span class="badge-private-inline">Private</span>}
-        {existingBookmark.notes && <p class="bookmark-user-notes">"{existingBookmark.notes}"</p>}
-      </div>
-    )}
-
-    <!-- Comments Section -->
-    <section class="comments-section">
-      <h3 class="comments-title">Comments ({allComments.length})</h3>
-
-      {authUser ? (
-        <form id="comment-form" class="comment-form">
-          <input type="hidden" name="work_id" value={work.id} />
-          <input type="hidden" name="chapter_id" value={chapter?.id ?? ''} />
-          <input type="hidden" name="parent_id" id="reply-parent-id" value="" />
-          <div class="comment-form-header">
-            <span id="reply-indicator" class="reply-indicator" style="display:none;">
-              Replying to <span id="reply-to-name"></span>
-              <button type="button" id="cancel-reply" class="cancel-reply-btn">✕</button>
-            </span>
+      <!-- Owner Actions -->
+      {isOwner && (
+        <div class="sidebar-card">
+          <h4 class="sidebar-heading">Author</h4>
+          <div class="sidebar-actions">
+            <a href={`/works/${work.id}/settings`} class="btn-secondary">Edit Work</a>
+            <a href={`/works/${work.id}/draft`} class="btn-secondary">Write / Add Chapter</a>
           </div>
-          <textarea id="comment-content" name="content" placeholder="Leave a comment…" rows="3" required class="comment-textarea"></textarea>
-          <button type="submit" class="btn-primary">Post Comment</button>
-        </form>
-      ) : (
-        <p class="login-prompt"><a href="/login">Sign in</a> to leave a comment.</p>
+        </div>
       )}
-
-      <div id="comments-thread" class="comments-thread" data-comments={commentsJson}>
-        {allComments.filter(c => !c.parent_id).map(comment => (
-          <div class="comment-item" data-comment-id={comment.id}>
-            <div class="comment-body">
-              <span class="comment-author">{comment.pseud_name}</span>
-              <span class="comment-date">{new Date(comment.created_at).toLocaleDateString()}</span>
-              <div class="comment-content" set:html={comment.content_html || markdownToHtml(comment.content || '')} />
-              {authUser && (
-                <button class="reply-btn" data-comment-id={comment.id} data-pseud-name={comment.pseud_name}>Reply</button>
-              )}
-            </div>
-            <div class="comment-replies">
-              {allComments.filter(r => r.parent_id === comment.id).map(reply => (
-                <div class="comment-item comment-reply" data-comment-id={reply.id}>
-                  <div class="comment-body">
-                    <span class="comment-author">{reply.pseud_name}</span>
-                    <span class="comment-date">{new Date(reply.created_at).toLocaleDateString()}</span>
-                    <div class="comment-content" set:html={reply.content_html || markdownToHtml(reply.content || '')} />
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        ))}
-      </div>
-    </section>
-  </article>
+    </aside>
+  </div>
 </Base>
 
 <style is:global>
-  @import '../../../styles/theme.css';
+  /* ── Layout: responsive CSS Grid ── */
+  .work-layout {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: var(--space-8);
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: var(--space-6) var(--space-4);
+    align-items: start;
+  }
 
-  .work-display { max-width: var(--reading-width); margin: 0 auto; padding: var(--space-6) 0; }
+  .work-main {
+    min-width: 0;
+  }
+
+  .work-sidebar {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-4);
+    min-width: 0;
+  }
+
+  @media (min-width: 1024px) {
+    .work-layout {
+      grid-template-columns: minmax(0, 1fr) 300px;
+      gap: var(--space-10);
+      padding: var(--space-6) var(--space-8);
+    }
+
+    .work-sidebar {
+      position: sticky;
+      top: calc(var(--space-16) + var(--space-4));
+      align-self: start;
+      max-height: calc(100vh - 6rem);
+      overflow-y: auto;
+      overscroll-behavior: contain;
+    }
+  }
+
+  /* ── Sidebar cards ── */
+  .sidebar-card {
+    background: var(--md-sys-color-surface-container);
+    border: 1px solid var(--md-sys-color-outline-variant);
+    border-radius: var(--md-sys-shape-corner-large);
+    padding: var(--space-4);
+  }
+
+  .sidebar-heading {
+    font: var(--md-sys-typescale-title-small);
+    color: var(--md-sys-color-on-surface-variant);
+    margin: 0 0 var(--space-3);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+
+  .sidebar-stats {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+  }
+
+  .sidebar-stat {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font: var(--md-sys-typescale-body-medium);
+    color: var(--md-sys-color-on-surface-variant);
+  }
+
+  .sidebar-stat-value {
+    color: var(--md-sys-color-on-surface);
+    font-weight: 500;
+    text-align: right;
+    margin-left: var(--space-2);
+  }
+
+  .sidebar-tags .tag-group {
+    margin: var(--space-2) 0;
+  }
+
+  .sidebar-actions {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+  }
+
+  .sidebar-actions .btn-primary,
+  .sidebar-actions .btn-secondary {
+    width: 100%;
+    text-align: center;
+    justify-content: center;
+    display: inline-block;
+  }
+
+  /* ── Main column content ── */
+  .work-header-main { margin-bottom: var(--space-6); }
   .work-title { font: var(--md-sys-typescale-headline-large); color: var(--md-sys-color-on-surface); margin: 0 0 var(--space-4); }
-
   .work-authors { font: var(--md-sys-typescale-title-medium); color: var(--md-sys-color-on-surface-variant); margin: 0 0 var(--space-2); }
   .work-authors a, .pseud-link { color: var(--md-sys-color-primary); }
   .pseud-icon-sm { width: 20px; height: 20px; border-radius: 50%; object-fit: cover; vertical-align: middle; margin-right: 4px; }
   .work-summary { font: var(--md-sys-typescale-body-large); color: var(--md-sys-color-on-surface-variant); font-style: italic; margin: var(--space-2) 0; }
-  .work-stats { font: var(--md-sys-typescale-body-medium); color: var(--md-sys-color-outline); display: flex; gap: var(--space-2); flex-wrap: wrap; }
-
-  .work-series { display: flex; flex-wrap: wrap; gap: var(--space-2); margin-top: var(--space-2); }
-  .series-link { font: var(--md-sys-typescale-body-medium); color: var(--md-sys-color-on-surface-variant); }
-  .series-link a { color: var(--md-sys-color-primary); }
-
-  .work-relations { margin-top: var(--space-3); }
-  .relations-heading { font: var(--md-sys-typescale-title-small); color: var(--md-sys-color-on-surface-variant); margin: 0 0 var(--space-2); }
-  .relations-list { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: var(--space-1); }
-  .relation-item { display: flex; align-items: center; gap: var(--space-2); flex-wrap: wrap; }
-  .relation-label { font: var(--md-sys-typescale-label-medium); background: var(--md-sys-color-tertiary-container); color: var(--md-sys-color-on-tertiary-container); padding: 1px var(--space-2); border-radius: var(--md-sys-shape-corner-full); white-space: nowrap; }
-  .relation-label.inverse { background: var(--md-sys-color-secondary-container); color: var(--md-sys-color-on-secondary-container); }
-  .relation-link { color: var(--md-sys-color-primary); font: var(--md-sys-typescale-body-medium); text-decoration: none; }
-  .relation-link:hover { text-decoration: underline; }
-  .lineage-link { font: var(--md-sys-typescale-label-medium); color: var(--md-sys-color-primary); display: inline-block; margin-top: var(--space-2); text-decoration: none; }
-  .lineage-link:hover { text-decoration: underline; }
-
-  .tag-group { display: flex; flex-wrap: wrap; gap: var(--space-2); align-items: center; margin: var(--space-1) 0; }
-  .tag-label { font: var(--md-sys-typescale-label-large); color: var(--md-sys-color-on-surface-variant); }
-  .tag-pill { font: var(--md-sys-typescale-body-small); background: var(--md-sys-color-secondary-container); color: var(--md-sys-color-on-secondary-container); padding: 2px var(--space-3); border-radius: var(--md-sys-shape-corner-full); }
-  .tag-rating { background: var(--md-sys-color-tertiary-container); color: var(--md-sys-color-on-tertiary-container); }
-  .tag-warning { background: var(--md-sys-color-error-container); color: var(--md-sys-color-on-error-container); }
-
-  .work-owner-actions { display: flex; gap: var(--space-3); margin-top: var(--space-4); }
 
   .work-notes { background: var(--md-sys-color-surface-container); border-radius: var(--md-sys-shape-corner-medium); padding: var(--space-4); margin: var(--space-6) 0; }
   .work-notes h3 { font: var(--md-sys-typescale-title-medium); margin: 0 0 var(--space-2); }
-
-  .chapter-nav { margin: var(--space-6) 0; }
-  .chapter-nav h3 { font: var(--md-sys-typescale-title-medium); margin: 0 0 var(--space-2); }
-  .chapter-list { list-style: decimal; padding-left: var(--space-6); }
-  .chapter-list li { padding: var(--space-1) 0; }
-  .chapter-list li.current { font-weight: 600; }
-  .chapter-list li a { color: var(--md-sys-color-primary); }
 
   .chapter-title { font: var(--md-sys-typescale-headline-medium); color: var(--md-sys-color-on-surface); margin: var(--space-6) 0 var(--space-4); }
 
@@ -402,17 +493,91 @@ const commentsJson = JSON.stringify(allComments);
   .prose-content figure { margin: var(--space-4) 0; text-align: center; }
   .prose-content figcaption { font: var(--md-sys-typescale-body-small); color: var(--md-sys-color-on-surface-variant); margin-top: var(--space-1); }
 
-  .work-actions { margin-top: var(--space-8); display: flex; gap: var(--space-3); align-items: center; flex-wrap: wrap; }
-  .user-work-actions { display: flex; gap: var(--space-3); }
+  /* ── Tags ── */
+  .tag-group { display: flex; flex-wrap: wrap; gap: var(--space-2); align-items: center; }
+  .tag-label { font: var(--md-sys-typescale-label-large); color: var(--md-sys-color-on-surface-variant); }
+  .tag-pill { font: var(--md-sys-typescale-body-small); background: var(--md-sys-color-secondary-container); color: var(--md-sys-color-on-secondary-container); padding: 2px var(--space-3); border-radius: var(--md-sys-shape-corner-full); }
+  .tag-rating { background: var(--md-sys-color-tertiary-container); color: var(--md-sys-color-on-tertiary-container); }
+  .tag-warning { background: var(--md-sys-color-error-container); color: var(--md-sys-color-on-error-container); }
 
-  .bookmark-info { background: var(--md-sys-color-secondary-container); border-radius: var(--md-sys-shape-corner-medium); padding: var(--space-3) var(--space-4); margin-top: var(--space-3); display: flex; align-items: center; gap: var(--space-2); flex-wrap: wrap; }
+  /* ── Series ── */
+  .series-link { font: var(--md-sys-typescale-body-medium); color: var(--md-sys-color-on-surface-variant); margin: var(--space-1) 0; }
+  .series-link a { color: var(--md-sys-color-primary); }
+
+  /* ── Relations ── */
+  .relations-list { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: var(--space-2); }
+  .relation-item { display: flex; flex-direction: column; gap: var(--space-1); }
+  .relation-label { font: var(--md-sys-typescale-label-medium); background: var(--md-sys-color-tertiary-container); color: var(--md-sys-color-on-tertiary-container); padding: 1px var(--space-2); border-radius: var(--md-sys-shape-corner-full); white-space: nowrap; }
+  .relation-label.inverse { background: var(--md-sys-color-secondary-container); color: var(--md-sys-color-on-secondary-container); }
+  .relation-link { color: var(--md-sys-color-primary); font: var(--md-sys-typescale-body-medium); text-decoration: none; }
+  .relation-link:hover { text-decoration: underline; }
+  .lineage-link { font: var(--md-sys-typescale-label-medium); color: var(--md-sys-color-primary); display: inline-block; margin-top: var(--space-2); text-decoration: none; }
+  .lineage-link:hover { text-decoration: underline; }
+
+  /* ── Chapter nav (sidebar style) ── */
+  .sidebar-chapter-list { list-style: none; padding-left: 0; margin: 0; }
+  .sidebar-chapter-list li { padding: var(--space-1) 0; border-bottom: 1px solid var(--md-sys-color-outline-variant); }
+  .sidebar-chapter-list li:last-child { border-bottom: none; }
+  .sidebar-chapter-list li a { color: var(--md-sys-color-primary); font: var(--md-sys-typescale-body-medium); text-decoration: none; display: block; padding: var(--space-1) 0; }
+  @media (hover: hover) { .sidebar-chapter-list li a:hover { text-decoration: underline; } }
+  .sidebar-chapter-list li.current a { font-weight: 600; color: var(--md-sys-color-on-surface); }
+
+  /* ── Chapter Reactions ── */
+  .chapter-reactions { margin-top: 0; }
+  .reactions-bar { display: flex; gap: var(--space-2); flex-wrap: wrap; }
+  .reaction-btn {
+    display: inline-flex; align-items: center; gap: var(--space-1);
+    font: var(--md-sys-typescale-label-large);
+    background: var(--md-sys-color-surface-container-high);
+    color: var(--md-sys-color-on-surface);
+    border: 1px solid var(--md-sys-color-outline-variant);
+    border-radius: var(--md-sys-shape-corner-full);
+    padding: var(--space-1) var(--space-3);
+    cursor: pointer;
+    transition: background 0.2s, border-color 0.2s, transform 0.1s;
+    user-select: none; -webkit-user-select: none;
+    min-height: 36px; min-width: 44px;
+    flex: 1;
+    justify-content: center;
+  }
+  .reaction-btn:hover { background: var(--md-sys-color-surface-container-highest); border-color: var(--md-sys-color-outline); }
+  .reaction-btn:active { transform: scale(0.95); }
+  .reaction-btn[data-mine="1"] {
+    background: var(--md-sys-color-primary-container);
+    color: var(--md-sys-color-on-primary-container);
+    border-color: var(--md-sys-color-primary);
+    font-weight: 600;
+  }
+  .reaction-btn[data-mine="1"]:hover { background: var(--md-sys-color-secondary-container); }
+  .reaction-count { font: var(--md-sys-typescale-label-medium); }
+  .reaction-btn[disabled], .chapter-reactions[data-authed="false"] .reaction-btn {
+    cursor: default; opacity: 0.7;
+  }
+
+  /* ── Work-level reaction summary ── */
+  .work-reactions-summary { display: flex; gap: var(--space-2); flex-wrap: wrap; }
+  .reaction-pill {
+    font: var(--md-sys-typescale-label-medium);
+    background: var(--md-sys-color-secondary-container);
+    color: var(--md-sys-color-on-secondary-container);
+    border-radius: var(--md-sys-shape-corner-full);
+    padding: var(--space-1) var(--space-3);
+  }
+
+  /* ── Buttons ── */
+  .btn-primary { font: var(--md-sys-typescale-label-large); color: var(--md-sys-color-on-primary); background: var(--md-sys-color-primary); border: none; border-radius: var(--md-sys-shape-corner-full); padding: var(--space-3) var(--space-6); cursor: pointer; }
+  .btn-secondary { font: var(--md-sys-typescale-label-large); color: var(--md-sys-color-primary); background: transparent; border: 1px solid var(--md-sys-color-outline); border-radius: var(--md-sys-shape-corner-full); padding: var(--space-3) var(--space-6); cursor: pointer; text-decoration: none; }
+  .placeholder-text { font: var(--md-sys-typescale-body-large); color: var(--md-sys-color-outline); font-style: italic; }
+
+  /* ── Bookmark info card ── */
+  .bookmark-info-card { }
   .bookmark-badge { font: var(--md-sys-typescale-label-large); color: var(--md-sys-color-on-secondary-container); }
-  .badge-private-inline { font: var(--md-sys-typescale-label-small); background: var(--md-sys-color-tertiary-container); color: var(--md-sys-color-on-tertiary-container); padding: 2px var(--space-2); border-radius: var(--md-sys-shape-corner-full); }
-  .bookmark-user-notes { font: var(--md-sys-typescale-body-medium); color: var(--md-sys-color-on-secondary-container); margin: 0; font-style: italic; }
+  .badge-private-inline { font: var(--md-sys-typescale-label-small); background: var(--md-sys-color-tertiary-container); color: var(--md-sys-color-on-tertiary-container); padding: 2px var(--space-2); border-radius: var(--md-sys-shape-corner-full); margin-left: var(--space-2); }
+  .bookmark-user-notes { font: var(--md-sys-typescale-body-medium); color: var(--md-sys-color-on-surface-variant); margin: var(--space-2) 0 0; font-style: italic; }
 
+  /* ── Comments ── */
   .comments-section { margin-top: var(--space-10); border-top: 1px solid var(--md-sys-color-outline-variant); padding-top: var(--space-6); }
   .comments-title { font: var(--md-sys-typescale-headline-medium); color: var(--md-sys-color-on-surface); margin: 0 0 var(--space-4); }
-
   .comment-form { margin-bottom: var(--space-6); }
   .comment-form-header { margin-bottom: var(--space-2); }
   .reply-indicator { font: var(--md-sys-typescale-body-small); color: var(--md-sys-color-primary); background: var(--md-sys-color-primary-container); padding: var(--space-1) var(--space-2); border-radius: var(--md-sys-shape-corner-full); display: inline-flex; align-items: center; gap: var(--space-2); }
@@ -424,7 +589,6 @@ const commentsJson = JSON.stringify(allComments);
 
   .comments-thread { display: flex; flex-direction: column; gap: var(--space-4); }
   .comment-item { background: var(--md-sys-color-surface-container); border-radius: var(--md-sys-shape-corner-medium); padding: var(--space-4); }
-  .comment-body { }
   .comment-author { font: var(--md-sys-typescale-label-large); color: var(--md-sys-color-primary); }
   .comment-date { font: var(--md-sys-typescale-body-small); color: var(--md-sys-color-outline); margin-left: var(--space-2); }
   .comment-content { font: var(--md-sys-typescale-body-large); color: var(--md-sys-color-on-surface); line-height: 1.7; margin-top: var(--space-2); }
@@ -434,72 +598,8 @@ const commentsJson = JSON.stringify(allComments);
   .comment-replies { margin-left: var(--space-6); margin-top: var(--space-3); display: flex; flex-direction: column; gap: var(--space-2); }
   .comment-reply { background: var(--md-sys-color-surface-container-high); }
 
-  .btn-primary { font: var(--md-sys-typescale-label-large); color: var(--md-sys-color-on-primary); background: var(--md-sys-color-primary); border: none; border-radius: var(--md-sys-shape-corner-full); padding: var(--space-3) var(--space-6); cursor: pointer; }
-  .btn-secondary { font: var(--md-sys-typescale-label-large); color: var(--md-sys-color-primary); background: transparent; border: 1px solid var(--md-sys-color-outline); border-radius: var(--md-sys-shape-corner-full); padding: var(--space-3) var(--space-6); cursor: pointer; text-decoration: none; }
-  .placeholder-text { font: var(--md-sys-typescale-body-large); color: var(--md-sys-color-outline); font-style: italic; }
-
-  /* Chapter Reactions */
-  .chapter-reactions {
-    margin-top: var(--space-6);
-    padding-top: var(--space-4);
-    border-top: 1px solid var(--md-sys-color-outline-variant);
-  }
-  .reactions-label {
-    font: var(--md-sys-typescale-label-medium);
-    color: var(--md-sys-color-on-surface-variant);
-    display: block;
-    margin-bottom: var(--space-2);
-  }
-  .reactions-bar {
-    display: flex;
-    gap: var(--space-2);
-    flex-wrap: wrap;
-  }
-  .reaction-btn {
-    display: inline-flex;
-    align-items: center;
-    gap: var(--space-1);
-    font: var(--md-sys-typescale-label-large);
-    background: var(--md-sys-color-surface-container);
-    color: var(--md-sys-color-on-surface);
-    border: 1px solid var(--md-sys-color-outline-variant);
-    border-radius: var(--md-sys-shape-corner-full);
-    padding: var(--space-1) var(--space-3);
-    cursor: pointer;
-    transition: background 0.2s, border-color 0.2s, transform 0.1s;
-    user-select: none;
-    -webkit-user-select: none;
-    min-height: 36px;
-    min-width: 44px; /* touch-friendly */
-  }
-  .reaction-btn:hover { background: var(--md-sys-color-surface-container-high); border-color: var(--md-sys-color-outline); }
-  .reaction-btn:active { transform: scale(0.95); }
-  .reaction-btn[data-mine="1"] {
-    background: var(--md-sys-color-primary-container);
-    color: var(--md-sys-color-on-primary-container);
-    border-color: var(--md-sys-color-primary);
-    font-weight: 600;
-  }
-  .reaction-btn[data-mine="1"]:hover { background: var(--md-sys-color-secondary-container); }
-  .reaction-count { font: var(--md-sys-typescale-label-medium); }
-  .reaction-btn[disabled], .chapter-reactions[data-authed="false"] .reaction-btn {
-    cursor: default;
-    opacity: 0.7;
-  }
-
-  /* Work-level reaction summary pills */
-  .work-reactions-summary {
-    display: inline-flex;
-    gap: var(--space-2);
-    flex-wrap: wrap;
-    align-items: center;
-  }
-  .reaction-pill {
-    font: var(--md-sys-typescale-label-medium);
-    background: var(--md-sys-color-secondary-container);
-    color: var(--md-sys-color-on-secondary-container);
-    border-radius: var(--md-sys-shape-corner-full);
-    padding: var(--space-1) var(--space-3);
+  @media (max-width: 1023px) {
+    .work-layout { gap: var(--space-6); padding: var(--space-4); }
   }
 </style>
 
