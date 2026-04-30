@@ -49,9 +49,28 @@ function isPublicPath(pathname: string): boolean {
 
 export const onRequest = defineMiddleware(async (context, next) => {
   const { pathname } = context.url;
+  const method = context.request.method;
+
+  // ── Publish flow debug logging ──
+  // Log every PUT/POST to /api/works/ paths so we can trace publish attempts
+  // even when they fail before reaching the API handler.
+  const isPublishRelated = pathname.startsWith('/api/works') && (method === 'PUT' || method === 'POST');
+  if (isPublishRelated) {
+    const hasCookie = !!(context.request.headers.get('cookie') ?? '').match(/session=([a-f0-9]+)/);
+    console.log(JSON.stringify({
+      t: 'mw_publish',
+      method,
+      pathname,
+      hasSessionCookie: hasCookie,
+      contentType: context.request.headers.get('Content-Type'),
+    }));
+  }
 
   // Allow all public paths through without auth checks
   if (isPublicPath(pathname)) {
+    if (isPublishRelated) {
+      console.log(JSON.stringify({ t: 'mw_publish', note: 'isPublicPath=true — skipping auth', pathname }));
+    }
     return next();
   }
 
@@ -60,6 +79,9 @@ export const onRequest = defineMiddleware(async (context, next) => {
   const sessionMatch = cookie.match(/session=([a-f0-9]+)/);
   if (!sessionMatch) {
     // Not authenticated — return 401 JSON for API routes, redirect for pages
+    if (isPublishRelated) {
+      console.log(JSON.stringify({ t: 'mw_publish', note: 'NO_SESSION_COOKIE — returning 401', pathname }));
+    }
     if (pathname.startsWith('/api/')) {
       return new Response(JSON.stringify({ error: 'Unauthorized' }), {
         status: 401,
@@ -80,6 +102,9 @@ export const onRequest = defineMiddleware(async (context, next) => {
 
   if (!session) {
     // Invalid/expired session
+    if (isPublishRelated) {
+      console.log(JSON.stringify({ t: 'mw_publish', note: 'SESSION_EXPIRED_OR_INVALID — returning 401', pathname }));
+    }
     if (pathname.startsWith('/api/')) {
       return new Response(JSON.stringify({ error: 'Unauthorized' }), {
         status: 401,
