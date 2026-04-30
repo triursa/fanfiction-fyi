@@ -466,13 +466,26 @@ const initialChapterData = JSON.stringify({
   });
 
   // ── Chapter Navigation ──
+  // Serialization token to prevent out-of-order chapter switches from rapid clicks
+  let chapterSwitchToken = 0;
+
   async function selectChapter(chapterId: number) {
     if (currentChapterId === chapterId) return;
 
+    const thisToken = ++chapterSwitchToken;
+
     // Save current chapter before switching (await to prevent data loss)
     if (currentChapterId) {
-      await saveChapter(true, true);
+      const savedOk = await saveChapter(true, true);
+      if (!savedOk) {
+        // Abort switch — don't lose unsaved edits
+        showToast('Could not save current chapter — please try again', 'error');
+        return;
+      }
     }
+
+    // If another switch was triggered while we were saving, abort this one
+    if (chapterSwitchToken !== thisToken) return;
 
     currentChapterId = chapterId;
     const chapter = work.chapters.find((c: any) => c.id === chapterId);
@@ -480,6 +493,7 @@ const initialChapterData = JSON.stringify({
 
     currentChapterPosition = chapter.position;
     chapterTitle.value = chapter.title;
+    hasUnsavedChanges = false;
 
     // Update active state in sidebar
     document.querySelectorAll('.draft-chapter-item').forEach(el => {
@@ -489,8 +503,12 @@ const initialChapterData = JSON.stringify({
     // Load chapter content via API
     try {
       const res = await fetch(`/api/works/${workId}/chapters/${chapterId}`);
+      // Check again after await — another switch may have happened
+      if (chapterSwitchToken !== thisToken) return;
       if (res.ok) {
         const data = await res.json();
+        // Check again after parsing JSON — another switch may have started
+        if (chapterSwitchToken !== thisToken) return;
         const contentMd = data.content_md || '';
         if ((window as any).__editorSetContent) {
           (window as any).__editorSetContent(contentMd);
@@ -568,17 +586,23 @@ const initialChapterData = JSON.stringify({
   async function saveChapter(draft: boolean = true, silent: boolean = false): Promise<boolean> {
     if (!currentChapterId) return false;
 
-    const contentMd = (window as any).__editorMarkdown || '';
-    const title = chapterTitle.value || `Chapter ${currentChapterPosition}`;
-
+    // If a save is already in flight, queue behind it
     if (isSaving) {
-      // Queue save behind current one
       if (savePromise) {
         await savePromise;
       }
     }
 
+    // Read content after any queued save has finished so we don't send stale data
+    const contentMd = (window as any).__editorMarkdown || '';
+    const title = chapterTitle.value || `Chapter ${currentChapterPosition}`;
+
+    // Snapshot content at save time — only clear dirty flag if no new edits happened
+    const contentAtSaveStart = contentMd;
+
     isSaving = true;
+    const previousSaveDraftDisabled = saveDraftBtn.disabled;
+    const previousPublishDisabled = publishBtn.disabled;
 
     if (!silent) {
       saveDraftBtn.disabled = true;
@@ -587,6 +611,10 @@ const initialChapterData = JSON.stringify({
       autosaveStatus.style.color = 'var(--md-sys-color-on-surface-variant)';
     }
 
+    // Assign savePromise so queued callers can await this operation
+    let resolveSave: () => void;
+    savePromise = new Promise<void>(resolve => { resolveSave = resolve; });
+
     try {
       const res = await fetch(`/api/works/${workId}/chapters/${currentChapterId}`, {
         method: 'PUT',
@@ -594,7 +622,11 @@ const initialChapterData = JSON.stringify({
         body: JSON.stringify({ title, content_md: contentMd, draft: draft ? 1 : 0 }),
       });
       if (res.ok) {
-        hasUnsavedChanges = false;
+        // Only clear dirty flag if no new edits happened while we were saving
+        const contentNow = (window as any).__editorMarkdown || '';
+        if (contentNow === contentAtSaveStart) {
+          hasUnsavedChanges = false;
+        }
         if (!silent) {
           autosaveStatus.textContent = draft ? 'Draft saved' : 'Chapter published';
           autosaveStatus.style.color = 'var(--md-sys-color-primary)';
@@ -639,8 +671,14 @@ const initialChapterData = JSON.stringify({
       return false;
     } finally {
       isSaving = false;
-      saveDraftBtn.disabled = false;
-      publishBtn.disabled = false;
+      savePromise = null;
+      resolveSave!();
+      // Only restore buttons if this wasn't a silent save and publish flow
+      // isn't controlling them. In silent mode, preserve whatever state they were in.
+      if (!silent) {
+        saveDraftBtn.disabled = previousSaveDraftDisabled;
+        publishBtn.disabled = previousPublishDisabled;
+      }
     }
   }
 
