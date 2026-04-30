@@ -204,8 +204,6 @@
 }
 
 .tag-cluster__chip:hover {
-  background: var(--md-sys-color-secondary);
-  color: var(--md-sys-color-on-secondary);
   text-decoration: none;
 }
 
