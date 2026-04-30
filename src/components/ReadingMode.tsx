@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'preact/hooks';
+import { useScrollDirection } from '../hooks/useScrollDirection';
 
 interface Chapter {
   id: number;
@@ -33,6 +34,225 @@ const REACTION_EMOJIS: Record<string, string> = {
   mindblown: '🤯',
 };
 
+const FONT_SIZES = [
+  { key: 'small', label: 'S' },
+  { key: 'default', label: 'M' },
+  { key: 'large', label: 'L' },
+  { key: 'x-large', label: 'XL' },
+] as const;
+
+// ── Focus Sheet Component (inline) ──
+interface FocusSheetProps {
+  open: boolean;
+  onClose: () => void;
+  chapters: Chapter[];
+  currentChapterId: number;
+  workId: number;
+  fontSize: string;
+  moodDisabled: boolean;
+  onFontSizeChange: (size: string) => void;
+  onMoodToggle: () => void;
+  prevChapter: Chapter | null;
+  nextChapter: Chapter | null;
+}
+
+function FocusSheet({
+  open,
+  onClose,
+  chapters,
+  currentChapterId,
+  workId,
+  fontSize,
+  moodDisabled,
+  onFontSizeChange,
+  onMoodToggle,
+  prevChapter,
+  nextChapter,
+}: FocusSheetProps) {
+  const sheetRef = useRef<HTMLDivElement>(null);
+  const previousFocus = useRef<HTMLElement | null>(null);
+
+  // Focus trap & escape handling
+  useEffect(() => {
+    if (!open) return;
+
+    previousFocus.current = document.activeElement as HTMLElement;
+
+    // Focus the first focusable element in the sheet
+    requestAnimationFrame(() => {
+      if (sheetRef.current) {
+        const focusable = sheetRef.current.querySelectorAll<HTMLElement>(
+          'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])',
+        );
+        if (focusable.length) focusable[0].focus();
+      }
+    });
+
+    function onKeyDown(e: KeyboardEvent) {
+      if (!sheetRef.current) return;
+
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        e.stopPropagation();
+        onClose();
+        return;
+      }
+
+      if (e.key === 'Tab') {
+        const focusable = sheetRef.current.querySelectorAll<HTMLElement>(
+          'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])',
+        );
+        if (focusable.length === 0) return;
+
+        const first = focusable[0];
+        const last = focusable[focusable.length - 1];
+
+        if (e.shiftKey) {
+          if (document.activeElement === first) {
+            e.preventDefault();
+            last.focus();
+          }
+        } else {
+          if (document.activeElement === last) {
+            e.preventDefault();
+            first.focus();
+          }
+        }
+      }
+    }
+
+    document.addEventListener('keydown', onKeyDown, true);
+    return () => {
+      document.removeEventListener('keydown', onKeyDown, true);
+      // Restore focus on close
+      if (previousFocus.current) {
+        previousFocus.current.focus();
+      }
+    };
+  }, [open, onClose]);
+
+  return (
+    <>
+      {/* Backdrop */}
+      <div
+        class={`focus-sheet-backdrop${open ? ' open' : ''}`}
+        onClick={onClose}
+        aria-hidden="true"
+      />
+
+      {/* Sheet */}
+      <div
+        ref={sheetRef}
+        class={`focus-sheet${open ? ' open' : ''}`}
+        role="dialog"
+        aria-modal="true"
+        aria-label="Reading options"
+      >
+        {/* Drag handle (mobile bottom sheet) */}
+        <div class="focus-sheet-drag-handle" aria-hidden="true">
+          <div class="focus-sheet-drag-indicator" />
+        </div>
+
+        {/* Close button */}
+        <div class="focus-sheet-header">
+          <span class="focus-sheet-title">Reading Options</span>
+          <button
+            class="focus-sheet-close"
+            onClick={onClose}
+            aria-label="Close reading options"
+          >
+            ✕
+          </button>
+        </div>
+
+        {/* Chapters section */}
+        <div class="focus-sheet-section">
+          <div class="focus-sheet-section-title">Chapters</div>
+          <ol class="focus-sheet-chapter-list">
+            {chapters.map((c) => (
+              <li
+                class={`focus-sheet-chapter-item${c.id === currentChapterId ? ' current' : ''}`}
+              >
+                <a href={`/works/${workId}/read?chapter=${c.id}`} onClick={onClose}>
+                  {c.position}. {c.title}
+                </a>
+                <span class="chapter-words">
+                  {c.word_count?.toLocaleString() || '?'} words
+                </span>
+              </li>
+            ))}
+          </ol>
+        </div>
+
+        {/* Settings section */}
+        <div class="focus-sheet-section">
+          <div class="focus-sheet-section-title">Settings</div>
+
+          {/* Font size */}
+          <div class="focus-sheet-setting-row">
+            <span class="focus-sheet-setting-label">Font Size</span>
+            <div class="focus-sheet-size-buttons">
+              {FONT_SIZES.map((fs) => (
+                <button
+                  class={`focus-sheet-size-btn${fontSize === fs.key ? ' active' : ''}`}
+                  onClick={() => onFontSizeChange(fs.key)}
+                  aria-label={`Font size ${fs.label}`}
+                >
+                  {fs.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Mood toggle */}
+          <div class="focus-sheet-setting-row">
+            <span class="focus-sheet-setting-label">Mood Engine</span>
+            <button
+              class={`focus-sheet-toggle-btn${moodDisabled ? '' : ' active'}`}
+              onClick={onMoodToggle}
+              aria-label={`Mood engine ${moodDisabled ? 'off' : 'on'}`}
+            >
+              {moodDisabled ? 'Off' : 'On'}
+            </button>
+          </div>
+        </div>
+
+        {/* Navigation section */}
+        <div class="focus-sheet-section">
+          <div class="focus-sheet-section-title">Navigation</div>
+          <div class="focus-sheet-nav-buttons">
+            {prevChapter ? (
+              <a
+                href={`/works/${workId}/read?chapter=${prevChapter.id}`}
+                class="focus-sheet-nav-btn"
+                onClick={onClose}
+              >
+                ← Previous Chapter
+              </a>
+            ) : (
+              <span class="focus-sheet-nav-btn disabled">← Previous Chapter</span>
+            )}
+            {nextChapter ? (
+              <a
+                href={`/works/${workId}/read?chapter=${nextChapter.id}`}
+                class="focus-sheet-nav-btn"
+                onClick={onClose}
+              >
+                Next Chapter →
+              </a>
+            ) : (
+              <span class="focus-sheet-nav-btn disabled">Next Chapter →</span>
+            )}
+          </div>
+          <a href={`/works/${workId}`} class="focus-sheet-exit-btn">
+            ✕ Exit Reading
+          </a>
+        </div>
+      </div>
+    </>
+  );
+}
+
 export default function ReadingMode({
   workId,
   chapters,
@@ -44,69 +264,59 @@ export default function ReadingMode({
   moodDisabled,
   reactionCounts: initialReactionCounts,
   myReactions: initialMyReactions,
-  fontSize,
+  fontSize: initialFontSize,
   workTitle,
 }: ReadingModeProps) {
   const [progressWidth, setProgressWidth] = useState(0);
-  const [headerVisible, setHeaderVisible] = useState(false);
-  const [toolbarVisible, setToolbarVisible] = useState(false);
-  const [drawerOpen, setDrawerOpen] = useState(false);
+  const [sheetOpen, setSheetOpen] = useState(false);
   const [shortcutsVisible, setShortcutsVisible] = useState(true);
+  const [currentFontSize, setCurrentFontSize] = useState(initialFontSize);
   const [reactionState, setReactionState] = useState(() => ({
     counts: { ...initialReactionCounts },
     mine: [...initialMyReactions],
   }));
 
-  const lastScrollY = useRef(typeof window !== 'undefined' ? window.scrollY : 0);
   const maxScrollPct = useRef(0);
+
+  // ── Scroll direction hook ──
+  const { direction, scrollY } = useScrollDirection(5);
+
+  // Header visibility: visible at top, hides on scroll down, shows on scroll up
+  const scrolled = scrollY > 0;
+  const headerVisible = direction === 'up' || scrollY <= 0;
 
   // Find prev/next chapters
   const currentIndex = chapters.findIndex((c) => c.id === currentChapterId);
   const prevChapter = currentIndex > 0 ? chapters[currentIndex - 1] : null;
   const nextChapter = currentIndex < chapters.length - 1 ? chapters[currentIndex + 1] : null;
 
+  // ── Progress from scroll direction hook ──
+  useEffect(() => {
+    const winH = window.innerHeight;
+    const docH = document.documentElement.scrollHeight;
+    const pct = docH <= winH ? 100 : Math.min(100, (scrollY / (docH - winH)) * 100);
+    setProgressWidth(pct);
+  }, [scrollY]);
+
   // ── Reaction rollback helper ──
-  // Reverts optimistic update when the server request fails
   const revertReaction = useCallback((reaction: string, wasMine: boolean) => {
     setReactionState((prev) => {
       if (wasMine) {
-        // Was mine (remove was rolled back) → re-add it
         return {
           counts: { ...prev.counts, [reaction]: (prev.counts[reaction] || 0) + 1 },
           mine: [...prev.mine, reaction],
         };
       } else {
-        // Was not mine (add was rolled back) → remove it
         return {
-          counts: { ...prev.counts, [reaction]: Math.max(0, (prev.counts[reaction] || 0) - 1) },
+          counts: {
+            ...prev.counts,
+            [reaction]: Math.max(0, (prev.counts[reaction] || 0) - 1),
+          },
           mine: prev.mine.filter((r) => r !== reaction),
         };
       }
     });
   }, []);
-
-  // ── Progress bar & header/toolbar visibility ──
-  const handleScroll = useCallback(() => {
-    const winH = window.innerHeight;
-    const docH = document.documentElement.scrollHeight;
-    const scrolled = window.scrollY;
-    const pct = docH <= winH ? 100 : Math.min(100, (scrolled / (docH - winH)) * 100);
-    setProgressWidth(pct);
-
-    const delta = scrolled - lastScrollY.current;
-    if (delta < -10) setHeaderVisible(true);
-    else if (delta > 10) setHeaderVisible(false);
-    lastScrollY.current = scrolled;
-
-    if (scrolled > 300) setToolbarVisible(true);
-    else setToolbarVisible(false);
-  }, []);
-
-  useEffect(() => {
-    window.addEventListener('scroll', handleScroll, { passive: true });
-    handleScroll();
-    return () => window.removeEventListener('scroll', handleScroll);
-  }, [handleScroll]);
 
   // ── Keyboard shortcuts ──
   useEffect(() => {
@@ -114,7 +324,14 @@ export default function ReadingMode({
     const nextHref = nextChapter ? `/works/${workId}/read?chapter=${nextChapter.id}` : null;
 
     function onKeyDown(e: KeyboardEvent) {
-      if ((e.target as HTMLElement).tagName === 'INPUT' || (e.target as HTMLElement).tagName === 'TEXTAREA') return;
+      if (
+        (e.target as HTMLElement).tagName === 'INPUT' ||
+        (e.target as HTMLElement).tagName === 'TEXTAREA'
+      )
+        return;
+
+      // If sheet is open, only Escape is handled (by the sheet's own handler)
+      if (sheetOpen) return;
 
       if (e.key === 'ArrowLeft' && prevHref) {
         window.location.href = prevHref;
@@ -123,13 +340,13 @@ export default function ReadingMode({
       } else if (e.key === 'Escape') {
         window.location.href = `/works/${workId}`;
       } else if (e.key === 'c' || e.key === 'C') {
-        setDrawerOpen((prev) => !prev);
+        setSheetOpen((prev) => !prev);
       }
     }
 
     document.addEventListener('keydown', onKeyDown);
     return () => document.removeEventListener('keydown', onKeyDown);
-  }, [prevChapter, nextChapter, workId]);
+  }, [prevChapter, nextChapter, workId, sheetOpen]);
 
   // ── Shortcuts hint (fade out after 5s) ──
   useEffect(() => {
@@ -166,25 +383,33 @@ export default function ReadingMode({
     async (reaction: string) => {
       const isMine = reactionState.mine.includes(reaction);
 
-      // Optimistic update
       if (isMine) {
         setReactionState((prev) => ({
-          counts: { ...prev.counts, [reaction]: Math.max(0, (prev.counts[reaction] || 0) - 1) },
+          counts: {
+            ...prev.counts,
+            [reaction]: Math.max(0, (prev.counts[reaction] || 0) - 1),
+          },
           mine: prev.mine.filter((r) => r !== reaction),
         }));
       } else {
         setReactionState((prev) => ({
-          counts: { ...prev.counts, [reaction]: (prev.counts[reaction] || 0) + 1 },
+          counts: {
+            ...prev.counts,
+            [reaction]: (prev.counts[reaction] || 0) + 1,
+          },
           mine: [...prev.mine, reaction],
         }));
       }
 
       try {
-        const res = await fetch(`/api/works/${workId}/chapters/${currentChapterId}/reactions`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ reaction }),
-        });
+        const res = await fetch(
+          `/api/works/${workId}/chapters/${currentChapterId}/reactions`,
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ reaction }),
+          },
+        );
         if (!res.ok) {
           revertReaction(reaction, isMine);
         }
@@ -194,6 +419,28 @@ export default function ReadingMode({
     },
     [workId, currentChapterId, reactionState.mine, reactionState.counts, revertReaction],
   );
+
+  // ── Font size change handler ──
+  const handleFontSizeChange = useCallback((size: string) => {
+    setCurrentFontSize(size);
+    // Update the data-font-size attribute on the nearest .reading-container
+    const container = document.querySelector('.reading-container');
+    if (container) {
+      container.setAttribute('data-font-size', size);
+    }
+  }, []);
+
+  // ── Mood toggle handler ──
+  const handleMoodToggle = useCallback(async () => {
+    try {
+      const res = await fetch('/api/user/mood-toggle', { method: 'POST' });
+      if (res.ok) {
+        window.location.reload();
+      }
+    } catch {
+      // silently fail
+    }
+  }, []);
 
   const moodAttr = moodDisabled ? 'off' : currentMood || 'none';
 
@@ -209,45 +456,17 @@ export default function ReadingMode({
         style={{ width: `${progressWidth}%` }}
       />
 
-      {/* Ambient Header */}
-      <header class={`reading-header${headerVisible ? ' visible' : ''}`}>
-        <button class="reading-toolbar-btn" onClick={() => setDrawerOpen(true)} aria-label="Chapters">
-          ☰
-        </button>
-        <div class="reading-header-title">{workTitle}</div>
-        <div class="reading-header-chapter">
+      {/* Top App Bar — M3 Center-Aligned */}
+      <header
+        class="focus-top-bar"
+        data-visible={headerVisible ? 'true' : 'false'}
+        data-elevated={scrolled ? 'true' : 'false'}
+      >
+        <div class="focus-bar-title">{workTitle}</div>
+        <div class="focus-bar-meta">
           Ch. {currentChapterPosition} of {chapters.length}
         </div>
-        <a href={`/works/${workId}`} class="reading-header-exit">
-          Exit Reading
-        </a>
       </header>
-
-      {/* Chapter Drawer Overlay */}
-      <div
-        class={`reading-drawer-overlay${drawerOpen ? ' open' : ''}`}
-        onClick={() => setDrawerOpen(false)}
-      />
-
-      {/* Chapter Drawer */}
-      <nav class={`reading-chapters-drawer${drawerOpen ? ' open' : ''}`} aria-label="Chapter list">
-        <div class="reading-drawer-title">
-          <span>Chapters</span>
-          <button class="reading-drawer-close" onClick={() => setDrawerOpen(false)} aria-label="Close chapter list">
-            ×
-          </button>
-        </div>
-        <ol class="reading-drawer-list">
-          {chapters.map((c) => (
-            <li class={`reading-drawer-item${c.id === currentChapterId ? ' current' : ''}`}>
-              <a href={`/works/${workId}/read?chapter=${c.id}`}>
-                {c.position}. {c.title}
-              </a>
-              <span class="chapter-words">{c.word_count?.toLocaleString() || '?'} words</span>
-            </li>
-          ))}
-        </ol>
-      </nav>
 
       {/* Reaction bar — rendered here in the flow where it appears in the chapter */}
       {authed ? (
@@ -273,29 +492,33 @@ export default function ReadingMode({
         </div>
       )}
 
-      {/* Bottom Toolbar */}
-      <div class={`reading-toolbar${toolbarVisible ? ' visible' : ''}`}>
-        {prevChapter && (
-          <a href={`/works/${workId}/read?chapter=${prevChapter.id}`} class="reading-toolbar-btn">
-            ← Prev
-          </a>
-        )}
-        <button class="reading-toolbar-btn" onClick={() => setDrawerOpen(true)}>
-          ☰ Ch. {currentChapterPosition}/{chapters.length}
-        </button>
-        <a href={`/works/${workId}`} class="reading-toolbar-btn">
-          ✕ Exit
-        </a>
-        {nextChapter && (
-          <a href={`/works/${workId}/read?chapter=${nextChapter.id}`} class="reading-toolbar-btn">
-            Next →
-          </a>
-        )}
-      </div>
+      {/* FAB — bottom-right */}
+      <button
+        class="focus-fab"
+        onClick={() => setSheetOpen(true)}
+        aria-label="Open reading options"
+      >
+        ☰
+      </button>
+
+      {/* Focus Sheet */}
+      <FocusSheet
+        open={sheetOpen}
+        onClose={() => setSheetOpen(false)}
+        chapters={chapters}
+        currentChapterId={currentChapterId}
+        workId={workId}
+        fontSize={currentFontSize}
+        moodDisabled={moodDisabled}
+        onFontSizeChange={handleFontSizeChange}
+        onMoodToggle={handleMoodToggle}
+        prevChapter={prevChapter}
+        nextChapter={nextChapter}
+      />
 
       {/* Keyboard Shortcuts Hint */}
       <div class={`reading-shortcuts${shortcutsVisible ? ' visible' : ''}`}>
-        <kbd>←</kbd> <kbd>→</kbd> chapters · <kbd>Esc</kbd> exit reading · <kbd>C</kbd> chapters
+        <kbd>←</kbd> <kbd>→</kbd> chapters · <kbd>Esc</kbd> exit reading · <kbd>C</kbd> options
       </div>
     </>
   );
