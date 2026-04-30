@@ -60,6 +60,7 @@ export interface Pseud {
 export interface Work {
   id: number;
   title: string;
+  slug?: string; // may not exist in all schemas
   summary?: string | null;
   notes?: string | null;
   end_notes?: string | null;

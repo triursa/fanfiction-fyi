@@ -7,6 +7,7 @@ import Heading from '@tiptap/extension-heading';
 import Placeholder from '@tiptap/extension-placeholder';
 import CodeBlockLowlight from '@tiptap/extension-code-block-lowlight';
 import Image from '@tiptap/extension-image';
+import CharacterCount from '@tiptap/extension-character-count';
 import { common, createLowlight } from 'lowlight';
 import { markdownToHtml, htmlToMarkdown } from '@/lib/markdown';
 import LinkDialog from './LinkDialog';
@@ -14,14 +15,11 @@ import LinkDialog from './LinkDialog';
 const lowlight = createLowlight(common);
 
 /** Upload an image file to the server and return the URL */
-async function uploadImageFile(file: File): Promise<{ key: string; url: string }> {
+async function uploadImageFile(file: File, workId: number | string): Promise<{ key: string; url: string }> {
   const formData = new FormData();
   formData.append('file', file);
   formData.append('type', 'chapter');
-  // workId will be set by the parent page via a global or we extract from URL
-  const workIdMatch = window.location.pathname.match(/\/works\/(\d+)/);
-  const workId = workIdMatch ? workIdMatch[1] : '0';
-  formData.append('id', workId);
+  formData.append('id', String(workId));
 
   const res = await fetch('/api/upload', {
     method: 'POST',
@@ -134,6 +132,7 @@ export default function TipTapEditor({
             class: 'chapter-image',
           },
         }),
+        CharacterCount,
       ],
       content: content || '',
       onUpdate: ({ editor: e }) => {
@@ -198,7 +197,8 @@ export default function TipTapEditor({
 
     setIsUploading(true);
     try {
-      const result = await uploadImageFile(file);
+      const effectiveWorkId = workId || (window as any).__editorWorkId || '0';
+      const result = await uploadImageFile(file, effectiveWorkId);
       // Insert image into editor at current position
       editorRef.current.chain().focus().setImage({
         src: result.url,
@@ -215,7 +215,7 @@ export default function TipTapEditor({
     } finally {
       setIsUploading(false);
     }
-  }, []);
+  }, [workId]);
 
   // ── File input for image upload button ──
   const handleImageButtonClick = useCallback(() => {
@@ -460,7 +460,7 @@ export default function TipTapEditor({
 
       <div class="tiptap-footer">
         <span class="tiptap-wordcount">
-          {editor ? editor.storage.characterCount?.words?.() ?? countWords(editor.getText()) : 0} words
+          {editor ? (editor.storage.characterCount?.words?.() ?? countWords(editor.getText())) : 0} words
         </span>
       </div>
 

@@ -65,6 +65,26 @@ export default function ReadingMode({
   const prevChapter = currentIndex > 0 ? chapters[currentIndex - 1] : null;
   const nextChapter = currentIndex < chapters.length - 1 ? chapters[currentIndex + 1] : null;
 
+  // ── Reaction rollback helper ──
+  // Reverts optimistic update when the server request fails
+  const revertReaction = useCallback((reaction: string, wasMine: boolean) => {
+    setReactionState((prev) => {
+      if (wasMine) {
+        // Was mine (remove was rolled back) → re-add it
+        return {
+          counts: { ...prev.counts, [reaction]: (prev.counts[reaction] || 0) + 1 },
+          mine: [...prev.mine, reaction],
+        };
+      } else {
+        // Was not mine (add was rolled back) → remove it
+        return {
+          counts: { ...prev.counts, [reaction]: Math.max(0, (prev.counts[reaction] || 0) - 1) },
+          mine: prev.mine.filter((r) => r !== reaction),
+        };
+      }
+    });
+  }, []);
+
   // ── Progress bar & header/toolbar visibility ──
   const handleScroll = useCallback(() => {
     const winH = window.innerHeight;
@@ -166,35 +186,13 @@ export default function ReadingMode({
           body: JSON.stringify({ reaction }),
         });
         if (!res.ok) {
-          // Revert on failure
-          if (isMine) {
-            setReactionState((prev) => ({
-              counts: { ...prev.counts, [reaction]: (prev.counts[reaction] || 0) + 1 },
-              mine: [...prev.mine, reaction],
-            }));
-          } else {
-            setReactionState((prev) => ({
-              counts: { ...prev.counts, [reaction]: Math.max(0, (prev.counts[reaction] || 0) - 1) },
-              mine: prev.mine.filter((r) => r !== reaction),
-            }));
-          }
+          revertReaction(reaction, isMine);
         }
       } catch {
-        // Revert on network error
-        if (isMine) {
-          setReactionState((prev) => ({
-            counts: { ...prev.counts, [reaction]: (prev.counts[reaction] || 0) + 1 },
-            mine: [...prev.mine, reaction],
-          }));
-        } else {
-          setReactionState((prev) => ({
-            counts: { ...prev.counts, [reaction]: Math.max(0, (prev.counts[reaction] || 0) - 1) },
-            mine: prev.mine.filter((r) => r !== reaction),
-          }));
-        }
+        revertReaction(reaction, isMine);
       }
     },
-    [workId, currentChapterId, reactionState.mine, reactionState.counts],
+    [workId, currentChapterId, reactionState.mine, reactionState.counts, revertReaction],
   );
 
   const moodAttr = moodDisabled ? 'off' : currentMood || 'none';
