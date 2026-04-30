@@ -687,19 +687,22 @@ const initialChapterData = JSON.stringify({
 
   // ── Publish Chapter button ──
   publishBtn.addEventListener('click', async () => {
-    // Disable button and show loading state
-    publishBtn.disabled = true;
+    // Prevent double-clicks — saveChapter's finally block will re-enable
+    if (isSaving) return;
     publishBtn.textContent = 'Publishing…';
-    saveDraftBtn.disabled = true;
 
     const savedOk = await saveChapter(false);
 
     if (!savedOk) {
       publishBtn.textContent = 'Publish Chapter';
+      // saveChapter's finally block already re-enabled buttons (previousSaveDraftDisabled was false)
       return;
     }
 
     // Also publish the work if it's still a draft
+    // Disable buttons during work publish call (saveChapter's finally already re-enabled them)
+    publishBtn.disabled = true;
+    saveDraftBtn.disabled = true;
     try {
       const workRes = await fetch(`/api/works/${workId}`, {
         method: 'PUT',
@@ -715,11 +718,13 @@ const initialChapterData = JSON.stringify({
       } else {
         const data = await workRes.json().catch(() => ({}));
         showToast(`Chapter saved, but work publish failed: ${data.error || 'Unknown error'}`, 'warning');
-        publishBtn.textContent = 'Publish Chapter';
       }
     } catch {
       showToast('Chapter saved locally — network error publishing work', 'warning');
+    } finally {
       publishBtn.textContent = 'Publish Chapter';
+      publishBtn.disabled = false;
+      saveDraftBtn.disabled = false;
     }
   });
 
