@@ -4,6 +4,7 @@ import { queryFirst, queryAll } from '../../../lib/db';
 import { markdownToHtml } from '../../../lib/markdown';
 import { THEMES } from '../../../styles/themes';
 import ReadingMode from '../../../components/ReadingMode';
+import TagCluster from '../../../components/TagCluster.tsx';
 
 const workId = Number(Astro.params.id);
 if (!workId) return Astro.redirect('/works');
@@ -132,6 +133,7 @@ const moodCSS = (!moodDisabled && currentMood && MOOD_PALETTES[currentMood])
 
   <style is:global>
     @import '../../../styles/theme.css';
+    @import '../../../styles/composer.css';
 
     /* ── Reading Mode Overrides ── */
     html[data-reading-mode] body {
@@ -235,23 +237,7 @@ const moodCSS = (!moodDisabled && currentMood && MOOD_PALETTES[currentMood])
       border-radius: var(--md-sys-shape-corner-full);
       font: var(--md-sys-typescale-label-medium);
     }
-    .reading-tags {
-      display: flex;
-      flex-wrap: wrap;
-      gap: var(--space-1);
-      margin-top: var(--space-3);
-    }
-    .reading-tag {
-      font: var(--md-sys-typescale-body-small);
-      background: var(--md-sys-color-surface-container);
-      color: var(--md-sys-color-on-surface-variant);
-      padding: 2px var(--space-2);
-      border-radius: var(--md-sys-shape-corner-full);
-    }
-    .reading-tag-rating {
-      background: var(--md-sys-color-tertiary-container);
-      color: var(--md-sys-color-on-tertiary-container);
-    }
+    /* ── Tags (now handled by TagCluster + composer.css) ── */
 
     /* ── Chapter Content ── */
     .reading-chapter {
@@ -629,11 +615,7 @@ const moodCSS = (!moodDisabled && currentMood && MOOD_PALETTES[currentMood])
         <span>{work.complete ? 'Complete' : 'In Progress'}</span>
       </div>
       {tags.length > 0 && (
-        <div class="reading-tags">
-          {tags.map((t: any) => (
-            <span class={`reading-tag ${t.type === 'rating' ? 'reading-tag-rating' : ''}`}>{t.name}</span>
-          ))}
-        </div>
+        <TagCluster client:load tags={tags.map((t: any) => ({ id: t.id, name: t.name, type: t.type }))} heading="" compact={true} />
       )}
     </div>
 

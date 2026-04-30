@@ -46,10 +46,10 @@ const defaultPseudId = pseuds.find(p => p.name === user.display_name)?.id ?? pse
       <div class="m3-card">
         <h2 class="m3-card-title">Taxonomy</h2>
         <div class="form-stack" style="gap: var(--space-4)">
-          <TagChips client:load type="fandom" label="Fandom" placeholder="e.g. Harry Potter, Marvel" />
-          <TagChips client:load type="character" label="Characters" placeholder="e.g. Hermione Granger" />
-          <TagChips client:load type="relationship" label="Relationships" placeholder="e.g. Harry Potter/Ginny Weasley" />
-          <TagChips client:load type="freeform" label="Additional Tags" placeholder="e.g. Angst, Fluff, Slow Burn" />
+          <TagChips client:load type="fandom" label="Fandom" placeholder="e.g. Harry Potter, Marvel" maxTags={5} />
+          <TagChips client:load type="character" label="Characters" placeholder="e.g. Hermione Granger" maxTags={20} />
+          <TagChips client:load type="relationship" label="Relationships" placeholder="e.g. Harry Potter/Ginny Weasley" maxTags={10} />
+          <TagChips client:load type="freeform" label="Additional Tags" placeholder="e.g. Angst, Fluff, Slow Burn" maxTags={30} />
         </div>
       </div>
 

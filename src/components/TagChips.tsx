@@ -13,21 +13,29 @@ interface TagChipsProps {
   label: string;
   /** Placeholder text for the input */
   placeholder: string;
+  /** Maximum number of tags allowed (0 = unlimited) */
+  maxTags?: number;
   /** Pre-selected tags (for edit mode) */
   initialTags?: Tag[];
   /** Called when the selected tags change */
   onChange?: (tags: Tag[]) => void;
 }
 
-export default function TagChips({ type, label, placeholder, initialTags = [], onChange }: TagChipsProps) {
+/** DISPLAY_ORDER defines the visual priority order for tag types in the cluster */
+const TAG_TYPE_ORDER = ['relationship', 'character', 'fandom', 'freeform', 'rating', 'warning', 'category'];
+
+export default function TagChips({ type, label, placeholder, maxTags = 0, initialTags = [], onChange }: TagChipsProps) {
   const [selected, setSelected] = useState<Tag[]>(initialTags);
   const [inputValue, setInputValue] = useState('');
   const [suggestions, setSuggestions] = useState<Tag[]>([]);
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [isComposing, setIsComposing] = useState(false);
+  const [highlightIndex, setHighlightIndex] = useState(-1);
   const debounceRef = useRef<ReturnType<typeof setTimeout>>();
   const wrapperRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+
+  const atMaxTags = maxTags > 0 && selected.length >= maxTags;
 
   // Notify parent of changes
   useEffect(() => {
@@ -39,6 +47,7 @@ export default function TagChips({ type, label, placeholder, initialTags = [], o
     function handleClick(e: MouseEvent) {
       if (wrapperRef.current && !wrapperRef.current.contains(e.target as Node)) {
         setShowSuggestions(false);
+        setHighlightIndex(-1);
       }
     }
     document.addEventListener('click', handleClick);
@@ -49,6 +58,7 @@ export default function TagChips({ type, label, placeholder, initialTags = [], o
     clearTimeout(debounceRef.current);
     if (q.length < 2) {
       setSuggestions([]);
+      setHighlightIndex(-1);
       return;
     }
     debounceRef.current = setTimeout(async () => {
@@ -56,13 +66,58 @@ export default function TagChips({ type, label, placeholder, initialTags = [], o
         const res = await fetch(`/api/tags?type=${type}&name=${encodeURIComponent(q)}&limit=8`);
         if (res.ok) {
           const tags = await res.json();
-          setSuggestions(tags.filter((t: Tag) => !selected.some(s => s.id === t.id)));
+          const filtered = tags.filter((t: Tag) => !selected.some(s => s.id === t.id));
+          setSuggestions(filtered);
+          setHighlightIndex(filtered.length > 0 ? 0 : -1);
         }
       } catch {
         // Silently fail — network errors don't break the input
       }
     }, 300);
   }, [type, selected]);
+
+  function commitInput() {
+    const trimmed = inputValue.trim();
+    if (!trimmed) return;
+
+    // Check if it matches an existing suggestion exactly
+    const match = suggestions.find(s => s.name.toLowerCase() === trimmed.toLowerCase());
+
+    if (type === 'fandom') {
+      // Fandom: require exact match from dropdown (no free entry)
+      if (match) {
+        addTag(match);
+      }
+      // If no match, do nothing — user must select from suggestions
+    } else {
+      // freeform, character, relationship: allow free entry
+      if (match) {
+        addTag(match);
+      } else {
+        // Create as new — server will handle tag creation
+        // Use negative temp IDs to indicate new tags
+        const tempId = -Date.now();
+        addTag({ id: tempId, name: trimmed });
+      }
+    }
+  }
+
+  function addTag(tag: Tag) {
+    if (atMaxTags) return;
+    if (!selected.some(t => t.id === tag.id)) {
+      setSelected(prev => [...prev, tag]);
+    }
+    setInputValue('');
+    setSuggestions([]);
+    setShowSuggestions(false);
+    setHighlightIndex(-1);
+    inputRef.current?.focus();
+  }
+
+  function removeTag(id: number) {
+    setSelected(prev => prev.filter(t => t.id !== id));
+    inputRef.current?.focus();
+  }
 
   function handleInput(e: Event) {
     const value = (e.target as HTMLInputElement).value;
@@ -85,59 +140,86 @@ export default function TagChips({ type, label, placeholder, initialTags = [], o
     setShowSuggestions(true);
   }
 
-  function addTag(tag: Tag) {
-    if (!selected.some(t => t.id === tag.id)) {
-      setSelected(prev => [...prev, tag]);
-    }
-    setInputValue('');
-    setSuggestions([]);
-    setShowSuggestions(false);
-    inputRef.current?.focus();
-  }
-
-  function removeTag(id: number) {
-    setSelected(prev => prev.filter(t => t.id !== id));
-  }
-
   function handleKeyDown(e: KeyboardEvent) {
-    if (e.key === 'Backspace' && inputValue === '' && selected.length > 0) {
-      // Remove last tag on backspace with empty input
-      setSelected(prev => prev.slice(0, -1));
-    } else if (e.key === 'Enter' && !isComposing) {
+    if (isComposing) return;
+
+    // Arrow keys for dropdown navigation
+    if (e.key === 'ArrowDown' && showSuggestions && suggestions.length > 0) {
       e.preventDefault();
+      setHighlightIndex(prev => Math.min(prev + 1, suggestions.length - 1));
+      return;
+    }
+    if (e.key === 'ArrowUp' && showSuggestions && suggestions.length > 0) {
+      e.preventDefault();
+      setHighlightIndex(prev => Math.max(prev - 1, 0));
+      return;
+    }
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      setShowSuggestions(false);
+      setHighlightIndex(-1);
+      return;
+    }
+
+    // Enter: tokenize input or select highlighted suggestion
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      if (showSuggestions && highlightIndex >= 0 && highlightIndex < suggestions.length) {
+        addTag(suggestions[highlightIndex]);
+      } else {
+        commitInput();
+      }
+      return;
+    }
+
+    // Tab: tokenize input (if there's text) or move focus
+    if (e.key === 'Tab') {
       if (inputValue.trim()) {
-        // Create a new freeform tag if type allows it
-        const trimmed = inputValue.trim();
-        // For freeform, character, relationship types — allow free entry
-        // For fandom, require selection from suggestions
-        if (type === 'freeform' || type === 'character' || type === 'relationship') {
-          // Check if it matches an existing suggestion
-          const match = suggestions.find(s => s.name.toLowerCase() === trimmed.toLowerCase());
-          if (match) {
-            addTag(match);
-          } else {
-            // Create as new — server will handle tag creation
-            // Use negative temp IDs to indicate new tags
-            const tempId = -Date.now();
-            addTag({ id: tempId, name: trimmed });
-          }
-        }
-        // fandom requires selection from dropdown (no free entry)
-        if (type === 'fandom') {
-          const match = suggestions.find(s => s.name.toLowerCase() === trimmed.toLowerCase());
-          if (match) {
-            addTag(match);
-          }
-          // If no match, do nothing — user must select from suggestions
+        e.preventDefault();
+        if (showSuggestions && highlightIndex >= 0 && highlightIndex < suggestions.length) {
+          addTag(suggestions[highlightIndex]);
+        } else {
+          commitInput();
         }
       }
+      return;
     }
+
+    // Comma: tokenize and clear (comma itself is not part of the tag)
+    if (e.key === ',') {
+      e.preventDefault();
+      commitInput();
+      return;
+    }
+
+    // Backspace: remove last tag when input is empty
+    if (e.key === 'Backspace' && inputValue === '' && selected.length > 0) {
+      setSelected(prev => prev.slice(0, -1));
+      return;
+    }
+  }
+
+  /** Highlight matching substring in suggestion text */
+  function renderSuggestion(name: string, query: string) {
+    if (!query) return name;
+    const idx = name.toLowerCase().indexOf(query.toLowerCase());
+    if (idx === -1) return name;
+    return (
+      <>
+        {name.slice(0, idx)}
+        <strong>{name.slice(idx, idx + query.length)}</strong>
+        {name.slice(idx + query.length)}
+      </>
+    );
   }
 
   return (
     <div class="tag-chips-field" ref={wrapperRef}>
-      <label class="tag-chips-label">{label}</label>
-      <div class="tag-chips-input-wrapper" onClick={() => inputRef.current?.focus()}>
+      <label class="tag-chips-label">
+        {label}
+        {maxTags > 0 && <span class="tag-chips-count">{selected.length}/{maxTags}</span>}
+      </label>
+      <div class={`tag-chips-input-wrapper${atMaxTags ? ' tag-chips-at-max' : ''}`} onClick={() => inputRef.current?.focus()}>
         {selected.map(tag => (
           <span class="tag-chip" key={tag.id}>
             <span class="tag-chip-text">{tag.name}</span>
@@ -162,19 +244,26 @@ export default function TagChips({ type, label, placeholder, initialTags = [], o
           onCompositionStart={handleCompositionStart}
           onCompositionEnd={handleCompositionEnd}
           onFocus={() => { if (inputValue.length >= 2) setShowSuggestions(true); }}
+          disabled={atMaxTags}
+          aria-expanded={showSuggestions}
+          aria-autocomplete="list"
+          aria-controls={`${type}-tag-suggestions`}
+          role="combobox"
         />
       </div>
       {showSuggestions && suggestions.length > 0 && (
-        <div class="tag-chips-dropdown" role="listbox">
-          {suggestions.map(tag => (
+        <div class="tag-chips-dropdown" role="listbox" id={`${type}-tag-suggestions`}>
+          {suggestions.map((tag, i) => (
             <button
               type="button"
-              class="tag-chips-suggestion"
+              class={`tag-chips-suggestion${i === highlightIndex ? ' tag-chips-suggestion-highlighted' : ''}`}
               role="option"
+              aria-selected={i === highlightIndex}
               key={tag.id}
               onClick={() => addTag(tag)}
+              onMouseEnter={() => setHighlightIndex(i)}
             >
-              {tag.name}
+              {renderSuggestion(tag.name, inputValue)}
             </button>
           ))}
         </div>
@@ -190,4 +279,12 @@ export default function TagChips({ type, label, placeholder, initialTags = [], o
       })}
     </div>
   );
+}
+
+/**
+ * TagCluster — server-side Preact component for displaying tags grouped by type
+ * on work detail and reading pages. Each tag links to the browse page filtered by that tag.
+ */
+export function getTagTypeOrder() {
+  return TAG_TYPE_ORDER;
 }

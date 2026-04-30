@@ -10,6 +10,14 @@
 .tag-chips-label {
   font: var(--md-sys-typescale-label-large);
   color: var(--md-sys-color-on-surface-variant);
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+}
+
+.tag-chips-count {
+  font: var(--md-sys-typescale-body-small);
+  color: var(--md-sys-color-outline);
 }
 
 .tag-chips-input-wrapper {
@@ -30,6 +38,11 @@
   border-color: var(--md-sys-color-primary);
 }
 
+.tag-chips-input-wrapper.tag-chips-at-max {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
 .tag-chip {
   display: inline-flex;
   align-items: center;
@@ -43,6 +56,12 @@
   white-space: nowrap;
   max-width: 200px;
   overflow: hidden;
+  animation: chip-in var(--md-sys-motion-duration-short4, 0.15s) var(--md-sys-motion-easing-standard, ease);
+}
+
+@keyframes chip-in {
+  from { transform: scale(0.8); opacity: 0; }
+  to { transform: scale(1); opacity: 1; }
 }
 
 .tag-chip-text {
@@ -75,6 +94,11 @@
   color: var(--md-sys-color-on-secondary);
 }
 
+.tag-chip-remove:focus-visible {
+  outline: 2px solid var(--md-sys-color-primary);
+  outline-offset: -2px;
+}
+
 .tag-chips-input {
   flex: 1;
   min-width: 120px;
@@ -89,6 +113,10 @@
 .tag-chips-input::placeholder {
   color: var(--md-sys-color-on-surface-variant);
   opacity: 0.6;
+}
+
+.tag-chips-input:disabled {
+  opacity: 0.5;
 }
 
 .tag-chips-dropdown {
@@ -116,8 +144,175 @@
   transition: background var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard);
 }
 
-.tag-chips-suggestion:hover {
+.tag-chips-suggestion:hover,
+.tag-chips-suggestion-highlighted {
   background: var(--md-sys-color-surface-container-highest);
+}
+
+.tag-chips-suggestion strong {
+  color: var(--md-sys-color-primary);
+  font-weight: 600;
+}
+
+/* ── Tag Cluster (Read-Mode Display) ── */
+.tag-cluster {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.tag-cluster--compact {
+  gap: var(--space-1);
+}
+
+.tag-cluster__heading {
+  font: var(--md-sys-typescale-label-large);
+  color: var(--md-sys-color-on-surface-variant);
+  margin: 0;
+}
+
+.tag-cluster__group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+  align-items: baseline;
+}
+
+.tag-cluster__label {
+  font: var(--md-sys-typescale-label-medium);
+  color: var(--md-sys-color-outline);
+  margin-right: var(--space-1);
+  white-space: nowrap;
+}
+
+.tag-cluster__chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+}
+
+.tag-cluster__chip {
+  font: var(--md-sys-typescale-body-small);
+  padding: 2px var(--space-3);
+  border-radius: var(--md-sys-shape-corner-full);
+  text-decoration: none;
+  white-space: nowrap;
+  background: var(--md-sys-color-secondary-container);
+  color: var(--md-sys-color-on-secondary-container);
+  transition: background var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard),
+              color var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard);
+}
+
+.tag-cluster__chip:hover {
+  text-decoration: none;
+}
+
+.tag-cluster__chip:focus-visible {
+  outline: 2px solid var(--md-sys-color-primary);
+  outline-offset: 1px;
+}
+
+/* Type-specific chip colors */
+.tag-type-relationship {
+  background: var(--md-sys-color-tertiary-container);
+  color: var(--md-sys-color-on-tertiary-container);
+  border: 1px solid var(--md-sys-color-tertiary);
+}
+
+.tag-type-relationship:hover {
+  background: var(--md-sys-color-tertiary);
+  color: var(--md-sys-color-on-tertiary);
+}
+
+.tag-type-character {
+  background: var(--md-sys-color-primary-container);
+  color: var(--md-sys-color-on-primary-container);
+}
+
+.tag-type-character:hover {
+  background: var(--md-sys-color-primary);
+  color: var(--md-sys-color-on-primary);
+}
+
+.tag-type-fandom {
+  background: var(--md-sys-color-secondary-container);
+  color: var(--md-sys-color-on-secondary-container);
+}
+
+.tag-type-fandom:hover {
+  background: var(--md-sys-color-secondary);
+  color: var(--md-sys-color-on-secondary);
+}
+
+.tag-type-freeform {
+  background: var(--md-sys-color-surface-container-high);
+  color: var(--md-sys-color-on-surface-variant);
+  border: 1px solid var(--md-sys-color-outline-variant);
+}
+
+.tag-type-freeform:hover {
+  background: var(--md-sys-color-surface-container-highest);
+  border-color: var(--md-sys-color-outline);
+}
+
+.tag-type-rating {
+  background: var(--md-sys-color-tertiary-container);
+  color: var(--md-sys-color-on-tertiary-container);
+}
+
+.tag-type-warning {
+  background: var(--md-sys-color-error-container);
+  color: var(--md-sys-color-on-error-container);
+}
+
+.tag-type-warning:hover {
+  background: var(--md-sys-color-error);
+  color: var(--md-sys-color-on-error);
+}
+
+.tag-type-category {
+  background: var(--md-sys-color-surface-container-high);
+  color: var(--md-sys-color-on-surface-variant);
+}
+
+.tag-type-category:hover {
+  background: var(--md-sys-color-surface-container-highest);
+}
+
+/* Mobile wrap safety */
+@media (max-width: 600px) {
+  .tag-chips-input-wrapper {
+    gap: 4px;
+    padding: var(--space-1) var(--space-2);
+  }
+
+  .tag-chip {
+    max-width: 160px;
+    font-size: 0.8rem;
+  }
+
+  .tag-chips-input {
+    min-width: 80px;
+  }
+
+  .tag-chips-dropdown {
+    min-width: 200px;
+    max-height: 150px;
+  }
+
+  .tag-cluster__group {
+    gap: 4px;
+  }
+
+  .tag-cluster__chip {
+    font-size: 0.75rem;
+    padding: 1px var(--space-2);
+  }
+
+  .tag-cluster__label {
+    width: 100%;
+    margin-bottom: 0;
+  }
 }
 
 /* ── M3 Card ── */
