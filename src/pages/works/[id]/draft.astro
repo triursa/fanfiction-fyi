@@ -457,7 +457,6 @@ const initialChapterData = JSON.stringify({
   let hasUnsavedChanges = false;
   let isSaving = false;
   let savePromise: Promise<any> | null = null;
-  let lastSavedContent = '';
 
   window.addEventListener('beforeunload', (e) => {
     if (hasUnsavedChanges) {
@@ -508,8 +507,9 @@ const initialChapterData = JSON.stringify({
       if (chapterSwitchToken !== thisToken) return;
       if (res.ok) {
         const data = await res.json();
+        // Check again after parsing JSON — another switch may have started
+        if (chapterSwitchToken !== thisToken) return;
         const contentMd = data.content_md || '';
-        lastSavedContent = contentMd;
         if ((window as any).__editorSetContent) {
           (window as any).__editorSetContent(contentMd);
         }
@@ -586,15 +586,16 @@ const initialChapterData = JSON.stringify({
   async function saveChapter(draft: boolean = true, silent: boolean = false): Promise<boolean> {
     if (!currentChapterId) return false;
 
-    const contentMd = (window as any).__editorMarkdown || '';
-    const title = chapterTitle.value || `Chapter ${currentChapterPosition}`;
-
     // If a save is already in flight, queue behind it
     if (isSaving) {
       if (savePromise) {
         await savePromise;
       }
     }
+
+    // Read content after any queued save has finished so we don't send stale data
+    const contentMd = (window as any).__editorMarkdown || '';
+    const title = chapterTitle.value || `Chapter ${currentChapterPosition}`;
 
     // Snapshot content at save time — only clear dirty flag if no new edits happened
     const contentAtSaveStart = contentMd;
@@ -626,7 +627,6 @@ const initialChapterData = JSON.stringify({
         if (contentNow === contentAtSaveStart) {
           hasUnsavedChanges = false;
         }
-        lastSavedContent = contentAtSaveStart;
         if (!silent) {
           autosaveStatus.textContent = draft ? 'Draft saved' : 'Chapter published';
           autosaveStatus.style.color = 'var(--md-sys-color-primary)';
