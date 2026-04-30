@@ -136,7 +136,7 @@
     color: var(--md-sys-color-on-surface-variant);
     min-width: 48px;
     position: relative;
-    width: 20%; /* equal distribution */
+    flex: 1; /* equal distribution regardless of item count */
     transition: color var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-emphasized);
   }
 
@@ -378,6 +378,15 @@
     background: var(--md-sys-color-primary-container);
     color: var(--md-sys-color-on-primary-container);
   }
+
+  .navigation-drawer__item--button {
+    width: 100%;
+    border: none;
+    background: none;
+    cursor: pointer;
+    text-align: left;
+    font: var(--md-sys-typescale-label-large);
+  }
 }
 
 /* ════════════════════════════════════════════
@@ -495,6 +504,15 @@
   color: var(--md-sys-color-on-primary-container);
 }
 
+.modal-drawer__item--button {
+  width: 100%;
+  border: none;
+  background: none;
+  cursor: pointer;
+  text-align: left;
+  font: var(--md-sys-typescale-label-large);
+}
+
 .modal-drawer__divider {
   height: 1px;
   background: var(--md-sys-color-outline-variant);
@@ -516,6 +534,13 @@
 @media (min-width: 600px) and (max-width: 839px) {
   .main-content {
     margin-left: 80px !important;
+  }
+}
+
+/* Tablet: offset app bar so it doesn't overlap the 80px rail */
+@media (min-width: 600px) and (max-width: 839px) {
+  .mobile-app-bar {
+    padding-left: calc(80px + var(--space-4));
   }
 }
 

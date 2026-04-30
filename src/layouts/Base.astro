@@ -40,7 +40,8 @@ if (sessionMatch) {
 
 const title = Astro.props.title ?? 'fanfiction.fyi';
 const currentPath = Astro.url.pathname;
-const isReadingMode = Astro.props.readingMode === true;
+const isReadingRoute = /^\/works\/[^/]+\/read\/?$/.test(currentPath);
+const isReadingMode = Astro.props.readingMode === true || isReadingRoute;
 const userName = user ? (pseuds[0]?.name || user.email) : undefined;
 const isAdmin = isModOrAbove;
 ---

@@ -1,5 +1,4 @@
-import { useState, useEffect, useCallback } from 'preact/hooks';
-import type { ComponentChildren } from 'preact';
+import { useState, useEffect, useRef, useCallback } from 'preact/hooks';
 
 // ── Navigation item definitions ──
 
@@ -54,6 +53,7 @@ const ICONS: Record<string, string> = {
   create: 'M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34a.9959.9959 0 00-.71-.29c-.26 0-.51.1-.7.29l-1.83 1.83 3.75 3.75 1.83-1.83z',
   settings: 'M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58c.18-.14.23-.41.12-.61l-1.92-3.32c-.12-.22-.37-.29-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54c-.04-.24-.24-.41-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.07.62-.07.94s.02.64.07.94l-2.03 1.58c-.18.14-.23.41-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6A3.6 3.6 0 1115.6 12 3.61 3.61 0 0112 15.6z',
   close: 'M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z',
+  logout: 'M17 7l-1.41 1.41L18.17 11H8v2h10.17l-2.58 2.58L17 17l5-5zM4 5h8V3H4c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h8v-2H4V5z',
 };
 
 function SvgIcon({ name, size = 24 }: { name: string; size?: number }) {
@@ -162,12 +162,28 @@ function NavigationDrawer({ items, secondaryItems, currentPath, userName }: {
         ))}
       </div>
       <div class="navigation-drawer__spacer" />
-      <div class="navigation-drawer__footer">
-        <a href="/works/create" class="navigation-drawer__create">
-          <SvgIcon name="create" size={20} />
-          <span>New Work</span>
-        </a>
-      </div>
+      {userName && (
+        <div class="navigation-drawer__footer">
+          <a href="/works/create" class="navigation-drawer__create">
+            <SvgIcon name="create" size={20} />
+            <span>New Work</span>
+          </a>
+          <a
+            href="/settings"
+            class={`navigation-drawer__item ${isActive('/settings', currentPath) ? 'navigation-drawer__item--active' : ''}`}
+            aria-current={isActive('/settings', currentPath) ? 'page' : undefined}
+          >
+            <SvgIcon name="settings" size={24} />
+            <span>Settings</span>
+          </a>
+          <form method="POST" action="/api/auth/logout">
+            <button type="submit" class="navigation-drawer__item navigation-drawer__item--button">
+              <SvgIcon name="logout" size={24} />
+              <span>Sign Out</span>
+            </button>
+          </form>
+        </div>
+      )}
     </nav>
   );
 }
@@ -183,11 +199,20 @@ function ModalDrawer({ isOpen, onClose, primaryItems, secondaryItems, currentPat
   userName?: string;
   isAdmin?: boolean;
 }) {
+  useEffect(() => {
+    if (!isOpen) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [isOpen, onClose]);
+
   if (!isOpen) return null;
 
   return (
     <div class="modal-drawer-overlay" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
-      <div class="modal-drawer" role="dialog" aria-label="Navigation menu">
+      <div class="modal-drawer" role="dialog" aria-modal="true" aria-label="Navigation menu">
         <div class="modal-drawer__header">
           <a href="/" class="modal-drawer__logo">fanfiction.fyi</a>
           <button class="modal-drawer__close" onClick={onClose} aria-label="Close menu">
@@ -228,23 +253,33 @@ function ModalDrawer({ isOpen, onClose, primaryItems, secondaryItems, currentPat
             </a>
           ))}
         </div>
-        <div class="modal-drawer__divider" />
-        <div class="modal-drawer__section">
-          <a href="/works/create" class="modal-drawer__item modal-drawer__item--create" onClick={onClose}>
-            <SvgIcon name="create" size={24} />
-            <span>New Work</span>
-          </a>
-          <a href="/settings" class="modal-drawer__item" onClick={onClose}>
-            <SvgIcon name="settings" size={24} />
-            <span>Settings</span>
-          </a>
-          {isAdmin && (
-            <a href="/admin" class="modal-drawer__item" onClick={onClose}>
-              <SvgIcon name="admin_panel_settings" size={24} />
-              <span>Admin</span>
-            </a>
-          )}
-        </div>
+        {userName && (
+          <>
+            <div class="modal-drawer__divider" />
+            <div class="modal-drawer__section">
+              <a href="/works/create" class="modal-drawer__item modal-drawer__item--create" onClick={onClose}>
+                <SvgIcon name="create" size={24} />
+                <span>New Work</span>
+              </a>
+              <a href="/settings" class="modal-drawer__item" onClick={onClose}>
+                <SvgIcon name="settings" size={24} />
+                <span>Settings</span>
+              </a>
+              {isAdmin && (
+                <a href="/admin" class="modal-drawer__item" onClick={onClose}>
+                  <SvgIcon name="admin_panel_settings" size={24} />
+                  <span>Admin</span>
+                </a>
+              )}
+              <form method="POST" action="/api/auth/logout">
+                <button type="submit" class="modal-drawer__item modal-drawer__item--button">
+                  <SvgIcon name="logout" size={24} />
+                  <span>Sign Out</span>
+                </button>
+              </form>
+            </div>
+          </>
+        )}
       </div>
     </div>
   );
@@ -284,7 +319,7 @@ interface AdaptiveNavProps {
 export default function AdaptiveNav({ currentPath, userName, isAdmin, isReadingMode }: AdaptiveNavProps) {
   const [modalOpen, setModalOpen] = useState(false);
   const [bottomNavHidden, setBottomNavHidden] = useState(false);
-  const [lastScrollY, setLastScrollY] = useState(0);
+  const lastScrollY = useRef(0);
 
   const openModal = useCallback(() => setModalOpen(true), []);
   const closeModal = useCallback(() => setModalOpen(false), []);
@@ -298,13 +333,13 @@ export default function AdaptiveNav({ currentPath, userName, isAdmin, isReadingM
 
     const handleScroll = () => {
       const currentY = window.scrollY;
-      setBottomNavHidden(currentY > lastScrollY && currentY > 100);
-      setLastScrollY(currentY);
+      setBottomNavHidden(currentY > lastScrollY.current && currentY > 100);
+      lastScrollY.current = currentY;
     };
 
     window.addEventListener('scroll', handleScroll, { passive: true });
     return () => window.removeEventListener('scroll', handleScroll);
-  }, [isReadingMode, lastScrollY]);
+  }, [isReadingMode]);
 
   // Build primary nav items — include Bookmarks only if logged in
   const primaryNav = userName
