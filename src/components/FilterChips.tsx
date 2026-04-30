@@ -1,5 +1,5 @@
 import { h } from 'preact';
-import { useState, useEffect, useRef, useCallback } from 'preact/hooks';
+import { useRef } from 'preact/hooks';
 
 /**
  * FilterChips — Horizontal scrolling row of M3 Filter Chips for search facets.

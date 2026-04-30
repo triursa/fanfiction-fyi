@@ -1,6 +1,6 @@
 export const prerender = false;
 
-import { queryAll, queryFirst } from '@/lib/db';
+import { queryAll } from '@/lib/db';
 import { corsHeaders, handleCors } from '@/lib/cors';
 import type { APIRoute } from 'astro';
 
@@ -55,45 +55,26 @@ export const GET: APIRoute = async ({ url, locals, request }) => {
 
   const whereClause = conditions.length > 0 ? 'WHERE ' + conditions.join(' AND ') : '';
 
-  // Count query
+  // Build count and data queries from a single source of truth
   let countSql: string;
   let countBindings: any[];
-  if (ftsWhere) {
-    countSql = `SELECT COUNT(*) as total FROM works w ${ftsWhere} ${whereClause ? ' AND ' + conditions.join(' AND ') : ''}`;
-    countBindings = [...ftsBindings];
-    // Re-add non-FTS bindings for count (we already have conditions in whereClause)
-  } else {
-    countSql = `SELECT COUNT(*) as total FROM works w ${whereClause}`;
-    countBindings = [...bindings];
-  }
-
-  // Actually, let's rebuild this more cleanly
-  // The FTS MATCH needs to be in the FROM/JOIN clause, conditions go in WHERE
-  if (ftsWhere) {
-    countSql = `SELECT COUNT(*) as total FROM works w JOIN works_fts f ON f.rowid = w.id WHERE works_fts MATCH ?`;
-    countBindings = [ftsBindings[0], ...bindings];
-  } else {
-    countSql = `SELECT COUNT(*) as total FROM works w ${whereClause}`;
-    countBindings = [...bindings];
-  }
-
-  // Data query
   let dataSql: string;
   let dataBindings: any[];
+
   if (ftsWhere) {
-    dataSql = `SELECT w.id, w.title, w.summary, w.word_count, w.complete, w.published_at, w.updated_at FROM works w JOIN works_fts f ON f.rowid = w.id WHERE works_fts MATCH ?`;
-    // Append conditions (skip the published_at one since FTS already requires it)
-    const extraConditions = conditions.slice(1); // all except published_at
-    if (extraConditions.length > 0) {
-      dataSql += ' AND ' + extraConditions.join(' AND ');
-    }
+    // FTS path: include ALL conditions (including published_at) after the MATCH predicate
+    const allConditions = ' AND ' + conditions.join(' AND ');
+    countSql = `SELECT COUNT(*) as total FROM works w JOIN works_fts f ON f.rowid = w.id WHERE works_fts MATCH ?${allConditions}`;
+    countBindings = [ftsBindings[0], ...bindings];
+
+    dataSql = `SELECT w.id, w.title, w.summary, w.word_count, w.complete, w.published_at, w.updated_at FROM works w JOIN works_fts f ON f.rowid = w.id WHERE works_fts MATCH ?${allConditions} ORDER BY rank`;
     dataBindings = [ftsBindings[0], ...bindings];
-    // Order by rank for FTS relevance
-    dataSql += ' ORDER BY rank';
   } else {
-    dataSql = `SELECT w.id, w.title, w.summary, w.word_count, w.complete, w.published_at, w.updated_at FROM works w ${whereClause}`;
+    countSql = `SELECT COUNT(*) as total FROM works w ${whereClause}`;
+    countBindings = [...bindings];
+
+    dataSql = `SELECT w.id, w.title, w.summary, w.word_count, w.complete, w.published_at, w.updated_at FROM works w ${whereClause} ORDER BY w.updated_at DESC`;
     dataBindings = [...bindings];
-    dataSql += ' ORDER BY w.updated_at DESC';
   }
 
   dataSql += ' LIMIT ? OFFSET ?';
@@ -103,21 +84,42 @@ export const GET: APIRoute = async ({ url, locals, request }) => {
   const totalRow = await db.prepare(countSql).bind(...countBindings).first<{ total: number }>();
   const total = totalRow?.total ?? 0;
 
-  // Enrich results with pseuds and tags
-  for (const w of results) {
-    const pseud = await queryAll<any>(
-      db,
-      `SELECT p.name FROM pseuds p JOIN creatorships c ON p.id = c.pseud_id WHERE c.work_id = ?1 LIMIT 1`,
-      w.id
-    );
-    w.pseud_name = pseud[0]?.name ?? null;
+  // Enrich results with pseuds and tags using batched queries
+  const workIds = results.map((w: any) => w.id);
 
-    const tags = await queryAll<any>(
+  if (workIds.length > 0) {
+    const placeholders = workIds.map(() => '?').join(', ');
+
+    const pseudRows = await queryAll<{ work_id: number; pseud_name: string | null }>(
       db,
-      `SELECT t.id, t.name, t.type FROM tags t JOIN taggings tg ON t.id = tg.tag_id WHERE tg.work_id = ?1 ORDER BY t.type, t.name`,
-      w.id
+      `SELECT w.id AS work_id, (SELECT p.name FROM pseuds p JOIN creatorships c ON p.id = c.pseud_id WHERE c.work_id = w.id LIMIT 1) AS pseud_name FROM works w WHERE w.id IN (${placeholders})`,
+      ...workIds
     );
-    w.tags = tags;
+    const pseudByWorkId = new Map<number, string | null>(
+      pseudRows.map(row => [row.work_id, row.pseud_name ?? null])
+    );
+
+    const tagRows = await queryAll<{ work_id: number; id: number; name: string; type: string }>(
+      db,
+      `SELECT tg.work_id, t.id, t.name, t.type FROM tags t JOIN taggings tg ON t.id = tg.tag_id WHERE tg.work_id IN (${placeholders}) ORDER BY tg.work_id, t.type, t.name`,
+      ...workIds
+    );
+    const tagsByWorkId = new Map<number, { id: number; name: string; type: string }[]>();
+    for (const row of tagRows) {
+      const tags = tagsByWorkId.get(row.work_id) ?? [];
+      tags.push({ id: row.id, name: row.name, type: row.type });
+      tagsByWorkId.set(row.work_id, tags);
+    }
+
+    for (const w of results) {
+      w.pseud_name = pseudByWorkId.get(w.id) ?? null;
+      w.tags = tagsByWorkId.get(w.id) ?? [];
+    }
+  } else {
+    for (const w of results) {
+      w.pseud_name = null;
+      w.tags = [];
+    }
   }
 
   return new Response(

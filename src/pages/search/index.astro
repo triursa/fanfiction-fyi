@@ -1,8 +1,6 @@
 ---
 export const prerender = false;
 import Base from '../../layouts/Base.astro';
-import FilterChips from '../../components/FilterChips.tsx';
-import WorkCard from '../../components/WorkCard.tsx';
 import { queryAll } from '../../lib/db';
 
 const db = Astro.locals.runtime.env.DB as D1Database;
@@ -44,10 +42,11 @@ const whereClause = 'WHERE ' + conditions.join(' AND ');
 
 if (hasQuery && sanitizedQ) {
   const ftsJoin = `JOIN works_fts f ON f.rowid = w.id`;
-  const extraConditions = conditions.length > 1 ? ' AND ' + conditions.slice(1).join(' AND ') : '';
+  // Include ALL conditions (including published_at) after the MATCH predicate
+  const allConditions = ' AND ' + conditions.join(' AND ');
 
-  const dataSql = `SELECT w.id, w.title, w.summary, w.word_count, w.complete, w.published_at, w.updated_at FROM works w ${ftsJoin} WHERE works_fts MATCH ?${extraConditions} ORDER BY rank LIMIT ? OFFSET ?`;
-  const countSql = `SELECT COUNT(*) as total FROM works w ${ftsJoin} WHERE works_fts MATCH ?${extraConditions}`;
+  const dataSql = `SELECT w.id, w.title, w.summary, w.word_count, w.complete, w.published_at, w.updated_at FROM works w ${ftsJoin} WHERE works_fts MATCH ?${allConditions} ORDER BY rank LIMIT ? OFFSET ?`;
+  const countSql = `SELECT COUNT(*) as total FROM works w ${ftsJoin} WHERE works_fts MATCH ?${allConditions}`;
 
   results = await queryAll<any>(db, dataSql, sanitizedQ, ...bindings, limit, offset);
   const totalRow = await db.prepare(countSql).bind(sanitizedQ, ...countBindings).first<{ total: number }>();
@@ -62,18 +61,45 @@ if (hasQuery && sanitizedQ) {
   total = totalRow?.total ?? 0;
 }
 
-// Enrich with pseuds and tags
-for (const w of results) {
-  const pseud = await queryAll<any>(db, `SELECT p.name FROM pseuds p JOIN creatorships c ON p.id = c.pseud_id WHERE c.work_id = ?1 LIMIT 1`, w.id);
-  w.pseud_name = pseud[0]?.name ?? null;
-  w.tags = await queryAll<any>(db, `SELECT t.id, t.name, t.type FROM tags t JOIN taggings tg ON t.id = tg.tag_id WHERE tg.work_id = ?1 ORDER BY t.type, t.name`, w.id);
+// Enrich with pseuds and tags using batched queries
+const workIds = results.map((w: any) => w.id);
+
+if (workIds.length > 0) {
+  const placeholders = workIds.map(() => '?').join(', ');
+
+  const pseudRows = await queryAll<any>(
+    db,
+    `SELECT w.id AS work_id, (SELECT p.name FROM pseuds p JOIN creatorships c ON p.id = c.pseud_id WHERE c.work_id = w.id LIMIT 1) AS pseud_name FROM works w WHERE w.id IN (${placeholders})`,
+    ...workIds
+  );
+  const pseudByWorkId = new Map<number, string | null>(
+    pseudRows.map((row: any) => [row.work_id, row.pseud_name ?? null])
+  );
+
+  const tagRows = await queryAll<any>(
+    db,
+    `SELECT tg.work_id, t.id, t.name, t.type FROM tags t JOIN taggings tg ON t.id = tg.tag_id WHERE tg.work_id IN (${placeholders}) ORDER BY tg.work_id, t.type, t.name`,
+    ...workIds
+  );
+  const tagsByWorkId = new Map<number, any[]>();
+  for (const row of tagRows) {
+    const tagList = tagsByWorkId.get(row.work_id) ?? [];
+    tagList.push({ id: row.id, name: row.name, type: row.type });
+    tagsByWorkId.set(row.work_id, tagList);
+  }
+
+  for (const w of results) {
+    w.pseud_name = pseudByWorkId.get(w.id) ?? null;
+    w.tags = tagsByWorkId.get(w.id) ?? [];
+  }
+} else {
+  for (const w of results) {
+    w.pseud_name = null;
+    w.tags = [];
+  }
 }
 
 const initialFilters = JSON.stringify({ type, complete, word_min, word_max });
-const initialResults = JSON.stringify(results);
-const initialTotal = total;
-const initialPage = page;
-const initialLimit = limit;
 ---
 
 <Base title={query ? `Search: ${query} — fanfiction.fyi` : 'Search — fanfiction.fyi'}>
@@ -100,7 +126,7 @@ const initialLimit = limit;
     </form>
 
     <!-- Filter Chips -->
-    <div id="filter-chips-mount" data-initial-filters={initialFilters}></div>
+    <div id="filter-chips-mount" data-initial-filters={initialFilters} data-initial-page={page}></div>
 
     <!-- Results Meta -->
     <div id="search-results">
@@ -169,21 +195,29 @@ const initialLimit = limit;
 
 <script is:inline>
   function escapeHtml(str) {
-    var d = document.createElement('div');
-    d.textContent = str;
-    return d.innerHTML;
+    return String(str)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
   }
 
   var currentFilters = { type: '', complete: '', word_min: 0, word_max: 0 };
   var currentPage = 1;
 
-  // Read initial filters from mount point
+  // Read initial filters and page from mount point
   var mountEl = document.getElementById('filter-chips-mount');
-  if (mountEl && mountEl.dataset.initialFilters) {
-    try {
-      var init = JSON.parse(mountEl.dataset.initialFilters);
-      currentFilters = init;
-    } catch(e) {}
+  if (mountEl) {
+    if (mountEl.dataset.initialFilters) {
+      try {
+        var init = JSON.parse(mountEl.dataset.initialFilters);
+        currentFilters = init;
+      } catch(e) {}
+    }
+    if (mountEl.dataset.initialPage) {
+      currentPage = Math.max(parseInt(mountEl.dataset.initialPage) || 1, 1);
+    }
   }
 
   // ── Filter Chips (inline implementation) ──
@@ -345,7 +379,7 @@ const initialLimit = limit;
 
         document.getElementById('search-results').innerHTML = html;
 
-        // Update URL
+        // Update URL with pushState so back/forward works
         var urlParams = new URLSearchParams();
         if (q) urlParams.set('q', q);
         if (currentFilters.type) urlParams.set('type', currentFilters.type);
@@ -353,7 +387,11 @@ const initialLimit = limit;
         if (currentFilters.word_min > 0) urlParams.set('word_min', String(currentFilters.word_min));
         if (currentFilters.word_max > 0) urlParams.set('word_max', String(currentFilters.word_max));
         if (currentPage > 1) urlParams.set('page', String(currentPage));
-        window.history.replaceState(null, '', '/search?' + urlParams.toString());
+        window.history.pushState(
+          { q: q, filters: Object.assign({}, currentFilters), page: currentPage },
+          '',
+          '/search?' + urlParams.toString()
+        );
       })
       .catch(function() {
         document.getElementById('search-results').innerHTML =
@@ -387,6 +425,29 @@ const initialLimit = limit;
     fetchResults();
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
+
+  // Restore state on back/forward navigation
+  window.addEventListener('popstate', function(e) {
+    var params;
+    var inputEl = document.getElementById('search-input');
+    if (e.state) {
+      currentFilters = e.state.filters || { type: '', complete: '', word_min: 0, word_max: 0 };
+      currentPage = e.state.page || 1;
+      if (inputEl) inputEl.value = e.state.q || '';
+    } else {
+      params = new URLSearchParams(location.search);
+      currentFilters = {
+        type: params.get('type') || '',
+        complete: params.get('complete') || '',
+        word_min: Number(params.get('word_min')) || 0,
+        word_max: Number(params.get('word_max')) || 0
+      };
+      currentPage = Math.max(Number(params.get('page')) || 1, 1);
+      if (inputEl) inputEl.value = params.get('q') || '';
+    }
+    renderFilterChips();
+    fetchResults();
+  });
 </script>
 
 <style is:global>
@@ -714,13 +775,5 @@ const initialLimit = limit;
     .work-card {
       padding: var(--space-3) var(--space-4);
     }
-    .work-card__tags {
-      overflow-x: auto;
-      flex-wrap: nowrap;
-      -webkit-overflow-scrolling: touch;
-      scrollbar-width: none;
-      padding-bottom: 2px;
-    }
-    .work-card__tags::-webkit-scrollbar { display: none; }
   }
 </style>
