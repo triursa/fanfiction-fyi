@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'preact/hooks';
 import { useScrollDirection } from '../hooks/useScrollDirection';
+import CanonSheet from './CanonSheet';
 
 interface Chapter {
   id: number;
@@ -277,6 +278,11 @@ export default function ReadingMode({
     mine: [...initialMyReactions],
   }));
 
+  // ── Canon Deep-Dive state ──
+  const [canonSheetOpen, setCanonSheetOpen] = useState(false);
+  const [canonType, setCanonType] = useState<'lore' | 'location' | null>(null);
+  const [canonId, setCanonId] = useState<number | null>(null);
+
   const maxScrollPct = useRef(0);
 
   // ── Scroll direction hook ──
@@ -346,6 +352,15 @@ export default function ReadingMode({
     document.addEventListener('keydown', onKeyDown);
     return () => document.removeEventListener('keydown', onKeyDown);
   }, [prevChapter, nextChapter, workId, sheetOpen]);
+
+  // ── Canon term delegated click listener on reading-container ──
+  useEffect(() => {
+    const container = document.querySelector('.reading-container');
+    if (!container) return;
+
+    container.addEventListener('click', handleCanonClick);
+    return () => container.removeEventListener('click', handleCanonClick);
+  }, [handleCanonClick]);
 
   // ── Shortcuts hint (fade out after 5s) ──
   useEffect(() => {
@@ -445,6 +460,24 @@ export default function ReadingMode({
     }
   }, []);
 
+  // ── Canon deep-dive click delegation ──
+  const handleCanonClick = useCallback((e: Event) => {
+    const target = (e.target as HTMLElement).closest('.canon-term') as HTMLElement | null;
+    if (!target) return;
+
+    const type = target.getAttribute('data-canon-type') as 'lore' | 'location' | null;
+    const id = Number(target.getAttribute('data-canon-id'));
+
+    if (!type || !id || !Number.isFinite(id)) return;
+
+    e.preventDefault();
+    e.stopPropagation();
+
+    setCanonType(type);
+    setCanonId(id);
+    setCanonSheetOpen(true);
+  }, []);
+
   const moodAttr = moodDisabled ? 'off' : currentMood || 'none';
 
   return (
@@ -523,6 +556,14 @@ export default function ReadingMode({
       <div class={`reading-shortcuts${shortcutsVisible ? ' visible' : ''}`}>
         <kbd>←</kbd> <kbd>→</kbd> chapters · <kbd>Esc</kbd> exit reading · <kbd>C</kbd> options
       </div>
+
+      {/* Canon Deep-Dive Sheet */}
+      <CanonSheet
+        open={canonSheetOpen}
+        canonType={canonType}
+        canonId={canonId}
+        onClose={() => setCanonSheetOpen(false)}
+      />
     </>
   );
 }

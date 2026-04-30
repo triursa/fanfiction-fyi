@@ -5,6 +5,7 @@ import { markdownToHtml } from '../../../lib/markdown';
 import { THEMES } from '../../../styles/themes';
 import ReadingMode from '../../../components/ReadingMode';
 import TagCluster from '../../../components/TagCluster.tsx';
+import { buildCanonIndex, resolveCanonLinks } from '../../../lib/canon-resolver';
 
 const workId = Number(Astro.params.id);
 if (!workId) return Astro.redirect('/works');
@@ -58,6 +59,11 @@ const readingTimeMinutes = Math.max(1, Math.ceil(totalWords / 230)); // 230 wpm 
 // Tags for context
 const tags = await queryAll<any>(db, `SELECT t.* FROM tags t JOIN taggings tg ON t.id = tg.tag_id WHERE tg.work_id = ?1`, workId);
 const pseuds = await queryAll<any>(db, `SELECT p.name, p.icon_key FROM pseuds p JOIN creatorships c ON p.id = c.pseud_id WHERE c.work_id = ?1`, workId);
+
+// ── Canon Deep-Dive: Build canon index for this work's fandom ──
+const fandomTag = tags.find((t: any) => t.type === 'fandom');
+const fandomTagId = fandomTag ? fandomTag.id : null;
+const canonIndex = fandomTagId ? await buildCanonIndex(db, fandomTagId) : new Map();
 
 // Chapter reactions for current chapter
 let reactionRows: any[] = [];
@@ -654,6 +660,299 @@ const moodCSS = (!moodDisabled && currentMood && MOOD_PALETTES[currentMood])
       border-color: var(--md-sys-color-outline);
     }
 
+    /* ── Canon Deep-Dive Term Highlighting ── */
+    .canon-term {
+      color: var(--md-sys-color-primary);
+      text-decoration: underline;
+      text-decoration-style: dotted;
+      text-decoration-thickness: 1px;
+      text-underline-offset: 3px;
+      cursor: pointer;
+      transition: background 0.15s, text-decoration-color 0.15s;
+      border-radius: 2px;
+    }
+    .canon-term:hover {
+      background: var(--md-sys-color-primary-container);
+      text-decoration-style: solid;
+    }
+    .canon-term:focus-visible {
+      outline: 2px solid var(--md-sys-color-primary);
+      outline-offset: 2px;
+    }
+    /* Wiki-link anchors that are also canon terms */
+    a.canon-term {
+      text-decoration: underline;
+      text-decoration-style: dotted;
+      text-decoration-thickness: 1px;
+      text-underline-offset: 3px;
+    }
+    a.canon-term:hover {
+      text-decoration-style: solid;
+    }
+
+    /* ── Canon Deep-Dive Sheet ── */
+    .canon-sheet-backdrop {
+      position: fixed;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.5);
+      z-index: 900;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.25s ease;
+    }
+    .canon-sheet-backdrop.open {
+      opacity: 1;
+      pointer-events: auto;
+    }
+
+    .canon-sheet {
+      position: fixed;
+      top: 0;
+      right: 0;
+      width: 380px;
+      height: 100%;
+      background: var(--md-sys-color-surface-container-low);
+      z-index: 901;
+      transform: translateX(100%);
+      transition: transform 0.3s cubic-bezier(0.2, 0, 0, 1);
+      display: flex;
+      flex-direction: column;
+      box-shadow: -4px 0 24px rgba(0, 0, 0, 0.3);
+    }
+    .canon-sheet.open {
+      transform: translateX(0);
+    }
+
+    .canon-sheet-drag-handle {
+      display: none; /* Mobile only */
+    }
+
+    .canon-sheet-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: var(--space-4) var(--space-4) 0;
+      flex-shrink: 0;
+    }
+    .canon-sheet-type-badge {
+      font: var(--md-sys-typescale-label-medium);
+      color: var(--md-sys-color-primary);
+      background: var(--md-sys-color-primary-container);
+      padding: 2px var(--space-3);
+      border-radius: var(--md-sys-shape-corner-full);
+    }
+    .canon-sheet-close {
+      width: 40px;
+      height: 40px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border: none;
+      background: transparent;
+      color: var(--md-sys-color-on-surface);
+      border-radius: var(--md-sys-shape-corner-full);
+      cursor: pointer;
+      font-size: 1.25rem;
+      transition: background 0.15s;
+    }
+    .canon-sheet-close:hover {
+      background: var(--md-sys-color-surface-container-high);
+    }
+
+    .canon-sheet-content {
+      flex: 1;
+      overflow-y: auto;
+      padding: var(--space-4) var(--space-5) var(--space-8);
+    }
+    .canon-sheet-content::-webkit-scrollbar { width: 4px; }
+    .canon-sheet-content::-webkit-scrollbar-track { background: transparent; }
+    .canon-sheet-content::-webkit-scrollbar-thumb {
+      background: var(--md-sys-color-outline-variant);
+      border-radius: 2px;
+    }
+
+    .canon-sheet-title {
+      font: 500 1.375rem/1.75rem 'Inter', sans-serif;
+      color: var(--md-sys-color-on-surface);
+      margin: 0 0 var(--space-2);
+    }
+    .canon-sheet-meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: var(--space-2);
+      margin-bottom: var(--space-4);
+    }
+    .canon-sheet-badge {
+      font: var(--md-sys-typescale-label-small);
+      background: var(--md-sys-color-secondary-container);
+      color: var(--md-sys-color-on-secondary-container);
+      padding: 2px var(--space-3);
+      border-radius: var(--md-sys-shape-corner-full);
+      text-transform: capitalize;
+    }
+    .canon-sheet-badge.fandom {
+      background: var(--md-sys-color-tertiary-container);
+      color: var(--md-sys-color-on-tertiary-container);
+    }
+
+    .canon-sheet-breadcrumb {
+      font: var(--md-sys-typescale-body-small);
+      color: var(--md-sys-color-on-surface-variant);
+      margin-bottom: var(--space-3);
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: var(--space-1);
+    }
+    .canon-sheet-breadcrumb-sep {
+      color: var(--md-sys-color-outline);
+    }
+    .canon-sheet-breadcrumb-link {
+      color: var(--md-sys-color-primary);
+      text-decoration: none;
+    }
+    .canon-sheet-breadcrumb-link:hover {
+      text-decoration: underline;
+    }
+    .canon-sheet-breadcrumb-current {
+      color: var(--md-sys-color-on-surface);
+    }
+
+    .canon-sheet-body {
+      font: var(--md-sys-typescale-body-medium);
+      color: var(--md-sys-color-on-surface);
+      line-height: 1.7;
+      margin-bottom: var(--space-4);
+    }
+    .canon-sheet-body p { margin: 0 0 0.75em; }
+    .canon-sheet-body h2, .canon-sheet-body h3 {
+      font-family: 'Inter', sans-serif;
+      font-weight: 500;
+      margin: 1.25em 0 0.5em;
+    }
+    .canon-sheet-body blockquote {
+      border-left: 3px solid var(--md-sys-color-primary);
+      padding-left: 1em;
+      color: var(--md-sys-color-on-surface-variant);
+      font-style: italic;
+    }
+    .canon-sheet-body a {
+      color: var(--md-sys-color-primary);
+      text-decoration: underline;
+    }
+    .canon-sheet-empty {
+      color: var(--md-sys-color-outline);
+      font-style: italic;
+    }
+
+    .canon-sheet-children,
+    .canon-sheet-works {
+      margin-top: var(--space-4);
+      padding-top: var(--space-3);
+      border-top: 1px solid var(--md-sys-color-outline-variant);
+    }
+    .canon-sheet-section-title {
+      font: var(--md-sys-typescale-title-small);
+      color: var(--md-sys-color-on-surface);
+      margin: 0 0 var(--space-2);
+    }
+    .canon-sheet-child-list,
+    .canon-sheet-work-list {
+      list-style: none;
+      padding: 0;
+      margin: 0;
+    }
+    .canon-sheet-child-list li,
+    .canon-sheet-work-list li {
+      padding: var(--space-1) 0;
+    }
+    .canon-sheet-child-list a,
+    .canon-sheet-work-list a {
+      color: var(--md-sys-color-primary);
+      text-decoration: none;
+      font: var(--md-sys-typescale-body-medium);
+    }
+    .canon-sheet-child-list a:hover,
+    .canon-sheet-work-list a:hover {
+      text-decoration: underline;
+    }
+
+    .canon-sheet-footer {
+      margin-top: var(--space-6);
+      padding-top: var(--space-3);
+      border-top: 1px solid var(--md-sys-color-outline-variant);
+    }
+    .canon-sheet-full-link {
+      color: var(--md-sys-color-primary);
+      font: var(--md-sys-typescale-label-large);
+      text-decoration: none;
+      display: inline-block;
+    }
+    .canon-sheet-full-link:hover {
+      text-decoration: underline;
+    }
+
+    /* ── Loading skeleton ── */
+    .canon-sheet-loading {
+      padding: var(--space-2) 0;
+    }
+    .canon-sheet-skeleton {
+      background: var(--md-sys-color-surface-container);
+      border-radius: var(--md-sys-shape-corner-small);
+      margin-bottom: var(--space-3);
+      animation: pulse 1.5s ease-in-out infinite;
+    }
+    .canon-sheet-skeleton-title { width: 60%; height: 1.5rem; }
+    .canon-sheet-skeleton-badge { width: 30%; height: 1rem; }
+    .canon-sheet-skeleton-line { width: 100%; height: 0.75rem; }
+    .canon-sheet-skeleton-line.short { width: 50%; }
+    @keyframes pulse {
+      0%, 100% { opacity: 0.6; }
+      50% { opacity: 1; }
+    }
+
+    .canon-sheet-error {
+      text-align: center;
+      padding: var(--space-8) var(--space-4);
+      color: var(--md-sys-color-on-surface-variant);
+    }
+    .canon-sheet-error-detail {
+      font: var(--md-sys-typescale-body-small);
+      color: var(--md-sys-color-outline);
+      margin-top: var(--space-2);
+    }
+
+    /* ── Canon Sheet — Mobile Bottom Sheet ── */
+    @media (max-width: 768px) {
+      .canon-sheet {
+        top: auto;
+        right: 0;
+        bottom: 0;
+        left: 0;
+        width: 100%;
+        height: auto;
+        max-height: 85vh;
+        transform: translateY(100%);
+        border-radius: var(--md-sys-shape-corner-extra-large) var(--md-sys-shape-corner-extra-large) 0 0;
+        box-shadow: 0 -4px 24px rgba(0, 0, 0, 0.3);
+      }
+      .canon-sheet.open {
+        transform: translateY(0);
+      }
+      .canon-sheet-drag-handle {
+        display: flex;
+        justify-content: center;
+        padding: var(--space-2) 0 0;
+      }
+      .canon-sheet-drag-indicator {
+        width: 32px;
+        height: 4px;
+        border-radius: 2px;
+        background: var(--md-sys-color-on-surface-variant);
+        opacity: 0.4;
+      }
+    }
+
     /* ── Keyboard Shortcuts Hint ── */
     .reading-shortcuts {
       position: fixed;
@@ -723,7 +1022,8 @@ const moodCSS = (!moodDisabled && currentMood && MOOD_PALETTES[currentMood])
 
     /* ── Reduced Motion ── */
     @media (prefers-reduced-motion: reduce) {
-      .reading-progress-bar, .focus-top-bar, .focus-sheet, .focus-sheet-backdrop, .focus-fab {
+      .reading-progress-bar, .focus-top-bar, .focus-sheet, .focus-sheet-backdrop, .focus-fab,
+      .canon-sheet, .canon-sheet-backdrop {
         transition: none !important;
       }
     }
@@ -814,8 +1114,8 @@ const moodCSS = (!moodDisabled && currentMood && MOOD_PALETTES[currentMood])
       </div>
 
       <div class="reading-prose">
-        {currentChapterData.content_html && <div set:html={currentChapterData.content_html} />}
-        {!currentChapterData.content_html && currentChapterData.content_md && <div set:html={markdownToHtml(currentChapterData.content_md)} />}
+        {currentChapterData.content_html && <div set:html={resolveCanonLinks(currentChapterData.content_html, canonIndex)} />}
+        {!currentChapterData.content_html && currentChapterData.content_md && <div set:html={resolveCanonLinks(markdownToHtml(currentChapterData.content_md), canonIndex)} />}
         {!currentChapterData.content_html && !currentChapterData.content_md && <p>No content available for this chapter.</p>}
       </div>
 
