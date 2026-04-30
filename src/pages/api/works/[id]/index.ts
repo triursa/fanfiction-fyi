@@ -2,6 +2,7 @@ export const prerender = false;
 
 import { queryFirst, queryAll, run } from '@/lib/db';
 import { getAuth, requireAuth } from '@/lib/auth';
+import { logPublishAttempt, logPublishResult } from '@/lib/publish-logger';
 import type { APIRoute } from 'astro';
 
 export const GET: APIRoute = async ({ params, locals, request }) => {
@@ -48,6 +49,13 @@ export const PUT: APIRoute = async ({ params, request, locals }) => {
 
   let body: any;
   try { body = await request.json(); } catch { return new Response(JSON.stringify({ error: 'Invalid JSON' }), { status: 400, headers: { 'Content-Type': 'application/json' } }); }
+
+  let workLogId: number = 0;
+  if (body.publish) {
+    workLogId = await logPublishAttempt(db, { workId, step: 'work_publish', userId: auth.user.id, requestSummary: JSON.stringify({ publish: true }) });
+  }
+
+  try {
 
   // Handle tag updates: resolve tag_names + tag_ids, then clear and re-add
   const resolvedTagIds: number[] = [...(Array.isArray(body.tag_ids) ? body.tag_ids.filter((id: any) => typeof id === 'number' && id > 0) : [])];
@@ -124,10 +132,15 @@ export const PUT: APIRoute = async ({ params, request, locals }) => {
   if (body.publish) {
     await run(db, `UPDATE chapters SET draft = 0, updated_at = datetime('now') WHERE work_id = ?1 AND draft = 1`, workId);
     await run(db, `UPDATE works SET word_count = (SELECT COALESCE(SUM(word_count), 0) FROM chapters WHERE work_id = ?1 AND draft = 0) WHERE id = ?1`, workId);
+    await logPublishResult(db, workLogId, { status: 'success', httpStatus: 200, responseSummary: JSON.stringify({ published_at: work?.published_at }).slice(0,200) });
   }
 
   const work = await queryFirst<any>(db, `SELECT * FROM works WHERE id = ?1`, workId);
   return new Response(JSON.stringify(work), { headers: { 'Content-Type': 'application/json' } });
+  } catch (err: any) {
+    if (workLogId) await logPublishResult(db, workLogId, { status: 'fail', httpStatus: 500, error: err?.message });
+    throw err;
+  }
 };
 
 export const DELETE: APIRoute = async ({ params, request, locals }) => {

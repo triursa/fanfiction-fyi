@@ -3,6 +3,7 @@ export const prerender = false;
 import { queryFirst, queryAll, run } from '@/lib/db';
 import { requireAuth } from '@/lib/auth';
 import { markdownToHtml } from '@/lib/markdown';
+import { logPublishAttempt, logPublishResult } from '@/lib/publish-logger';
 import type { APIRoute } from 'astro';
 
 export const GET: APIRoute = async ({ params, locals }) => {
@@ -25,6 +26,9 @@ export const PUT: APIRoute = async ({ params, request, locals }) => {
   const chapterId = Number(params.chapterId);
   if (!workId || !chapterId) return new Response(JSON.stringify({ error: 'Not found' }), { status: 404, headers: { 'Content-Type': 'application/json' } });
 
+  // Publish log: record attempt
+  const isPublishOp = (() => { try { const b = JSON.parse(request.headers.get('x-body-preview') || '{}'); return b.draft === 0; } catch { return false; } })();
+
   const creatorship = await queryFirst<any>(db, `SELECT * FROM creatorships WHERE work_id = ?1 AND pseud_id IN (SELECT id FROM pseuds WHERE user_id = ?2)`, workId, auth.user.id);
   if (!creatorship) return new Response(JSON.stringify({ error: 'Forbidden' }), { status: 403, headers: { 'Content-Type': 'application/json' } });
 
@@ -34,6 +38,16 @@ export const PUT: APIRoute = async ({ params, request, locals }) => {
   let body: any;
   try { body = await request.json(); } catch { return new Response(JSON.stringify({ error: 'Invalid JSON' }), { status: 400, headers: { 'Content-Type': 'application/json' } }); }
 
+  // Publish log: record attempt with actual body data
+  const logId = await logPublishAttempt(db, {
+    workId,
+    chapterId,
+    step: 'chapter_save',
+    userId: auth.user.id,
+    requestSummary: JSON.stringify({ title: body.title, draft: body.draft, hasContent: !!body.content_md, contentLen: body.content_md?.length }),
+  });
+
+  try {
   await run(db, `INSERT INTO chapter_versions (chapter_id, version, content_md, content_html, note, created_at) SELECT id, (SELECT COALESCE(MAX(version), 0) + 1 FROM chapter_versions WHERE chapter_id = ?1), content_md, content_html, 'Auto-save before update', datetime('now') FROM chapters WHERE id = ?1`, chapterId);
 
   const fields: string[] = [];
@@ -77,5 +91,10 @@ export const PUT: APIRoute = async ({ params, request, locals }) => {
   await run(db, `UPDATE works SET word_count = (SELECT COALESCE(SUM(word_count), 0) FROM chapters WHERE work_id = ?1 AND draft = 0) WHERE id = ?1`, workId);
 
   const updated = await queryFirst<any>(db, `SELECT * FROM chapters WHERE id = ?1`, chapterId);
+  await logPublishResult(db, logId, { status: 'success', httpStatus: 200, responseSummary: JSON.stringify({id: updated?.id, draft: updated?.draft, word_count: updated?.word_count}).slice(0,200) });
   return new Response(JSON.stringify(updated), { headers: { 'Content-Type': 'application/json' } });
+  } catch (err: any) {
+    await logPublishResult(db, logId, { status: 'fail', httpStatus: 500, error: err?.message });
+    throw err;
+  }
 };
