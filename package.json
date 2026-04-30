@@ -29,6 +29,7 @@
     "astro": "^5.0.0",
     "epub-gen-memory": "^1.1.2",
     "jose": "^6.2.3",
+    "lowlight": "^3.3.0",
     "marked": "^15.0.0",
     "preact": "^10.0.0",
     "sanitize-html": "^2.13.0",
