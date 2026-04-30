@@ -116,6 +116,7 @@ export const PUT: APIRoute = async ({ params, request, locals }) => {
   if (body.complete !== undefined) { fields.push('complete = ?'); values.push(body.complete ? 1 : 0); }
   if (body.language !== undefined) { fields.push('language = ?'); values.push(body.language); }
   if (body.publish) {
+    console.log('[WORK_PUT] Publishing work:', workId, 'body keys:', Object.keys(body).join(','));
     // Set published_at only if it's currently null (first publish)
     fields.push("published_at = COALESCE(published_at, CURRENT_TIMESTAMP)");
   }
@@ -137,9 +138,10 @@ export const PUT: APIRoute = async ({ params, request, locals }) => {
 
   const work = await queryFirst<any>(db, `SELECT * FROM works WHERE id = ?1`, workId);
   return new Response(JSON.stringify(work), { headers: { 'Content-Type': 'application/json' } });
-  } catch (err: any) {
-    if (workLogId) await logPublishResult(db, workLogId, { status: 'fail', httpStatus: 500, error: err?.message });
-    throw err;
+  } catch (err) {
+    console.error('[WORK_PUT] Error updating work:', workId, err);
+    if (workLogId) await logPublishResult(db, workLogId, { status: 'fail', httpStatus: 500, error: String(err?.message || err) });
+    return new Response(JSON.stringify({ error: err?.message || 'Internal server error' }), { status: 500, headers: { 'Content-Type': 'application/json' } });
   }
 };
 
