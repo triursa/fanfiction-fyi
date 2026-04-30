@@ -204,7 +204,7 @@ const moodCSS = (!moodDisabled && currentMood && MOOD_PALETTES[currentMood])
     .reading-container[data-font-size="small"] { font-size: 0.9375rem; }
     .reading-container[data-font-size="default"] { font-size: 1rem; }
     .reading-container[data-font-size="large"] { font-size: 1.125rem; }
-    .reading-container[data-font-size="x-large"] { font-size: 1.25rem; }
+    .reading-container[data-font-size="xlarge"] { font-size: 1.25rem; }
 
     /* ── Work Metadata (minimal, top) ── */
     .reading-work-meta {
@@ -723,7 +723,7 @@ const moodCSS = (!moodDisabled && currentMood && MOOD_PALETTES[currentMood])
 
     /* ── Reduced Motion ── */
     @media (prefers-reduced-motion: reduce) {
-      .reading-progress-bar, .focus-top-bar, .focus-sheet, .focus-sheet-backdrop {
+      .reading-progress-bar, .focus-top-bar, .focus-sheet, .focus-sheet-backdrop, .focus-fab {
         transition: none !important;
       }
     }

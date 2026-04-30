@@ -38,7 +38,7 @@ const FONT_SIZES = [
   { key: 'small', label: 'S' },
   { key: 'default', label: 'M' },
   { key: 'large', label: 'L' },
-  { key: 'x-large', label: 'XL' },
+  { key: 'xlarge', label: 'XL' },
 ] as const;
 
 // ── Focus Sheet Component (inline) ──
@@ -171,6 +171,7 @@ function FocusSheet({
           <ol class="focus-sheet-chapter-list">
             {chapters.map((c) => (
               <li
+                key={c.id}
                 class={`focus-sheet-chapter-item${c.id === currentChapterId ? ' current' : ''}`}
               >
                 <a href={`/works/${workId}/read?chapter=${c.id}`} onClick={onClose}>
@@ -194,6 +195,7 @@ function FocusSheet({
             <div class="focus-sheet-size-buttons">
               {FONT_SIZES.map((fs) => (
                 <button
+                  key={fs.key}
                   class={`focus-sheet-size-btn${fontSize === fs.key ? ' active' : ''}`}
                   onClick={() => onFontSizeChange(fs.key)}
                   aria-label={`Font size ${fs.label}`}
@@ -267,7 +269,6 @@ export default function ReadingMode({
   fontSize: initialFontSize,
   workTitle,
 }: ReadingModeProps) {
-  const [progressWidth, setProgressWidth] = useState(0);
   const [sheetOpen, setSheetOpen] = useState(false);
   const [shortcutsVisible, setShortcutsVisible] = useState(true);
   const [currentFontSize, setCurrentFontSize] = useState(initialFontSize);
@@ -279,7 +280,7 @@ export default function ReadingMode({
   const maxScrollPct = useRef(0);
 
   // ── Scroll direction hook ──
-  const { direction, scrollY } = useScrollDirection(5);
+  const { direction, progress, scrollY } = useScrollDirection(5);
 
   // Header visibility: visible at top, hides on scroll down, shows on scroll up
   const scrolled = scrollY > 0;
@@ -289,14 +290,6 @@ export default function ReadingMode({
   const currentIndex = chapters.findIndex((c) => c.id === currentChapterId);
   const prevChapter = currentIndex > 0 ? chapters[currentIndex - 1] : null;
   const nextChapter = currentIndex < chapters.length - 1 ? chapters[currentIndex + 1] : null;
-
-  // ── Progress from scroll direction hook ──
-  useEffect(() => {
-    const winH = window.innerHeight;
-    const docH = document.documentElement.scrollHeight;
-    const pct = docH <= winH ? 100 : Math.min(100, (scrollY / (docH - winH)) * 100);
-    setProgressWidth(pct);
-  }, [scrollY]);
 
   // ── Reaction rollback helper ──
   const revertReaction = useCallback((reaction: string, wasMine: boolean) => {
@@ -331,7 +324,13 @@ export default function ReadingMode({
         return;
 
       // If sheet is open, only Escape is handled (by the sheet's own handler)
-      if (sheetOpen) return;
+      if (sheetOpen) {
+        if (e.key === 'c' || e.key === 'C') {
+          setSheetOpen(false);
+          return;
+        }
+        return;
+      }
 
       if (e.key === 'ArrowLeft' && prevHref) {
         window.location.href = prevHref;
@@ -433,7 +432,11 @@ export default function ReadingMode({
   // ── Mood toggle handler ──
   const handleMoodToggle = useCallback(async () => {
     try {
-      const res = await fetch('/api/user/mood-toggle', { method: 'POST' });
+      const res = await fetch('/api/user/profile', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mood_disabled: !moodDisabled }),
+      });
       if (res.ok) {
         window.location.reload();
       }
@@ -453,7 +456,7 @@ export default function ReadingMode({
       <div
         class="reading-progress-bar"
         data-mood={moodAttr}
-        style={{ width: `${progressWidth}%` }}
+        style={{ width: `${progress}%` }}
       />
 
       {/* Top App Bar — M3 Center-Aligned */}
