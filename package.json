@@ -18,7 +18,7 @@
     "@material/web": "^2.0.0",
     "@preact/signals": "^1.3.0",
     "@tiptap/core": "^2.0.0",
-    "@tiptap/extension-character-count": "^3.22.5",
+    "@tiptap/extension-character-count": "^2.0.0",
     "@tiptap/extension-code-block-lowlight": "^2.0.0",
     "@tiptap/extension-heading": "^2.0.0",
     "@tiptap/extension-image": "^2.27.2",
@@ -33,8 +33,7 @@
     "preact": "^10.0.0",
     "sanitize-html": "^2.13.0",
     "tiptap": "^1.0.0",
-    "turndown": "^7.0.0",
-    "vite": "^8.0.10"
+    "turndown": "^7.0.0"
   },
   "devDependencies": {
     "@types/turndown": "^5.0.0",
