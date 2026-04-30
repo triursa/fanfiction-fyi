@@ -9,12 +9,15 @@ export const GET: APIRoute = async ({ request, locals }) => {
   const auth = await requireAuth(db, request);
   if (!auth) return new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401, headers: { 'Content-Type': 'application/json' } });
   const pseuds = await queryAll<any>(db, `
-    SELECT p.*, COUNT(c.id) as work_count
+    SELECT p.*,
+      COUNT(DISTINCT c.work_id) as work_count,
+      COUNT(DISTINCT sw.series_id) as series_count
     FROM pseuds p
     LEFT JOIN creatorships c ON c.pseud_id = p.id
+    LEFT JOIN serial_works sw ON sw.work_id = c.work_id
     WHERE p.user_id = ?1
     GROUP BY p.id
-    ORDER BY p.id
+    ORDER BY p.is_default DESC, p.id
   `, auth.user.id);
   return new Response(JSON.stringify(pseuds), { headers: { 'Content-Type': 'application/json' } });
 };
@@ -47,8 +50,22 @@ export const POST: APIRoute = async ({ request, locals }) => {
 
   const desc = (description !== undefined && description !== null) ? String(description) : null;
   const iconKey = (body.icon_key !== undefined && body.icon_key !== null) ? String(body.icon_key) : null;
-  const result = await run(db, `INSERT INTO pseuds (user_id, name, description, icon_key, created_at) VALUES (?1, ?2, ?3, ?4, datetime('now'))`, auth.user.id, trimmedName, desc, iconKey);
-  const pseud = await queryAll<any>(db, `SELECT *, 0 as work_count FROM pseuds WHERE id = ?1`, result.meta.last_row_id);
+  const themeColor = (body.theme_color !== undefined && body.theme_color !== null) ? String(body.theme_color) : null;
+
+  // Validate theme_color format (hex color)
+  if (themeColor && !/^(?:#[0-9a-fA-F]{3}|#[0-9a-fA-F]{4}|#[0-9a-fA-F]{6}|#[0-9a-fA-F]{8})$/.test(themeColor)) {
+    return new Response(JSON.stringify({ error: 'Invalid theme color format' }), { status: 400, headers: { 'Content-Type': 'application/json' } });
+  }
+
+  // If this is the user's first pseud, make it default
+  const pseudCount = await queryAll<any>(db, `SELECT COUNT(*) as cnt FROM pseuds WHERE user_id = ?1`, auth.user.id);
+  const isDefault = (pseudCount[0].cnt === 0) ? 1 : 0;
+
+  const result = await run(db,
+    `INSERT INTO pseuds (user_id, name, description, icon_key, theme_color, is_default, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, datetime('now'))`,
+    auth.user.id, trimmedName, desc, iconKey, themeColor, isDefault
+  );
+  const pseud = await queryAll<any>(db, `SELECT *, 0 as work_count, 0 as series_count FROM pseuds WHERE id = ?1`, result.meta.last_row_id);
 
   return new Response(JSON.stringify(pseud[0]), { status: 201, headers: { 'Content-Type': 'application/json' } });
 };

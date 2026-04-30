@@ -134,27 +134,15 @@ const themesJSON = JSON.stringify(
     <!--  SECTION 2: Aliases (Pseuds)                       -->
     <!-- ═══════════════════════════════════════════════════ -->
     <section class="settings-card" id="aliases-section">
-      <h2 class="card-title">Aliases</h2>
-      <p class="card-subtitle">Pseuds are pen names you write under. You can have multiple — one for each fandom or persona.</p>
-
+      <div class="aliases-header-row">
+        <div>
+          <h2 class="card-title" style="margin-bottom:0">Aliases</h2>
+          <p class="card-subtitle" style="margin-top:var(--space-1, 4px)">Pseuds are pen names you write under. You can have multiple — one for each fandom or persona.</p>
+        </div>
+        <button type="button" class="btn-filled" id="open-add-pseud-modal-btn">Add Alias</button>
+      </div>
       <div id="pseuds-list" class="pseuds-list">
         <!-- Populated by JS -->
-      </div>
-
-      <div class="pseud-add-form" id="pseud-add-form">
-        <h3 class="subsection-title" style="margin-top:0; border-top:none; padding-top:0;">Add Alias</h3>
-        <div class="form-group">
-          <label for="new-pseud-name" class="form-label">Name</label>
-          <input type="text" id="new-pseud-name" class="form-input" placeholder="e.g. DarkElfWriter" maxlength="100" />
-        </div>
-        <div class="form-group">
-          <label for="new-pseud-desc" class="form-label">Description <span class="form-hint" style="display:inline">(optional)</span></label>
-          <input type="text" id="new-pseud-desc" class="form-input" placeholder="A short blurb about this pseud" maxlength="200" />
-        </div>
-        <div class="form-actions">
-          <button type="button" class="btn-filled" id="add-pseud-btn">Add Alias</button>
-          <span class="inline-feedback" id="add-pseud-feedback"></span>
-        </div>
       </div>
     </section>
 
@@ -284,6 +272,12 @@ const themesJSON = JSON.stringify(
       <input type="text" id="edit-pseud-desc" class="form-input" maxlength="200" />
     </div>
     <div class="form-group">
+      <label class="form-label">Theme Color</label>
+      <div class="color-picker-swatches" id="edit-color-swatches">
+        <!-- populated by JS -->
+      </div>
+    </div>
+    <div class="form-group">
       <label class="form-label">Banner Image</label>
       <div class="pseud-banner-upload">
         <div class="pseud-banner-preview" id="edit-pseud-banner-preview">
@@ -308,6 +302,48 @@ const themesJSON = JSON.stringify(
       <button type="button" class="btn-filled" id="save-pseud-btn">Save</button>
       <button type="button" class="btn-outlined" id="cancel-pseud-btn">Cancel</button>
       <span class="inline-feedback" id="edit-pseud-feedback"></span>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════ -->
+<!--  Add Pseud Modal (hidden by default)                   -->
+<!-- ═══════════════════════════════════════════════════════ -->
+<div class="modal-overlay" id="pseud-add-modal" style="display:none" role="dialog" aria-modal="true" aria-label="Add alias">
+  <div class="modal-card">
+    <h3 class="modal-title">Add Alias</h3>
+    <div class="form-group">
+      <label class="form-label">Icon</label>
+      <div class="pseud-icon-upload">
+        <div class="pseud-icon-preview" id="add-pseud-icon-preview">
+          <img id="add-pseud-icon-img" src="" alt="Pseud icon" style="display:none" />
+          <span id="add-pseud-icon-fallback" class="avatar-fallback">?</span>
+        </div>
+        <div class="pseud-icon-actions">
+          <label for="add-pseud-icon-file" class="btn-outlined pseud-icon-btn">Upload</label>
+          <input type="file" id="add-pseud-icon-file" accept="image/gif,image/png,image/jpeg,image/webp" style="display:none" />
+          <button type="button" class="btn-text btn-text--danger" id="add-pseud-icon-remove" style="display:none">Remove</button>
+        </div>
+      </div>
+    </div>
+    <div class="form-group">
+      <label for="add-pseud-name-input" class="form-label">Name</label>
+      <input type="text" id="add-pseud-name-input" class="form-input" placeholder="e.g. DarkElfWriter" maxlength="100" />
+    </div>
+    <div class="form-group">
+      <label for="add-pseud-desc-input" class="form-label">Description <span class="form-hint" style="display:inline">(optional)</span></label>
+      <input type="text" id="add-pseud-desc-input" class="form-input" placeholder="A short blurb about this pseud" maxlength="200" />
+    </div>
+    <div class="form-group">
+      <label class="form-label">Theme Color</label>
+      <div class="color-picker-swatches" id="add-color-swatches">
+        <!-- populated by JS -->
+      </div>
+    </div>
+    <div class="form-actions">
+      <button type="button" class="btn-filled" id="save-add-pseud-btn">Save</button>
+      <button type="button" class="btn-outlined" id="cancel-add-pseud-btn">Cancel</button>
+      <span class="inline-feedback" id="add-pseud-feedback"></span>
     </div>
   </div>
 </div>
@@ -711,35 +747,117 @@ const themesJSON = JSON.stringify(
   var pseudsList = document.getElementById('pseuds-list');
   var pseudsData = [];
 
+  var THEME_COLORS = ['#7B8FA8', '#4A90D9', '#D946EF', '#F59E0B', '#10B981', '#EF4444', '#8B5CF6', '#EC4899', '#06B6D4', '#78716C'];
+  var DEFAULT_THEME_COLOR = THEME_COLORS[0];
+
+  var addPseudSelectedColor = DEFAULT_THEME_COLOR;
+  var editPseudSelectedColor = DEFAULT_THEME_COLOR;
+
+  // ─── Color picker rendering ─────────────────────────────
+  function renderColorSwatches(containerId, selectedColor) {
+    var container = document.getElementById(containerId);
+    if (!container) return;
+    var html = '';
+    THEME_COLORS.forEach(function(color) {
+      var isSelected = (color === selectedColor);
+      html += '<button type="button" class="color-swatch' + (isSelected ? ' color-swatch--selected' : '') + '" data-color="' + escapeHtml(color) + '" style="background:' + escapeHtml(color) + '" title="' + escapeHtml(color) + '" aria-label="Theme color ' + escapeHtml(color) + '" aria-pressed="' + (isSelected ? 'true' : 'false') + '">';
+      if (isSelected) html += '<svg class="color-swatch-check" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>';
+      html += '</button>';
+    });
+    container.innerHTML = html;
+    container.querySelectorAll('.color-swatch').forEach(function(btn) {
+      btn.addEventListener('click', function() {
+        var color = btn.dataset.color;
+        if (containerId === 'add-color-swatches') {
+          addPseudSelectedColor = color;
+        } else {
+          editPseudSelectedColor = color;
+        }
+        renderColorSwatches(containerId, color);
+      });
+    });
+  }
+
+  // Initialize color swatches
+  renderColorSwatches('add-color-swatches', addPseudSelectedColor);
+
   function renderPseuds() {
     if (!pseudsData || pseudsData.length === 0) {
-      pseudsList.innerHTML = '<div class="pseuds-empty" role="status">No aliases yet. Add one below.</div>';
+      pseudsList.innerHTML = '<div class="pseuds-empty" role="status">No aliases yet. Click "Add Alias" to create one.</div>';
       return;
     }
     var html = '';
     pseudsData.forEach(function(p) {
       var iconUrl = p.icon_key ? '/api/storage/' + encodeURIComponent(p.icon_key) : null;
-      html += '<div class="pseud-card" data-pseud-id="' + escapeHtml(String(p.id)) + '">';
-      html += '  <div class="pseud-info">';
+      var themeColor = p.theme_color || THEME_COLORS[0];
+      var desc = p.description ? p.description : '';
+      var truncatedDesc = desc.length > 80 ? desc.substring(0, 80) + '…' : desc;
+      var workCount = (typeof p.work_count !== 'undefined') ? p.work_count : 0;
+      var seriesCount = (typeof p.series_count !== 'undefined') ? p.series_count : 0;
+
+      html += '<div class="pseud-card" data-pseud-id="' + escapeHtml(String(p.id)) + '" style="border-left:4px solid ' + escapeHtml(themeColor) + '">';
+      html += '  <div class="pseud-card-left">';
+      html += '    <div class="pseud-avatar">';
       if (iconUrl) {
-        html += '    <img class="pseud-icon" src="' + escapeHtml(iconUrl) + '" alt="" />';
+        html += '      <img class="pseud-avatar-img" src="' + escapeHtml(iconUrl) + '" alt="" />';
+      } else {
+        html += '      <span class="pseud-avatar-initial" style="color:' + escapeHtml(themeColor) + '">' + escapeHtml(p.name.charAt(0).toUpperCase()) + '</span>';
       }
-      html += '    <span class="pseud-name">' + escapeHtml(p.name) + '</span>';
-      if (p.description) {
-        html += '    <span class="pseud-desc">' + escapeHtml(p.description) + '</span>';
+      html += '    </div>';
+      html += '    <div class="pseud-card-info">';
+      html += '      <div class="pseud-name-row">';
+      html += '        <span class="pseud-name">' + escapeHtml(p.name) + '</span>';
+      if (p.is_default == 1) {
+        html += '      <span class="pseud-badge pseud-badge--primary">Primary</span>';
       }
+      html += '      </div>';
+      if (truncatedDesc) {
+        html += '    <span class="pseud-desc">' + escapeHtml(truncatedDesc) + '</span>';
+      }
+      html += '      <span class="pseud-stats">' + escapeHtml(String(workCount)) + ' Works · ' + escapeHtml(String(seriesCount)) + ' Series</span>';
+      html += '    </div>';
       html += '  </div>';
-      html += '  <div class="pseud-actions">';
-      html += '    <button type="button" class="btn-icon pseud-edit-btn" data-pseud-id="' + escapeHtml(String(p.id)) + '" title="Edit" aria-label="Edit ' + escapeHtml(p.name) + '">';
-      html += '      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/></svg>';
-      html += '    </button>';
-      html += '    <button type="button" class="btn-icon btn-icon--danger pseud-delete-btn" data-pseud-id="' + escapeHtml(String(p.id)) + '" data-pseud-name="' + escapeHtml(p.name) + '" title="Delete" aria-label="Delete ' + escapeHtml(p.name) + '">';
-      html += '      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></svg>';
-      html += '    </button>';
+      html += '  <div class="pseud-card-right">';
+      html += '    <button type="button" class="pseud-menu-btn" data-pseud-id="' + escapeHtml(String(p.id)) + '" aria-label="Menu for ' + escapeHtml(p.name) + '" aria-haspopup="true" aria-expanded="false" aria-controls="pseud-dropdown-' + escapeHtml(String(p.id)) + '">⋮</button>';
+      html += '    <div class="pseud-dropdown" id="pseud-dropdown-' + escapeHtml(String(p.id)) + '" data-pseud-id="' + escapeHtml(String(p.id)) + '">';
+      html += '      <button type="button" class="pseud-dropdown-item pseud-edit-btn" data-pseud-id="' + escapeHtml(String(p.id)) + '">Edit</button>';
+      if (p.is_default != 1) {
+        html += '    <button type="button" class="pseud-dropdown-item pseud-default-btn" data-pseud-id="' + escapeHtml(String(p.id)) + '">Set as Default</button>';
+      }
+      html += '      <button type="button" class="pseud-dropdown-item pseud-dropdown-item--danger pseud-delete-btn" data-pseud-id="' + escapeHtml(String(p.id)) + '" data-pseud-name="' + escapeHtml(p.name) + '">Delete</button>';
+      html += '    </div>';
       html += '  </div>';
       html += '</div>';
     });
     pseudsList.innerHTML = html;
+
+    // Bind three-dot menu buttons
+    pseudsList.querySelectorAll('.pseud-menu-btn').forEach(function(btn) {
+      btn.addEventListener('click', function(e) {
+        e.stopPropagation();
+        var pseudId = btn.dataset.pseudId;
+        // Close all other dropdowns first
+        pseudsList.querySelectorAll('.pseud-dropdown').forEach(function(dd) {
+          if (dd.dataset.pseudId !== pseudId) dd.classList.remove('pseud-dropdown--open');
+        });
+        pseudsList.querySelectorAll('.pseud-menu-btn').forEach(function(b) {
+          if (b.dataset.pseudId !== pseudId) b.setAttribute('aria-expanded', 'false');
+        });
+        var dropdown = pseudsList.querySelector('.pseud-dropdown[data-pseud-id="' + pseudId + '"]');
+        if (dropdown) {
+          var isOpen = dropdown.classList.toggle('pseud-dropdown--open');
+          btn.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
+        }
+      });
+      btn.addEventListener('keydown', function(e) {
+        if (e.key === 'Escape') {
+          var pseudId = btn.dataset.pseudId;
+          var dropdown = pseudsList.querySelector('.pseud-dropdown[data-pseud-id="' + pseudId + '"]');
+          if (dropdown) dropdown.classList.remove('pseud-dropdown--open');
+          btn.setAttribute('aria-expanded', 'false');
+        }
+      });
+    });
 
     // Bind edit buttons
     pseudsList.querySelectorAll('.pseud-edit-btn').forEach(function(btn) {
@@ -747,7 +865,17 @@ const themesJSON = JSON.stringify(
         var pseudId = parseInt(btn.dataset.pseudId, 10);
         var pseud = pseudsData.find(function(p) { return p.id === pseudId; });
         if (!pseud) return;
+        closeAllDropdowns();
         openEditModal(pseud);
+      });
+    });
+
+    // Bind default buttons
+    pseudsList.querySelectorAll('.pseud-default-btn').forEach(function(btn) {
+      btn.addEventListener('click', function() {
+        var pseudId = parseInt(btn.dataset.pseudId, 10);
+        closeAllDropdowns();
+        setDefaultPseud(pseudId);
       });
     });
 
@@ -756,10 +884,22 @@ const themesJSON = JSON.stringify(
       btn.addEventListener('click', function() {
         var pseudId = parseInt(btn.dataset.pseudId, 10);
         var pseudName = btn.dataset.pseudName;
+        closeAllDropdowns();
         deletePseud(pseudId, pseudName);
       });
     });
   }
+
+  function closeAllDropdowns() {
+    pseudsList.querySelectorAll('.pseud-dropdown--open').forEach(function(dd) {
+      dd.classList.remove('pseud-dropdown--open');
+    });
+  }
+
+  // Close dropdowns when clicking outside
+  document.addEventListener('click', function() {
+    closeAllDropdowns();
+  });
 
   function loadPseuds() {
     fetch('/api/pseuds')
@@ -773,45 +913,160 @@ const themesJSON = JSON.stringify(
       });
   }
 
-  // ─── Add new pseud ────────────────────────────────────
-  var addPseudBtn = document.getElementById('add-pseud-btn');
+  // ─── Add Pseud Modal ──────────────────────────────────
+  var addPseudModal = document.getElementById('pseud-add-modal');
+  var openAddPseudModalBtn = document.getElementById('open-add-pseud-modal-btn');
+  var saveAddPseudBtn = document.getElementById('save-add-pseud-btn');
+  var cancelAddPseudBtn = document.getElementById('cancel-add-pseud-btn');
   var addPseudFeedback = document.getElementById('add-pseud-feedback');
+  var addingPseudIconKey = null;
 
-  addPseudBtn.addEventListener('click', function() {
-    var name = document.getElementById('new-pseud-name').value.trim();
-    var desc = document.getElementById('new-pseud-desc').value.trim();
+  openAddPseudModalBtn.addEventListener('click', function() {
+    // Reset form
+    document.getElementById('add-pseud-name-input').value = '';
+    document.getElementById('add-pseud-desc-input').value = '';
+    addingPseudIconKey = null;
+    addPseudSelectedColor = DEFAULT_THEME_COLOR;
+    var addIconImg = document.getElementById('add-pseud-icon-img');
+    var addIconFallback = document.getElementById('add-pseud-icon-fallback');
+    var addIconRemoveBtn = document.getElementById('add-pseud-icon-remove');
+    addIconImg.style.display = 'none';
+    addIconFallback.style.display = '';
+    addIconRemoveBtn.style.display = 'none';
+    document.getElementById('add-pseud-icon-file').value = '';
+    renderColorSwatches('add-color-swatches', addPseudSelectedColor);
+    addPseudFeedback.textContent = '';
+    addPseudFeedback.className = 'inline-feedback';
+    addPseudModal.style.display = '';
+    document.getElementById('add-pseud-name-input').focus();
+  });
+
+  cancelAddPseudBtn.addEventListener('click', function() {
+    addPseudModal.style.display = 'none';
+  });
+
+  addPseudModal.addEventListener('click', function(e) {
+    if (e.target === addPseudModal) addPseudModal.style.display = 'none';
+  });
+
+  // Icon upload for add modal
+  var addPseudIconFileInput = document.getElementById('add-pseud-icon-file');
+  addPseudIconFileInput.addEventListener('change', function() {
+    var file = addPseudIconFileInput.files[0];
+    if (!file) return;
+    var allowedTypes = ['image/gif', 'image/png', 'image/jpeg', 'image/webp'];
+    if (allowedTypes.indexOf(file.type) === -1) {
+      showToast('Invalid file type. Use GIF, PNG, JPG, or WebP.', 'error');
+      return;
+    }
+    // We'll upload icon after creating the pseud, so just preview for now
+    var reader = new FileReader();
+    reader.onload = function(e) {
+      var iconImg = document.getElementById('add-pseud-icon-img');
+      var iconFallback = document.getElementById('add-pseud-icon-fallback');
+      var iconRemoveBtn = document.getElementById('add-pseud-icon-remove');
+      iconImg.src = e.target.result;
+      iconImg.style.display = 'block';
+      iconFallback.style.display = 'none';
+      iconRemoveBtn.style.display = '';
+    };
+    reader.readAsDataURL(file);
+  });
+
+  document.getElementById('add-pseud-icon-remove').addEventListener('click', function() {
+    addingPseudIconKey = null;
+    var iconImg = document.getElementById('add-pseud-icon-img');
+    var iconFallback = document.getElementById('add-pseud-icon-fallback');
+    var iconRemoveBtn = document.getElementById('add-pseud-icon-remove');
+    iconImg.style.display = 'none';
+    iconFallback.style.display = '';
+    iconRemoveBtn.style.display = 'none';
+    addPseudIconFileInput.value = '';
+  });
+
+  saveAddPseudBtn.addEventListener('click', function() {
+    var name = document.getElementById('add-pseud-name-input').value.trim();
+    var desc = document.getElementById('add-pseud-desc-input').value.trim();
 
     if (!name) {
       setFeedback(addPseudFeedback, 'Name is required.', true);
       return;
     }
 
-    addPseudBtn.disabled = true;
+    saveAddPseudBtn.disabled = true;
     setFeedback(addPseudFeedback, 'Adding…', false);
 
     fetch('/api/pseuds', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name: name, description: desc || null }),
+      body: JSON.stringify({
+        name: name,
+        description: desc || null,
+        theme_color: addPseudSelectedColor,
+        icon_key: addingPseudIconKey,
+      }),
     })
     .then(function(res) { return res.json().then(function(data) { return { ok: res.ok, data: data }; }); })
     .then(function(result) {
-      addPseudBtn.disabled = false;
       if (result.ok) {
-        document.getElementById('new-pseud-name').value = '';
-        document.getElementById('new-pseud-desc').value = '';
-        setFeedback(addPseudFeedback, 'Alias added!', false);
+        // If a file was selected, upload it now and await result before refreshing
+        var iconFile = addPseudIconFileInput.files[0];
+        if (iconFile && result.data && result.data.id) {
+          var formData = new FormData();
+          formData.append('file', iconFile);
+          formData.append('type', 'pseud');
+          formData.append('id', String(result.data.id));
+          return fetch('/api/upload', { method: 'POST', body: formData })
+            .then(function(uploadRes) {
+              if (!uploadRes.ok) {
+                showToast('Alias created, but icon upload failed.', 'error');
+              }
+            })
+            .catch(function() {
+              showToast('Alias created, but icon upload failed.', 'error');
+            })
+            .then(function() {
+              saveAddPseudBtn.disabled = false;
+              addPseudModal.style.display = 'none';
+              showToast('Alias created!');
+              loadPseuds();
+            });
+        }
+        saveAddPseudBtn.disabled = false;
+        addPseudModal.style.display = 'none';
         showToast('Alias created!');
         loadPseuds();
       } else {
+        saveAddPseudBtn.disabled = false;
         setFeedback(addPseudFeedback, result.data.error || 'Failed to add alias.', true);
       }
     })
     .catch(function() {
-      addPseudBtn.disabled = false;
+      saveAddPseudBtn.disabled = false;
       setFeedback(addPseudFeedback, 'Network error.', true);
     });
   });
+
+  // ─── Set Default Pseud ──────────────────────────────────
+  function setDefaultPseud(pseudId) {
+    fetch('/api/pseuds/' + encodeURIComponent(pseudId), {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ is_default: 1 }),
+    })
+    .then(function(res) { return res.json().then(function(data) { return { ok: res.ok, data: data }; }); })
+    .then(function(result) {
+      if (result.ok) {
+        showToast('Default alias updated!');
+        loadPseuds();
+      } else {
+        showToast(result.data.error || 'Failed to set default.', 'error');
+      }
+    })
+    .catch(function() {
+      showToast('Network error.', 'error');
+    });
+  }
 
   // ─── Edit modal ───────────────────────────────────────
   var editModal = document.getElementById('pseud-edit-modal');
@@ -828,6 +1083,10 @@ const themesJSON = JSON.stringify(
     document.getElementById('edit-pseud-name').value = pseud.name || '';
     document.getElementById('edit-pseud-desc').value = pseud.description || '';
     editingPseudIconKey = pseud.icon_key || null;
+    editPseudSelectedColor = pseud.theme_color || DEFAULT_THEME_COLOR;
+
+    // Render color swatches for edit modal
+    renderColorSwatches('edit-color-swatches', editPseudSelectedColor);
 
     // Update icon preview
     var iconImg = document.getElementById('edit-pseud-icon-img');
@@ -1082,7 +1341,10 @@ const themesJSON = JSON.stringify(
 
   // Close modal on Escape
   document.addEventListener('keydown', function(e) {
-    if (e.key === 'Escape' && editModal.style.display !== 'none') closeEditModal();
+    if (e.key === 'Escape') {
+      if (editModal.style.display !== 'none') closeEditModal();
+      if (addPseudModal && addPseudModal.style.display !== 'none') addPseudModal.style.display = 'none';
+    }
   });
 
   savePseudBtn.addEventListener('click', function() {
@@ -1107,6 +1369,7 @@ const themesJSON = JSON.stringify(
         icon_key: editingPseudIconKey,
         banner_key: editingPseudBannerKey,
         pinned_work_ids: editingPseudPinnedIds,
+        theme_color: editPseudSelectedColor,
       }),
     })
     .then(function(res) { return res.json().then(function(data) { return { ok: res.ok, data: data }; }); })
@@ -1727,11 +1990,18 @@ const themesJSON = JSON.stringify(
   /* ═══════════════════════════════════════════════════════ */
   /*  Pseud list & cards                                   */
   /* ═══════════════════════════════════════════════════════ */
+  .aliases-header-row {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: var(--space-4, 16px);
+    margin-bottom: var(--space-4, 16px);
+  }
+
   .pseuds-list {
     display: flex;
     flex-direction: column;
-    gap: var(--space-2, 8px);
-    margin-bottom: var(--space-5, 20px);
+    gap: var(--space-3, 12px);
   }
 
   .pseuds-empty {
@@ -1751,19 +2021,62 @@ const themesJSON = JSON.stringify(
     padding: var(--space-3, 12px) var(--space-4, 16px);
     background: var(--md-sys-color-surface-container-high);
     border: 1px solid var(--md-sys-color-outline-variant);
-    border-radius: var(--md-sys-shape-corner-small, 8px);
-    transition: border-color 200ms;
+    border-left: 4px solid var(--md-sys-color-outline-variant);
+    border-radius: var(--md-sys-shape-corner-medium, 12px);
+    transition: border-color 200ms, box-shadow 200ms;
+    position: relative;
   }
 
   .pseud-card:hover {
     border-color: var(--md-sys-color-outline);
+    box-shadow: 0 1px 3px rgba(0,0,0,0.08);
   }
 
-  .pseud-info {
+  .pseud-card-left {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3, 12px);
+    min-width: 0;
+    flex: 1;
+  }
+
+  .pseud-avatar {
+    width: 36px;
+    height: 36px;
+    border-radius: var(--md-sys-shape-corner-full, 100px);
+    overflow: hidden;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--md-sys-color-surface-container);
+    flex-shrink: 0;
+    border: 2px solid var(--md-sys-color-outline-variant);
+  }
+
+  .pseud-avatar-img {
+    width: 36px;
+    height: 36px;
+    border-radius: var(--md-sys-shape-corner-full, 100px);
+    object-fit: cover;
+  }
+
+  .pseud-avatar-initial {
+    font-size: var(--md-sys-typescale-title-medium-size, 16px);
+    font-weight: 600;
+    line-height: 1;
+  }
+
+  .pseud-card-info {
     display: flex;
     flex-direction: column;
     gap: 2px;
     min-width: 0;
+  }
+
+  .pseud-name-row {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2, 8px);
   }
 
   .pseud-name {
@@ -1773,20 +2086,42 @@ const themesJSON = JSON.stringify(
     word-break: break-word;
   }
 
+  .pseud-badge {
+    display: inline-flex;
+    align-items: center;
+    font-size: var(--md-sys-typescale-label-medium-size, 12px);
+    font-weight: 600;
+    padding: 1px 8px;
+    border-radius: var(--md-sys-shape-corner-full, 100px);
+    line-height: 1.5;
+  }
+
+  .pseud-badge--primary {
+    background: var(--md-sys-color-tertiary-container);
+    color: var(--md-sys-color-on-tertiary-container);
+  }
+
   .pseud-desc {
     color: var(--md-sys-color-on-surface-variant);
     font-size: var(--md-sys-typescale-body-small-size, 12px);
     word-break: break-word;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
-  .pseud-actions {
-    display: flex;
-    align-items: center;
-    gap: var(--space-1, 4px);
+  .pseud-stats {
+    color: var(--md-sys-color-on-surface-variant);
+    font-size: var(--md-sys-typescale-body-small-size, 12px);
+    opacity: 0.7;
+  }
+
+  .pseud-card-right {
+    position: relative;
     flex-shrink: 0;
   }
 
-  .btn-icon {
+  .pseud-menu-btn {
     display: inline-flex;
     align-items: center;
     justify-content: center;
@@ -1797,22 +2132,96 @@ const themesJSON = JSON.stringify(
     background: transparent;
     color: var(--md-sys-color-on-surface-variant);
     cursor: pointer;
-    transition: background 200ms, color 200ms;
+    font-size: 20px;
+    line-height: 1;
+    transition: background 200ms;
   }
 
-  .btn-icon:hover {
+  .pseud-menu-btn:hover {
     background: var(--md-sys-color-surface-container-highest);
-    color: var(--md-sys-color-on-surface);
   }
 
-  .btn-icon--danger:hover {
-    background: var(--md-sys-color-error-container);
+  .pseud-dropdown {
+    display: none;
+    position: absolute;
+    right: 0;
+    top: 100%;
+    z-index: 100;
+    min-width: 160px;
+    background: var(--md-sys-color-surface-container-high);
+    border: 1px solid var(--md-sys-color-outline-variant);
+    border-radius: var(--md-sys-shape-corner-small, 8px);
+    box-shadow: 0 4px 12px rgba(0,0,0,0.12);
+    overflow: hidden;
+  }
+
+  .pseud-dropdown--open {
+    display: block;
+  }
+
+  .pseud-dropdown-item {
+    display: block;
+    width: 100%;
+    padding: var(--space-2, 8px) var(--space-4, 16px);
+    background: none;
+    border: none;
+    text-align: left;
+    font-size: var(--md-sys-typescale-body-medium-size, 14px);
+    color: var(--md-sys-color-on-surface);
+    cursor: pointer;
+    transition: background 150ms;
+  }
+
+  .pseud-dropdown-item:hover {
+    background: var(--md-sys-color-surface-container-highest);
+  }
+
+  .pseud-dropdown-item--danger {
     color: var(--md-sys-color-error);
   }
 
-  .pseud-add-form {
-    border-top: 1px solid var(--md-sys-color-outline-variant);
-    padding-top: var(--space-4, 16px);
+  .pseud-dropdown-item--danger:hover {
+    background: var(--md-sys-color-error-container);
+  }
+
+  /* ═══════════════════════════════════════════════════════ */
+  /*  Color picker swatches                                */
+  /* ═══════════════════════════════════════════════════════ */
+  .color-picker-swatches {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-2, 8px);
+  }
+
+  .color-swatch {
+    width: 28px;
+    height: 28px;
+    border-radius: var(--md-sys-shape-corner-full, 100px);
+    border: 2px solid transparent;
+    cursor: pointer;
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: border-color 150ms, transform 150ms;
+  }
+
+  .color-swatch:focus-visible {
+    outline: 2px solid var(--md-sys-color-primary);
+    outline-offset: 2px;
+  }
+
+  .color-swatch:hover {
+    transform: scale(1.1);
+  }
+
+  .color-swatch--selected {
+    border-color: var(--md-sys-color-on-surface);
+  }
+
+  .color-swatch-check {
+    width: 16px;
+    height: 16px;
   }
 
   /* ═══════════════════════════════════════════════════════ */
