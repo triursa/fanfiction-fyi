@@ -83,8 +83,13 @@ const hasRelations = outgoingRelations.length > 0 || incomingRelations.length > 
 
 // Tag grouping now handled by TagCluster Preact component on the client
 
+// Word counts: work.word_count only sums published chapters.
+// For owner view: compute total including drafts, and count all chapters.
+const totalWordCount = chapters.reduce((sum: number, c: any) => sum + (c.word_count || 0), 0);
+const totalChapterCount = chapters.length;
+
 // Reading time estimation (230 wpm)
-const readingTimeMinutes = Math.max(1, Math.ceil((work.word_count || 0) / 230));
+const readingTimeMinutes = Math.max(1, Math.ceil((isOwner ? totalWordCount : (work.word_count || 0)) / 230));
 
 // Kudos count
 const kudosCount = (await queryFirst<any>(db, `SELECT COUNT(*) as cnt FROM kudos WHERE work_id = ?1`, workId))?.cnt ?? 0;
@@ -227,10 +232,9 @@ const commentsJson = JSON.stringify(allComments);
     <aside class="work-sidebar">
       <!-- Metadata -->
       <div class="sidebar-card">
-        <h4 class="sidebar-heading">Metadata</h4>
         <div class="sidebar-stats">
-          <div class="sidebar-stat"><span>Words</span><span class="sidebar-stat-value">{work.word_count.toLocaleString()}</span></div>
-          <div class="sidebar-stat"><span>Chapters</span><span class="sidebar-stat-value">{publishedChapters.length} / {chapters.length}</span></div>
+          <div class="sidebar-stat"><span>Words</span><span class="sidebar-stat-value">{(isOwner ? totalWordCount : work.word_count || 0).toLocaleString()}</span></div>
+          <div class="sidebar-stat"><span>Chapters</span><span class="sidebar-stat-value">{isOwner ? totalChapterCount : publishedChapters.length}</span></div>
           <div class="sidebar-stat"><span>Reading time</span><span class="sidebar-stat-value">~{readingTimeMinutes} min</span></div>
           <div class="sidebar-stat"><span>Status</span><span class="sidebar-stat-value">{work.complete ? 'Complete' : 'WIP'}</span></div>
           {work.published_at && <div class="sidebar-stat"><span>Published</span><span class="sidebar-stat-value">{new Date(work.published_at).toLocaleDateString()}</span></div>}
