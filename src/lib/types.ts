@@ -47,7 +47,14 @@ export interface Pseud {
   name: string;
   description?: string | null;
   icon_key?: string | null;
+  theme_color?: string | null;
+  is_default: number; // 0 or 1 (SQLite doesn't have booleans)
+  banner_key?: string | null;
+  pinned_work_ids?: string | null; // JSON array string
   created_at: string;
+  // Joined fields (from GET /api/pseuds)
+  work_count?: number;
+  series_count?: number;
 }
 
 export interface Work {

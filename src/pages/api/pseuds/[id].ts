@@ -19,7 +19,7 @@ export const GET: APIRoute = async ({ request, locals, params }) => {
   return new Response(JSON.stringify(pseud), { headers: { 'Content-Type': 'application/json' } });
 };
 
-/** PUT /api/pseuds/[id] — update pseud name/description (owner only) */
+/** PUT /api/pseuds/[id] — update pseud (owner only) */
 export const PUT: APIRoute = async ({ request, locals, params }) => {
   const db = locals.runtime.env.DB as D1Database;
   const auth = await requireAuth(db, request);
@@ -37,7 +37,7 @@ export const PUT: APIRoute = async ({ request, locals, params }) => {
     return new Response(JSON.stringify({ error: 'Invalid JSON' }), { status: 400, headers: { 'Content-Type': 'application/json' } });
   }
 
-  const { name, description, icon_key, pinned_work_ids, banner_key } = body || {};
+  const { name, description, icon_key, pinned_work_ids, banner_key, theme_color, is_default } = body || {};
   const newName = (typeof name === 'string' ? name.trim() : existing.name);
   const newDesc = (description !== undefined ? (typeof description === 'string' ? description : null) : existing.description);
   const newIconKey = (icon_key !== undefined ? (typeof icon_key === 'string' ? icon_key : null) : existing.icon_key);
@@ -68,6 +68,15 @@ export const PUT: APIRoute = async ({ request, locals, params }) => {
   // Banner key validation
   const newBannerKey = (banner_key !== undefined ? (typeof banner_key === 'string' ? banner_key : null) : existing.banner_key);
 
+  // Theme color validation (hex color)
+  let newThemeColor = existing.theme_color;
+  if (theme_color !== undefined) {
+    if (theme_color !== null && !/^#[0-9a-fA-F]{3,8}$/.test(String(theme_color))) {
+      return new Response(JSON.stringify({ error: 'Invalid theme color format' }), { status: 400, headers: { 'Content-Type': 'application/json' } });
+    }
+    newThemeColor = theme_color === null ? null : String(theme_color);
+  }
+
   // Name validation
   if (!newName || newName.length === 0) {
     return new Response(JSON.stringify({ error: 'Name is required' }), { status: 400, headers: { 'Content-Type': 'application/json' } });
@@ -84,7 +93,15 @@ export const PUT: APIRoute = async ({ request, locals, params }) => {
     }
   }
 
-  await run(db, `UPDATE pseuds SET name = ?1, description = ?2, icon_key = ?3, pinned_work_ids = ?4, banner_key = ?5 WHERE id = ?6 AND user_id = ?7`, newName, newDesc, newIconKey, newPinnedWorkIds, newBannerKey, pseudId, auth.user.id);
+  // Handle is_default: only one pseud per user can be default
+  if (is_default === 1) {
+    await run(db, `UPDATE pseuds SET is_default = 0 WHERE user_id = ?1`, auth.user.id);
+  }
+
+  await run(db,
+    `UPDATE pseuds SET name = ?1, description = ?2, icon_key = ?3, pinned_work_ids = ?4, banner_key = ?5, theme_color = ?6, is_default = ?7 WHERE id = ?8 AND user_id = ?9`,
+    newName, newDesc, newIconKey, newPinnedWorkIds, newBannerKey, newThemeColor, (is_default === 1 ? 1 : existing.is_default), pseudId, auth.user.id
+  );
 
   const updated = await queryFirst<any>(db, `SELECT * FROM pseuds WHERE id = ?1`, pseudId);
   return new Response(JSON.stringify(updated), { headers: { 'Content-Type': 'application/json' } });
@@ -119,6 +136,14 @@ export const DELETE: APIRoute = async ({ request, locals, params }) => {
       JSON.stringify({ error: 'You must have at least one pseud. Create a new one before deleting this one.' }),
       { status: 409, headers: { 'Content-Type': 'application/json' } }
     );
+  }
+
+  // If deleting the default pseud, promote the first remaining one
+  if (existing.is_default === 1) {
+    const remaining = allPseuds.filter((p: any) => p.id !== pseudId);
+    if (remaining.length > 0) {
+      await run(db, `UPDATE pseuds SET is_default = 1 WHERE id = ?1`, remaining[0].id);
+    }
   }
 
   // Delete related records first (comments, kudos, bookmarks, readings)
