@@ -453,6 +453,16 @@ const initialChapterData = JSON.stringify({
     }
   }
 
+  // ── DEBUG: Client-side publish flow tracer ──
+  // Sends every publish-related state change to /api/admin/client-log
+  // so we can see exactly what happens in the browser even if toasts fail.
+  async function clientLog(action: string, detail: string) {
+    try {
+      navigator.sendBeacon('/api/client-log',
+        JSON.stringify({ action, detail, url: location.href, ts: Date.now() }));
+    } catch {}
+  }
+
   // ── Unsaved changes guard ──
   let hasUnsavedChanges = false;
   let isSaving = false;
@@ -584,10 +594,12 @@ const initialChapterData = JSON.stringify({
   let saveTimeout: ReturnType<typeof setTimeout>;
 
   async function saveChapter(draft: boolean = true, silent: boolean = false): Promise<boolean> {
+    clientLog('saveChapter_start', `draft=${draft} silent=${silent} currentChapterId=${currentChapterId} isSaving=${isSaving}`);
     if (!currentChapterId) return false;
 
     // If a save is already in flight, queue behind it
     if (isSaving) {
+      clientLog('saveChapter_queued', 'save already in flight, awaiting');
       if (savePromise) {
         await savePromise;
       }
@@ -596,6 +608,7 @@ const initialChapterData = JSON.stringify({
     // Read content after any queued save has finished so we don't send stale data
     const contentMd = (window as any).__editorMarkdown || '';
     const title = chapterTitle.value || `Chapter ${currentChapterPosition}`;
+    clientLog('saveChapter_content', `title="${title}" mdLen=${contentMd.length} editorMarkdown=${typeof (window as any).__editorMarkdown}`);
 
     // Snapshot content at save time — only clear dirty flag if no new edits happened
     const contentAtSaveStart = contentMd;
@@ -616,11 +629,13 @@ const initialChapterData = JSON.stringify({
     savePromise = new Promise<void>(resolve => { resolveSave = resolve; });
 
     try {
+      clientLog('saveChapter_fetch', `PUT /api/works/${workId}/chapters/${currentChapterId} draft=${draft ? 1 : 0}`);
       const res = await fetch(`/api/works/${workId}/chapters/${currentChapterId}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ title, content_md: contentMd, draft: draft ? 1 : 0 }),
       });
+      clientLog('saveChapter_response', `status=${res.status} ok=${res.ok}`);
       if (res.ok) {
         // Only clear dirty flag if no new edits happened while we were saving
         const contentNow = (window as any).__editorMarkdown || '';
@@ -659,7 +674,8 @@ const initialChapterData = JSON.stringify({
         }
         return false;
       }
-    } catch {
+    } catch (err) {
+      clientLog('saveChapter_catch', `network_error: ${err}`);
       if (!silent) {
         autosaveStatus.textContent = 'Network error';
         autosaveStatus.style.color = 'var(--md-sys-color-error)';
@@ -687,9 +703,11 @@ const initialChapterData = JSON.stringify({
 
   // ── Publish Chapter button ──
   publishBtn.addEventListener('click', async () => {
+    clientLog('publish_click', `workId=${workId} btnDisabled=${publishBtn.disabled} isSaving=${isSaving}`);
     publishBtn.textContent = 'Publishing…';
 
     const savedOk = await saveChapter(false);
+    clientLog('publish_afterSaveChapter', `savedOk=${savedOk}`);
 
     if (!savedOk) {
       publishBtn.textContent = 'Publish Chapter';
@@ -703,11 +721,13 @@ const initialChapterData = JSON.stringify({
     saveDraftBtn.disabled = true;
     let publishSucceeded = false;
     try {
+      clientLog('publish_workFetch', `PUT /api/works/${workId} publish=true`);
       const workRes = await fetch(`/api/works/${workId}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ publish: true }),
       });
+      clientLog('publish_workResponse', `status=${workRes.status} ok=${workRes.ok}`);
       if (workRes.ok) {
         publishSucceeded = true;
         showToast('Published! Redirecting to your work…', 'success');

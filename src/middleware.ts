@@ -15,6 +15,7 @@ const PUBLIC_PATHS = [
 const PUBLIC_PATH_PREFIXES = [
   '/api/auth/',
   '/api/bugs/',
+  '/api/client-log',
   '/_astro/',
 ];
 
