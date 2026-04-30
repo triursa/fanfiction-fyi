@@ -38,19 +38,16 @@ export function markdownToHtml(md: string): string {
           : attribs,
       }),
     },
-    // Validate img src — allow /api/storage/ paths and absolute https URLs
+    // Filter: only allow img tags with safe src URLs (allow-list approach)
+    // exclusiveFilter returns true to REMOVE the element
     exclusiveFilter: (frame) => {
-      // For img tags, ensure src is a safe URL
       if (frame.tag === 'img') {
         const src = frame.attribs.src || '';
-        // Allow /api/storage/ relative paths (our R2 proxy)
-        if (src.startsWith('/api/storage/')) return true;
-        // Allow absolute https URLs
-        if (src.startsWith('https://')) return true;
-        // Reject everything else (data: URIs, javascript:, etc.)
-        return false;
+        // Remove imgs that do NOT have safe URLs (allow only /api/storage/ and https://)
+        const isSafe = src.startsWith('/api/storage/') || src.startsWith('https://');
+        return !isSafe; // true = remove unsafe imgs, false = keep safe imgs
       }
-      return true;
+      return false; // false = keep all non-img elements
     },
   });
 }
