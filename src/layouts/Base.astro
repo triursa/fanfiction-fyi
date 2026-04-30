@@ -4,6 +4,7 @@ import { queryFirst, queryAll } from '../lib/db';
 import { ROLE_LEVEL, UserRole } from '../lib/types';
 import { THEMES } from '../styles/themes';
 import BugReport from '../components/BugReport';
+import AdaptiveNav from '../components/AdaptiveNav';
 
 // Check auth status from cookie
 const cookie = Astro.request.headers.get('cookie') ?? '';
@@ -38,6 +39,10 @@ if (sessionMatch) {
 }
 
 const title = Astro.props.title ?? 'fanfiction.fyi';
+const currentPath = Astro.url.pathname;
+const isReadingMode = Astro.props.readingMode === true;
+const userName = user ? (pseuds[0]?.name || user.email) : undefined;
+const isAdmin = isModOrAbove;
 ---
 
 <!doctype html>
@@ -65,9 +70,8 @@ const title = Astro.props.title ?? 'fanfiction.fyi';
     <!-- Serialized theme colors for client-side localStorage fallback -->
     <script type="application/json" id="ff-themes-data" set:html={JSON.stringify(Object.fromEntries(Object.entries(THEMES).map(([k, v]) => [k, v.colors])))} />
   </head>
-  <body data-theme={userTheme ?? 'obsidian'}>
-    <!-- Inline script to apply localStorage theme ASAP, before paint,
-         so non-authed pages and fresh navigations respect the user's choice -->
+  <body data-theme={userTheme ?? 'obsidian'} data-reading-mode={isReadingMode ? 'true' : undefined}>
+    <!-- Inline script to apply localStorage theme ASAP, before paint -->
     <script is:inline>
     (function() {
       try {
@@ -89,35 +93,14 @@ const title = Astro.props.title ?? 'fanfiction.fyi';
       } catch(e) {}
     })();
     </script>
-    <header class="app-bar">
-      <a href="/" class="app-bar__title">fanfiction.fyi</a>
-      <nav class="app-bar__nav">
-        <a href="/works">Works</a>
-        <a href="/pseuds">Authors</a>
-        <a href="/characters">Characters</a>
-        <a href="/tags">Tags</a>
-        <a href="/series">Series</a>
-        <a href="/collections">Collections</a>
-        <a href="/search">Search</a>
-        {user && <a href="/bookmarks">Bookmarks</a>}
-        {user && <a href="/settings">Settings</a>}
-        {isModOrAbove && <a href="/admin">Admin</a>}
-      </nav>
-      <nav class="app-bar__actions">
-        {user ? (
-          <div class="user-menu">
-            <span class="user-name">{pseuds[0]?.name || user.email}</span>
-            <a href="/settings" class="btn-nav" aria-label="Settings">⚙️</a>
-            <a href="/works/create" class="btn-nav-accent">New Work</a>
-            <form action="/api/auth/logout" method="post" class="logout-form">
-              <button type="submit" class="btn-nav">Sign Out</button>
-            </form>
-          </div>
-        ) : (
-          <a href="/login" class="btn-nav-accent">Sign In</a>
-        )}
-      </nav>
-    </header>
+    <!-- Adaptive Navigation: swaps between mobile bottom bar, tablet rail, and desktop drawer -->
+    <AdaptiveNav
+      client:load
+      currentPath={currentPath}
+      userName={userName}
+      isAdmin={isAdmin}
+      isReadingMode={isReadingMode}
+    />
     <main class="main-content">
       <slot />
     </main>
@@ -136,84 +119,7 @@ const title = Astro.props.title ?? 'fanfiction.fyi';
 <style is:global>
   @import '../styles/theme.css';
   @import '../styles/portfolio.css';
-
-  .app-bar {
-    display: flex;
-    align-items: center;
-    gap: var(--space-4);
-    padding: var(--space-3) var(--space-6);
-    background: var(--md-sys-color-surface-container);
-    border-bottom: 1px solid var(--md-sys-color-outline-variant);
-    position: sticky;
-    top: 0;
-    z-index: 100;
-  }
-
-  .app-bar__title {
-    font: var(--md-sys-typescale-title-large);
-    color: var(--md-sys-color-primary);
-    text-decoration: none;
-    margin-right: auto;
-  }
-
-  .app-bar__nav {
-    display: flex;
-    gap: var(--space-4);
-  }
-
-  .app-bar__nav a,
-  .btn-nav {
-    font: var(--md-sys-typescale-label-large);
-    color: var(--md-sys-color-on-surface-variant);
-    padding: var(--space-2) var(--space-3);
-    border-radius: var(--md-sys-shape-corner-full);
-    transition: background var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard);
-    text-decoration: none;
-    background: none;
-    border: none;
-    cursor: pointer;
-  }
-
-  @media (hover: hover) {
-    .app-bar__nav a:hover,
-    .btn-nav:hover {
-      background: var(--md-sys-color-surface-container-highest);
-      text-decoration: none;
-    }
-  }
-
-  .btn-nav-accent {
-    font: var(--md-sys-typescale-label-large);
-    color: var(--md-sys-color-on-primary);
-    background: var(--md-sys-color-primary);
-    padding: var(--space-2) var(--space-4);
-    border-radius: var(--md-sys-shape-corner-full);
-    text-decoration: none;
-    border: none;
-    cursor: pointer;
-  }
-
-  @media (hover: hover) {
-    .btn-nav-accent:hover {
-      background: var(--md-sys-color-primary-container);
-      color: var(--md-sys-color-on-primary-container);
-    }
-  }
-
-  .user-menu {
-    display: flex;
-    align-items: center;
-    gap: var(--space-3);
-  }
-
-  .user-name {
-    font: var(--md-sys-typescale-label-large);
-    color: var(--md-sys-color-on-surface);
-  }
-
-  .logout-form {
-    display: inline;
-  }
+  @import '../styles/adaptive-nav.css';
 
   .main-content {
     max-width: 1200px;
@@ -249,19 +155,6 @@ const title = Astro.props.title ?? 'fanfiction.fyi';
     color: var(--md-sys-color-outline-variant);
   }
 
-  @media (max-width: 768px) {
-    .app-bar {
-      flex-wrap: wrap;
-      gap: var(--space-2);
-    }
-    .app-bar__nav {
-      order: 3;
-      width: 100%;
-      overflow-x: auto;
-      gap: var(--space-2);
-    }
-  }
-
   /* ── Bug Report FAB + Dialog ── */
   .bug-report-fab {
     position: fixed;
@@ -287,6 +180,21 @@ const title = Astro.props.title ?? 'fanfiction.fyi';
     .bug-report-fab:hover {
       background: var(--md-sys-color-surface-container-highest);
       box-shadow: var(--md-sys-elevation-2);
+    }
+  }
+
+  /* Push bug FAB above bottom nav on mobile */
+  @media (max-width: 599px) {
+    .bug-report-fab {
+      bottom: calc(100px + env(safe-area-inset-bottom));
+    }
+  }
+
+  /* Push bug FAB above rail on tablet */
+  @media (min-width: 600px) and (max-width: 839px) {
+    .bug-report-fab {
+      left: calc(80px + var(--space-4));
+      right: auto;
     }
   }
 
