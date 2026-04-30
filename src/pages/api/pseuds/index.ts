@@ -10,7 +10,7 @@ export const GET: APIRoute = async ({ request, locals }) => {
   if (!auth) return new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401, headers: { 'Content-Type': 'application/json' } });
   const pseuds = await queryAll<any>(db, `
     SELECT p.*,
-      COUNT(DISTINCT c.id) as work_count,
+      COUNT(DISTINCT c.work_id) as work_count,
       COUNT(DISTINCT sw.series_id) as series_count
     FROM pseuds p
     LEFT JOIN creatorships c ON c.pseud_id = p.id
@@ -53,7 +53,7 @@ export const POST: APIRoute = async ({ request, locals }) => {
   const themeColor = (body.theme_color !== undefined && body.theme_color !== null) ? String(body.theme_color) : null;
 
   // Validate theme_color format (hex color)
-  if (themeColor && !/^#[0-9a-fA-F]{3,8}$/.test(themeColor)) {
+  if (themeColor && !/^(?:#[0-9a-fA-F]{3}|#[0-9a-fA-F]{4}|#[0-9a-fA-F]{6}|#[0-9a-fA-F]{8})$/.test(themeColor)) {
     return new Response(JSON.stringify({ error: 'Invalid theme color format' }), { status: 400, headers: { 'Content-Type': 'application/json' } });
   }
 

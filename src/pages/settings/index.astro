@@ -760,7 +760,7 @@ const themesJSON = JSON.stringify(
     var html = '';
     THEME_COLORS.forEach(function(color) {
       var isSelected = (color === selectedColor);
-      html += '<button type="button" class="color-swatch' + (isSelected ? ' color-swatch--selected' : '') + '" data-color="' + escapeHtml(color) + '" style="background:' + escapeHtml(color) + '" title="' + escapeHtml(color) + '">';
+      html += '<button type="button" class="color-swatch' + (isSelected ? ' color-swatch--selected' : '') + '" data-color="' + escapeHtml(color) + '" style="background:' + escapeHtml(color) + '" title="' + escapeHtml(color) + '" aria-label="Theme color ' + escapeHtml(color) + '" aria-pressed="' + (isSelected ? 'true' : 'false') + '">';
       if (isSelected) html += '<svg class="color-swatch-check" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>';
       html += '</button>';
     });
@@ -818,8 +818,8 @@ const themesJSON = JSON.stringify(
       html += '    </div>';
       html += '  </div>';
       html += '  <div class="pseud-card-right">';
-      html += '    <button type="button" class="pseud-menu-btn" data-pseud-id="' + escapeHtml(String(p.id)) + '" aria-label="Menu for ' + escapeHtml(p.name) + '">⋮</button>';
-      html += '    <div class="pseud-dropdown" data-pseud-id="' + escapeHtml(String(p.id)) + '">';
+      html += '    <button type="button" class="pseud-menu-btn" data-pseud-id="' + escapeHtml(String(p.id)) + '" aria-label="Menu for ' + escapeHtml(p.name) + '" aria-haspopup="true" aria-expanded="false" aria-controls="pseud-dropdown-' + escapeHtml(String(p.id)) + '">⋮</button>';
+      html += '    <div class="pseud-dropdown" id="pseud-dropdown-' + escapeHtml(String(p.id)) + '" data-pseud-id="' + escapeHtml(String(p.id)) + '">';
       html += '      <button type="button" class="pseud-dropdown-item pseud-edit-btn" data-pseud-id="' + escapeHtml(String(p.id)) + '">Edit</button>';
       if (p.is_default != 1) {
         html += '    <button type="button" class="pseud-dropdown-item pseud-default-btn" data-pseud-id="' + escapeHtml(String(p.id)) + '">Set as Default</button>';
@@ -840,8 +840,22 @@ const themesJSON = JSON.stringify(
         pseudsList.querySelectorAll('.pseud-dropdown').forEach(function(dd) {
           if (dd.dataset.pseudId !== pseudId) dd.classList.remove('pseud-dropdown--open');
         });
+        pseudsList.querySelectorAll('.pseud-menu-btn').forEach(function(b) {
+          if (b.dataset.pseudId !== pseudId) b.setAttribute('aria-expanded', 'false');
+        });
         var dropdown = pseudsList.querySelector('.pseud-dropdown[data-pseud-id="' + pseudId + '"]');
-        if (dropdown) dropdown.classList.toggle('pseud-dropdown--open');
+        if (dropdown) {
+          var isOpen = dropdown.classList.toggle('pseud-dropdown--open');
+          btn.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
+        }
+      });
+      btn.addEventListener('keydown', function(e) {
+        if (e.key === 'Escape') {
+          var pseudId = btn.dataset.pseudId;
+          var dropdown = pseudsList.querySelector('.pseud-dropdown[data-pseud-id="' + pseudId + '"]');
+          if (dropdown) dropdown.classList.remove('pseud-dropdown--open');
+          btn.setAttribute('aria-expanded', 'false');
+        }
       });
     });
 
@@ -994,22 +1008,36 @@ const themesJSON = JSON.stringify(
     })
     .then(function(res) { return res.json().then(function(data) { return { ok: res.ok, data: data }; }); })
     .then(function(result) {
-      saveAddPseudBtn.disabled = false;
       if (result.ok) {
-        // If a file was selected, upload it now
+        // If a file was selected, upload it now and await result before refreshing
         var iconFile = addPseudIconFileInput.files[0];
         if (iconFile && result.data && result.data.id) {
           var formData = new FormData();
           formData.append('file', iconFile);
           formData.append('type', 'pseud');
           formData.append('id', String(result.data.id));
-          fetch('/api/upload', { method: 'POST', body: formData })
-            .catch(function() {});
+          return fetch('/api/upload', { method: 'POST', body: formData })
+            .then(function(uploadRes) {
+              if (!uploadRes.ok) {
+                showToast('Alias created, but icon upload failed.', 'error');
+              }
+            })
+            .catch(function() {
+              showToast('Alias created, but icon upload failed.', 'error');
+            })
+            .then(function() {
+              saveAddPseudBtn.disabled = false;
+              addPseudModal.style.display = 'none';
+              showToast('Alias created!');
+              loadPseuds();
+            });
         }
+        saveAddPseudBtn.disabled = false;
         addPseudModal.style.display = 'none';
         showToast('Alias created!');
-        setTimeout(loadPseuds, 500);
+        loadPseuds();
       } else {
+        saveAddPseudBtn.disabled = false;
         setFeedback(addPseudFeedback, result.data.error || 'Failed to add alias.', true);
       }
     })
@@ -1030,7 +1058,7 @@ const themesJSON = JSON.stringify(
     .then(function(result) {
       if (result.ok) {
         showToast('Default alias updated!');
-        setTimeout(loadPseuds, 500);
+        loadPseuds();
       } else {
         showToast(result.data.error || 'Failed to set default.', 'error');
       }
@@ -2176,7 +2204,11 @@ const themesJSON = JSON.stringify(
     align-items: center;
     justify-content: center;
     transition: border-color 150ms, transform 150ms;
-    outline: none;
+  }
+
+  .color-swatch:focus-visible {
+    outline: 2px solid var(--md-sys-color-primary);
+    outline-offset: 2px;
   }
 
   .color-swatch:hover {

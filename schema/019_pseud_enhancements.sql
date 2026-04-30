@@ -7,6 +7,14 @@ ALTER TABLE pseuds ADD COLUMN theme_color TEXT DEFAULT NULL;
 -- Default pseud flag (only one per user)
 ALTER TABLE pseuds ADD COLUMN is_default INTEGER NOT NULL DEFAULT 0;
 
+-- Backfill: mark the earliest pseud per user as default so every existing
+-- account has exactly one default pseud before the unique index is created.
+UPDATE pseuds
+SET is_default = 1
+WHERE id IN (
+  SELECT MIN(id) FROM pseuds GROUP BY user_id
+);
+
 -- Partial unique index: at most one default pseud per user
 -- SQLite doesn't support CREATE UNIQUE INDEX ... WHERE directly in all contexts,
 -- but D1 (SQLite 3.37+) supports partial indexes.

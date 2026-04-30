@@ -71,7 +71,7 @@ export const PUT: APIRoute = async ({ request, locals, params }) => {
   // Theme color validation (hex color)
   let newThemeColor = existing.theme_color;
   if (theme_color !== undefined) {
-    if (theme_color !== null && !/^#[0-9a-fA-F]{3,8}$/.test(String(theme_color))) {
+    if (theme_color !== null && !/^(?:#[0-9a-fA-F]{3}|#[0-9a-fA-F]{4}|#[0-9a-fA-F]{6}|#[0-9a-fA-F]{8})$/.test(String(theme_color))) {
       return new Response(JSON.stringify({ error: 'Invalid theme color format' }), { status: 400, headers: { 'Content-Type': 'application/json' } });
     }
     newThemeColor = theme_color === null ? null : String(theme_color);
@@ -93,14 +93,27 @@ export const PUT: APIRoute = async ({ request, locals, params }) => {
     }
   }
 
-  // Handle is_default: only one pseud per user can be default
-  if (is_default === 1) {
-    await run(db, `UPDATE pseuds SET is_default = 0 WHERE user_id = ?1`, auth.user.id);
-  }
-
+  // Handle is_default atomically: if promoting this pseud to default, clear all others in the same statement
   await run(db,
-    `UPDATE pseuds SET name = ?1, description = ?2, icon_key = ?3, pinned_work_ids = ?4, banner_key = ?5, theme_color = ?6, is_default = ?7 WHERE id = ?8 AND user_id = ?9`,
-    newName, newDesc, newIconKey, newPinnedWorkIds, newBannerKey, newThemeColor, (is_default === 1 ? 1 : existing.is_default), pseudId, auth.user.id
+    `UPDATE pseuds SET
+       name         = CASE WHEN id = ?8 THEN ?1 ELSE name END,
+       description  = CASE WHEN id = ?8 THEN ?2 ELSE description END,
+       icon_key     = CASE WHEN id = ?8 THEN ?3 ELSE icon_key END,
+       pinned_work_ids = CASE WHEN id = ?8 THEN ?4 ELSE pinned_work_ids END,
+       banner_key   = CASE WHEN id = ?8 THEN ?5 ELSE banner_key END,
+       theme_color  = CASE WHEN id = ?8 THEN ?6 ELSE theme_color END,
+       is_default   = CASE
+                        WHEN ?7 = 1 AND id = ?8 THEN 1
+                        WHEN ?7 = 1             THEN 0
+                        WHEN id = ?8            THEN ?10
+                        ELSE is_default
+                      END
+     WHERE user_id = ?9 AND (?7 = 1 OR id = ?8)`,
+    newName, newDesc, newIconKey, newPinnedWorkIds, newBannerKey, newThemeColor,
+    is_default === 1 ? 1 : 0,
+    pseudId,
+    auth.user.id,
+    existing.is_default
   );
 
   const updated = await queryFirst<any>(db, `SELECT * FROM pseuds WHERE id = ?1`, pseudId);
@@ -138,8 +151,9 @@ export const DELETE: APIRoute = async ({ request, locals, params }) => {
     );
   }
 
-  // If deleting the default pseud, promote the first remaining one
+  // If deleting the default pseud, first clear its flag then promote the next one
   if (existing.is_default === 1) {
+    await run(db, `UPDATE pseuds SET is_default = 0 WHERE id = ?1`, pseudId);
     const remaining = allPseuds.filter((p: any) => p.id !== pseudId);
     if (remaining.length > 0) {
       await run(db, `UPDATE pseuds SET is_default = 1 WHERE id = ?1`, remaining[0].id);
