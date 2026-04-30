@@ -122,7 +122,7 @@ function NavigationRail({ items, currentPath, onMenuClick }: { items: NavItem[];
       </div>
       <div class="navigation-rail__spacer" />
       <a href="/studio" class="navigation-rail__create" aria-label="Creator Studio" title="Studio">
-        <SvgIcon name="create" size={24} />
+        <SvgIcon name="studio" size={24} />
       </a>
     </nav>
   );

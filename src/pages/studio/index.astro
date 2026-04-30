@@ -437,18 +437,18 @@ if (!session) return Astro.redirect('/login');
       padding: 0 var(--space-4);
       height: 56px;
     }
+  }
 
-    /* On very small screens, make FAB smaller */
-    @media (max-width: 374px) {
-      .fab-label {
-        display: none;
-      }
-      .studio-fab {
-        width: 56px;
-        padding: 0;
-        justify-content: center;
-        border-radius: var(--md-sys-shape-corner-full);
-      }
+  /* On very small screens, make FAB smaller */
+  @media (max-width: 374px) {
+    .fab-label {
+      display: none;
+    }
+    .studio-fab {
+      width: 56px;
+      padding: 0;
+      justify-content: center;
+      border-radius: var(--md-sys-shape-corner-full);
     }
   }
 

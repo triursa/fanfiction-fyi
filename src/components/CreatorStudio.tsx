@@ -47,16 +47,13 @@ function SegmentedButton({ options, value, onChange }: {
 function SwipeableWorkItem({ work, onPublish, onDelete }: {
   work: StudioWork;
   onPublish: (id: number) => void;
-  onDelete: (id: number) => void;
+  onDelete: (id: number) => Promise<boolean>;
 }) {
   const itemRef = useRef<HTMLDivElement>(null);
   const startX = useRef(0);
   const currentX = useRef(0);
   const isDragging = useRef(false);
   const SWIPE_THRESHOLD = 80;
-  const prefersReducedMotion = useRef(
-    typeof window !== 'undefined' && window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches
-  );
 
   const handleTouchStart = useCallback((e: TouchEvent) => {
     startX.current = e.touches[0].clientX;
@@ -75,7 +72,7 @@ function SwipeableWorkItem({ work, onPublish, onDelete }: {
     }
   }, []);
 
-  const handleTouchEnd = useCallback(() => {
+  const handleTouchEnd = useCallback(async () => {
     isDragging.current = false;
     if (!itemRef.current) return;
     const dx = currentX.current;
@@ -86,10 +83,14 @@ function SwipeableWorkItem({ work, onPublish, onDelete }: {
       itemRef.current.style.transition = `transform var(--md-sys-motion-duration-medium2) var(--md-sys-motion-easing-standard)`;
       onPublish(work.id);
     } else if (dx < -SWIPE_THRESHOLD) {
-      // Swipe left → delete
+      // Swipe left → delete; snap card first, then reset if cancelled/failed
       itemRef.current.style.transform = 'translateX(-120px)';
       itemRef.current.style.transition = `transform var(--md-sys-motion-duration-medium2) var(--md-sys-motion-easing-standard)`;
-      onDelete(work.id);
+      const deleted = await onDelete(work.id);
+      if (!deleted && itemRef.current) {
+        itemRef.current.style.transform = 'translateX(0)';
+        itemRef.current.style.transition = `transform var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard)`;
+      }
     } else {
       // Snap back
       itemRef.current.style.transform = 'translateX(0)';
@@ -117,9 +118,9 @@ function SwipeableWorkItem({ work, onPublish, onDelete }: {
       <div
         ref={itemRef}
         class="work-list-item"
-        onTouchStart={prefersReducedMotion.current ? undefined : handleTouchStart}
-        onTouchMove={prefersReducedMotion.current ? undefined : handleTouchMove}
-        onTouchEnd={prefersReducedMotion.current ? undefined : handleTouchEnd}
+        onTouchStart={handleTouchStart}
+        onTouchMove={handleTouchMove}
+        onTouchEnd={handleTouchEnd}
       >
         <div class="work-list-item__main">
           <a href={`/works/${work.id}`} class="work-list-item__title">{work.title}</a>
@@ -144,6 +145,10 @@ function SwipeableWorkItem({ work, onPublish, onDelete }: {
         <div class="work-list-item__actions">
           <a href={`/works/${work.id}/draft`} class="action-btn action-btn--edit" title="Edit">✎</a>
           <a href={`/works/${work.id}/settings`} class="action-btn action-btn--settings" title="Settings">⚙</a>
+          {isDraft && (
+            <button type="button" class="action-btn action-btn--publish" title="Publish" onClick={() => onPublish(work.id)}>Publish</button>
+          )}
+          <button type="button" class="action-btn action-btn--delete" title="Delete" onClick={() => onDelete(work.id)}>✕</button>
         </div>
       </div>
     </div>
@@ -242,15 +247,17 @@ export default function CreatorStudio() {
   // Publish handler — publish all draft chapters of a work
   const handlePublish = useCallback(async (workId: number) => {
     try {
-      // First get chapters
-      const chRes = await fetch(`/api/works/${workId}/chapters`);
-      if (!chRes.ok) throw new Error('Failed to fetch chapters');
-      const chapters: any[] = await chRes.json();
+      // Fetch work detail so owners can access draft chapters too
+      const workRes = await fetch(`/api/works/${workId}`);
+      if (!workRes.ok) throw new Error('Failed to fetch work');
+      const workData: any = await workRes.json();
+      const chapters: any[] = Array.isArray(workData.chapters) ? workData.chapters : [];
 
       // Publish each draft chapter
       for (const ch of chapters) {
         if (ch.draft === 1) {
-          await fetch(`/api/works/${workId}/chapters/${ch.id}/publish`, { method: 'POST' });
+          const publishRes = await fetch(`/api/works/${workId}/chapters/${ch.id}/publish`, { method: 'POST' });
+          if (!publishRes.ok) throw new Error('Failed to publish chapter');
         }
       }
       // Refresh list
@@ -261,14 +268,16 @@ export default function CreatorStudio() {
   }, [fetchWorks]);
 
   // Delete handler
-  const handleDelete = useCallback(async (workId: number) => {
-    if (!confirm('Delete this work? This cannot be undone.')) return;
+  const handleDelete = useCallback(async (workId: number): Promise<boolean> => {
+    if (!confirm('Delete this work? This cannot be undone.')) return false;
     try {
       const res = await fetch(`/api/works/${workId}`, { method: 'DELETE' });
       if (!res.ok) throw new Error('Failed to delete');
       fetchWorks();
+      return true;
     } catch (err: any) {
       setError(err.message || 'Failed to delete');
+      return false;
     }
   }, [fetchWorks]);
 
