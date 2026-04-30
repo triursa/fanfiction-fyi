@@ -133,6 +133,79 @@ const initialChapterData = JSON.stringify({
   <Toast client:load />
 </Base>
 
+<!-- ── BUTTON STATE DIAGNOSTIC (standalone, no define:vars) ── -->
+<script is:inline>
+(function() {
+  // This script runs independently of the define:vars block.
+  // It checks: (1) does the publish button exist? (2) is it disabled?
+  // (3) does the define:vars script run at all? (4) what happens on click?
+  
+  function diag(msg) {
+    console.log('[DIAG] ' + msg);
+    // Also write to a visible debug overlay
+    var overlay = document.getElementById('diag-overlay');
+    if (!overlay) {
+      overlay = document.createElement('div');
+      overlay.id = 'diag-overlay';
+      overlay.style.cssText = 'position:fixed;top:10px;right:10px;width:340px;max-height:200px;overflow-y:auto;background:#1a1d27;border:2px solid #7B8FA8;border-radius:8px;padding:10px;font:11px/1.4 monospace;color:#e2e4ea;z-index:99999;';
+      document.body.appendChild(overlay);
+    }
+    var line = document.createElement('div');
+    line.textContent = new Date().toISOString().slice(11,23) + ' ' + msg;
+    overlay.appendChild(line);
+  }
+
+  window.addEventListener('DOMContentLoaded', function() {
+    diag('Standalone script loaded OK');
+    
+    var pubBtn = document.getElementById('publish-btn');
+    var saveBtn = document.getElementById('save-draft-btn');
+    
+    if (pubBtn) {
+      diag('publish-btn found. disabled=' + pubBtn.disabled + ' text="' + pubBtn.textContent + '"');
+    } else {
+      diag('ERROR: publish-btn NOT FOUND in DOM');
+    }
+    
+    if (saveBtn) {
+      diag('save-draft-btn found. disabled=' + saveBtn.disabled);
+    }
+
+    // Monitor button disabled attribute changes
+    if (pubBtn) {
+      var observer = new MutationObserver(function() {
+        diag('publish-btn state changed: disabled=' + pubBtn.disabled + ' text="' + pubBtn.textContent + '"');
+      });
+      observer.observe(pubBtn, { attributes: true, attributeFilter: ['disabled'], childList: true, subtree: true });
+    }
+
+    // Add a PRIMARY click listener BEFORE the define:vars one can interfere
+    // Use capture phase so we see it first
+    if (pubBtn) {
+      pubBtn.addEventListener('click', function(e) {
+        diag('PUBLISH CLICK captured! disabled=' + pubBtn.disabled + ' isTrusted=' + e.isTrusted);
+      }, true); // capture phase
+    }
+    
+    // Check if define:vars script executed by looking for its global
+    setTimeout(function() {
+      var hasEditor = typeof window.__editorMarkdown !== 'undefined';
+      var hasSetContent = typeof window.__editorSetContent !== 'undefined';
+      diag('After 3s: __editorMarkdown=' + hasEditor + ' __editorSetContent=' + hasSetContent + ' editorMd="' + (window.__editorMarkdown || 'UNDEFINED').substring(0,30) + '"');
+    }, 3000);
+
+    // Check for JS errors
+    window.addEventListener('error', function(e) {
+      diag('JS ERROR: ' + e.message + ' at ' + (e.filename || '').split('/').pop() + ':' + e.lineno);
+    });
+
+    window.addEventListener('unhandledrejection', function(e) {
+      diag('UNHANDLED REJECTION: ' + (e.reason && e.reason.message || e.reason));
+    });
+  });
+})();
+</script>
+
 <style is:global>
   @import '../../../styles/theme.css';
   @import '../../../styles/composer.css';
