@@ -153,43 +153,45 @@ const moodCSS = (!moodDisabled && currentMood && MOOD_PALETTES[currentMood])
       border-radius: 0 2px 2px 0;
     }
 
-    /* ── Ambient Header ── */
-    .reading-header {
+    /* ── Focus Top App Bar (M3 Center-Aligned) ── */
+    .focus-top-bar {
       position: fixed;
       top: 0;
       left: 0;
       right: 0;
       z-index: 900;
-      background: linear-gradient(to bottom, var(--md-sys-color-surface) 60%, transparent);
-      transform: translateY(-100%);
-      transition: transform 0.3s ease;
+      background: transparent;
+      transform: translateY(0);
+      transition: transform var(--md-sys-motion-duration-medium2) var(--md-sys-motion-easing-standard),
+                  background-color var(--md-sys-motion-duration-medium2) var(--md-sys-motion-easing-standard),
+                  box-shadow var(--md-sys-motion-duration-medium2) var(--md-sys-motion-easing-standard);
       padding: var(--space-3) var(--space-6);
       display: flex;
+      flex-direction: column;
       align-items: center;
-      gap: var(--space-4);
+      justify-content: center;
+      gap: 0;
+      pointer-events: none;
     }
-    .reading-header.visible { transform: translateY(0); }
-    .reading-header-title {
+    .focus-top-bar[data-visible="false"] {
+      transform: translateY(-100%);
+    }
+    .focus-top-bar[data-elevated="true"] {
+      background: var(--md-sys-color-surface);
+      box-shadow: var(--md-sys-elevation-2);
+      pointer-events: auto;
+    }
+    .focus-bar-title {
       font: var(--md-sys-typescale-title-medium);
       color: var(--md-sys-color-on-surface);
       white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;
-      flex: 1;
+      max-width: 100%;
     }
-    .reading-header-chapter {
+    .focus-bar-meta {
       font: var(--md-sys-typescale-body-small);
       color: var(--md-sys-color-on-surface-variant);
-      white-space: nowrap;
-    }
-    .reading-header-exit {
-      font: var(--md-sys-typescale-label-large);
-      color: var(--md-sys-color-primary);
-      background: var(--md-sys-color-primary-container);
-      border: none;
-      border-radius: var(--md-sys-shape-corner-full);
-      padding: var(--space-2) var(--space-4);
-      cursor: pointer;
       white-space: nowrap;
     }
 
@@ -202,7 +204,7 @@ const moodCSS = (!moodDisabled && currentMood && MOOD_PALETTES[currentMood])
     .reading-container[data-font-size="small"] { font-size: 0.9375rem; }
     .reading-container[data-font-size="default"] { font-size: 1rem; }
     .reading-container[data-font-size="large"] { font-size: 1.125rem; }
-    .reading-container[data-font-size="x-large"] { font-size: 1.25rem; }
+    .reading-container[data-font-size="xlarge"] { font-size: 1.25rem; }
 
     /* ── Work Metadata (minimal, top) ── */
     .reading-work-meta {
@@ -376,56 +378,161 @@ const moodCSS = (!moodDisabled && currentMood && MOOD_PALETTES[currentMood])
       color: var(--md-sys-color-outline);
     }
 
-    /* ── Chapter List (collapsible) ── */
-    .reading-chapters-drawer {
+    /* ── FAB (Floating Action Button) ── */
+    .focus-fab {
       position: fixed;
-      right: 0;
-      top: 0;
-      bottom: 0;
-      width: 320px;
-      max-width: 85vw;
-      background: var(--md-sys-color-surface-container);
-      transform: translateX(100%);
-      transition: transform 0.3s ease;
-      z-index: 950;
-      overflow-y: auto;
-      padding: var(--space-6);
-      box-shadow: -4px 0 24px rgba(0,0,0,0.3);
+      bottom: var(--space-4);
+      right: var(--space-4);
+      z-index: 800;
+      width: 56px;
+      height: 56px;
+      border-radius: var(--md-sys-shape-corner-large);
+      background: var(--md-sys-color-primary-container);
+      color: var(--md-sys-color-on-primary-container);
+      border: none;
+      cursor: pointer;
+      font-size: 1.375rem;
+      line-height: 1;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      box-shadow: var(--md-sys-elevation-3);
+      transition: transform var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard),
+                  box-shadow var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard);
     }
-    .reading-chapters-drawer.open { transform: translateX(0); }
-    .reading-drawer-overlay {
+    .focus-fab:hover {
+      transform: scale(1.05);
+      box-shadow: var(--md-sys-elevation-3);
+    }
+    .focus-fab:active {
+      transform: scale(0.97);
+    }
+
+    /* ── Focus Sheet Backdrop ── */
+    .focus-sheet-backdrop {
       position: fixed;
       inset: 0;
       background: rgba(0,0,0,0.5);
       z-index: 940;
       opacity: 0;
       pointer-events: none;
-      transition: opacity 0.3s;
+      transition: opacity var(--md-sys-motion-duration-medium2) var(--md-sys-motion-easing-standard);
     }
-    .reading-drawer-overlay.open { opacity: 1; pointer-events: auto; }
-    .reading-drawer-title {
+    .focus-sheet-backdrop.open {
+      opacity: 1;
+      pointer-events: auto;
+    }
+
+    /* ── Focus Sheet (Bottom Sheet mobile / Side Sheet desktop) ── */
+    .focus-sheet {
+      position: fixed;
+      z-index: 950;
+      background: var(--md-sys-color-surface-container-low);
+      overflow-y: auto;
+      /* Mobile: Bottom Sheet */
+      bottom: 0;
+      left: 0;
+      right: 0;
+      max-height: 85vh;
+      border-radius: var(--md-sys-shape-corner-extra-large) var(--md-sys-shape-corner-extra-large) 0 0;
+      transform: translateY(100%);
+      transition: transform var(--md-sys-motion-duration-medium4) var(--md-sys-motion-easing-emphasized);
+      box-shadow: var(--md-sys-elevation-3);
+    }
+    .focus-sheet.open {
+      transform: translateY(0);
+    }
+
+    /* Desktop: Side Sheet (from right) */
+    @media (min-width: 769px) {
+      .focus-sheet {
+        top: 0;
+        bottom: 0;
+        left: auto;
+        right: 0;
+        width: 360px;
+        max-width: 85vw;
+        max-height: 100vh;
+        border-radius: 0;
+        transform: translateX(100%);
+        transition: transform var(--md-sys-motion-duration-medium4) var(--md-sys-motion-easing-emphasized);
+      }
+      .focus-sheet.open {
+        transform: translateX(0);
+      }
+    }
+
+    /* Drag handle (bottom sheet only) */
+    .focus-sheet-drag-handle {
+      display: flex;
+      justify-content: center;
+      padding: var(--space-3) 0 var(--space-1);
+    }
+    @media (min-width: 769px) {
+      .focus-sheet-drag-handle { display: none; }
+    }
+    .focus-sheet-drag-indicator {
+      width: 32px;
+      height: 4px;
+      border-radius: var(--md-sys-shape-corner-full);
+      background: var(--md-sys-color-outline-variant);
+    }
+
+    /* Sheet header */
+    .focus-sheet-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: var(--space-3) var(--space-5) var(--space-2);
+    }
+    .focus-sheet-title {
       font: var(--md-sys-typescale-title-medium);
       color: var(--md-sys-color-on-surface);
-      margin: 0 0 var(--space-4);
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
     }
-    .reading-drawer-close {
+    .focus-sheet-close {
       background: none;
       border: none;
       color: var(--md-sys-color-on-surface-variant);
       cursor: pointer;
-      font-size: 1.25rem;
+      font-size: 1.125rem;
       padding: var(--space-1);
       line-height: 1;
+      border-radius: var(--md-sys-shape-corner-full);
+      width: 32px;
+      height: 32px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
     }
-    .reading-drawer-list {
+    .focus-sheet-close:hover {
+      background: var(--md-sys-color-surface-container-high);
+    }
+
+    /* Sheet sections */
+    .focus-sheet-section {
+      padding: var(--space-2) var(--space-5) var(--space-3);
+      border-top: 1px solid var(--md-sys-color-outline-variant);
+    }
+    .focus-sheet-section:first-of-type {
+      border-top: none;
+    }
+    .focus-sheet-section-title {
+      font: var(--md-sys-typescale-label-large);
+      color: var(--md-sys-color-on-surface-variant);
+      margin: 0 0 var(--space-3);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+
+    /* Chapter list inside sheet */
+    .focus-sheet-chapter-list {
       list-style: none;
       padding: 0;
       margin: 0;
+      max-height: 200px;
+      overflow-y: auto;
     }
-    .reading-drawer-item a {
+    .focus-sheet-chapter-item a {
       display: block;
       padding: var(--space-2) var(--space-3);
       color: var(--md-sys-color-on-surface-variant);
@@ -434,47 +541,115 @@ const moodCSS = (!moodDisabled && currentMood && MOOD_PALETTES[currentMood])
       font: var(--md-sys-typescale-body-large);
       transition: background 0.15s;
     }
-    .reading-drawer-item a:hover { background: var(--md-sys-color-surface-container-high); }
-    .reading-drawer-item.current a {
+    .focus-sheet-chapter-item a:hover {
+      background: var(--md-sys-color-surface-container-high);
+    }
+    .focus-sheet-chapter-item.current a {
       color: var(--md-sys-color-primary);
       background: var(--md-sys-color-primary-container);
       font-weight: 500;
     }
-    .reading-drawer-item .chapter-words {
+    .focus-sheet-chapter-item .chapter-words {
       font: var(--md-sys-typescale-body-small);
       color: var(--md-sys-color-outline);
     }
 
-    /* ── Bottom Toolbar ── */
-    .reading-toolbar {
-      position: fixed;
-      bottom: 0;
-      left: 0;
-      right: 0;
-      z-index: 900;
-      background: linear-gradient(to top, var(--md-sys-color-surface) 70%, transparent);
-      padding: var(--space-4) var(--space-6);
+    /* Settings rows */
+    .focus-sheet-setting-row {
       display: flex;
-      justify-content: center;
-      gap: var(--space-3);
-      transform: translateY(100%);
-      transition: transform 0.3s ease;
+      align-items: center;
+      justify-content: space-between;
+      padding: var(--space-2) 0;
     }
-    .reading-toolbar.visible { transform: translateY(0); }
-    .reading-toolbar-btn {
+    .focus-sheet-setting-label {
+      font: var(--md-sys-typescale-body-large);
+      color: var(--md-sys-color-on-surface);
+    }
+    .focus-sheet-size-buttons {
+      display: flex;
+      gap: var(--space-1);
+    }
+    .focus-sheet-size-btn {
+      width: 36px;
+      height: 36px;
+      border-radius: var(--md-sys-shape-corner-full);
+      border: 1px solid var(--md-sys-color-outline-variant);
+      background: var(--md-sys-color-surface-container);
+      color: var(--md-sys-color-on-surface);
+      cursor: pointer;
+      font: var(--md-sys-typescale-label-large);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: background var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard),
+                  border-color var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard);
+    }
+    .focus-sheet-size-btn.active {
+      background: var(--md-sys-color-primary-container);
+      color: var(--md-sys-color-on-primary-container);
+      border-color: var(--md-sys-color-primary);
+    }
+    .focus-sheet-size-btn:hover:not(.active) {
+      background: var(--md-sys-color-surface-container-high);
+    }
+
+    /* Mood toggle button */
+    .focus-sheet-toggle-btn {
+      padding: var(--space-2) var(--space-4);
+      border-radius: var(--md-sys-shape-corner-full);
+      border: 1px solid var(--md-sys-color-outline-variant);
+      background: var(--md-sys-color-surface-container);
+      color: var(--md-sys-color-on-surface);
+      cursor: pointer;
+      font: var(--md-sys-typescale-label-large);
+      transition: background var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard),
+                  border-color var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard);
+    }
+    .focus-sheet-toggle-btn.active {
+      background: var(--md-sys-color-primary-container);
+      color: var(--md-sys-color-on-primary-container);
+      border-color: var(--md-sys-color-primary);
+    }
+
+    /* Navigation section */
+    .focus-sheet-nav-buttons {
+      display: flex;
+      gap: var(--space-3);
+      margin-bottom: var(--space-3);
+    }
+    .focus-sheet-nav-btn {
+      flex: 1;
+      text-align: center;
+      font: var(--md-sys-typescale-label-large);
+      color: var(--md-sys-color-primary);
+      background: var(--md-sys-color-primary-container);
+      border: none;
+      border-radius: var(--md-sys-shape-corner-full);
+      padding: var(--space-3) var(--space-4);
+      cursor: pointer;
+      text-decoration: none;
+      transition: opacity 0.2s;
+    }
+    .focus-sheet-nav-btn:hover { opacity: 0.85; }
+    .focus-sheet-nav-btn.disabled {
+      opacity: 0.4;
+      pointer-events: none;
+    }
+    .focus-sheet-exit-btn {
+      display: block;
+      width: 100%;
+      text-align: center;
       font: var(--md-sys-typescale-label-large);
       color: var(--md-sys-color-on-surface);
       background: var(--md-sys-color-surface-container-high);
       border: 1px solid var(--md-sys-color-outline-variant);
       border-radius: var(--md-sys-shape-corner-full);
-      padding: var(--space-2) var(--space-4);
+      padding: var(--space-3) var(--space-4);
       cursor: pointer;
-      display: flex;
-      align-items: center;
-      gap: var(--space-2);
       text-decoration: none;
+      transition: background 0.15s;
     }
-    .reading-toolbar-btn:hover {
+    .focus-sheet-exit-btn:hover {
       background: var(--md-sys-color-surface-container-highest);
       border-color: var(--md-sys-color-outline);
     }
@@ -483,14 +658,14 @@ const moodCSS = (!moodDisabled && currentMood && MOOD_PALETTES[currentMood])
     .reading-shortcuts {
       position: fixed;
       bottom: var(--space-16);
-      right: var(--space-4);
+      left: var(--space-4);
       z-index: 800;
       font: var(--md-sys-typescale-body-small);
       color: var(--md-sys-color-outline);
       opacity: 0;
       transition: opacity 0.5s;
       pointer-events: none;
-      text-align: right;
+      text-align: left;
     }
     .reading-shortcuts.visible { opacity: 0.6; }
     kbd {
@@ -548,7 +723,7 @@ const moodCSS = (!moodDisabled && currentMood && MOOD_PALETTES[currentMood])
 
     /* ── Reduced Motion ── */
     @media (prefers-reduced-motion: reduce) {
-      .reading-progress-bar, .reading-header, .reading-toolbar, .reading-chapters-drawer {
+      .reading-progress-bar, .focus-top-bar, .focus-sheet, .focus-sheet-backdrop, .focus-fab {
         transition: none !important;
       }
     }
