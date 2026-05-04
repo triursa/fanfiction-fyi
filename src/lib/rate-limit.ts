@@ -23,7 +23,7 @@ const WINDOW_SECONDS = 300; // 5 minutes
 export async function checkRateLimit(
   db: D1Database,
   key: string,
-  action: string = 'login'
+  action = 'login'
 ): Promise<RateLimitResult> {
   try {
     // Clean up expired entries first
@@ -66,7 +66,7 @@ export async function checkRateLimit(
 export async function recordFailedAttempt(
   db: D1Database,
   key: string,
-  action: string = 'login'
+  action = 'login'
 ): Promise<void> {
   try {
     await db.prepare(
@@ -83,7 +83,7 @@ export async function recordFailedAttempt(
 export async function clearRateLimit(
   db: D1Database,
   key: string,
-  action: string = 'login'
+  action = 'login'
 ): Promise<void> {
   try {
     await db.prepare(

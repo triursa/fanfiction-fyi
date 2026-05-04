@@ -430,6 +430,8 @@ const initialChapterData = JSON.stringify({
 </style>
 
 <script define:vars={{ workId, workData, initialChapterData }}>
+  import { editorMarkdown, editorSetContent, editorOnContentChange } from '../../../lib/editor-signals';
+
   const work = JSON.parse(workData);
   const initialChapter = JSON.parse(initialChapterData);
   let currentChapterId = initialChapter.id;
@@ -523,8 +525,9 @@ const initialChapterData = JSON.stringify({
         // Check again after parsing JSON — another switch may have started
         if (chapterSwitchToken !== thisToken) return;
         const contentMd = data.content_md || '';
-        if (window.__editorSetContent) {
-          window.__editorSetContent(contentMd);
+        const setFn = editorSetContent.value;
+        if (setFn) {
+          setFn(contentMd);
         }
         const words = contentMd.split(/\s+/).filter(Boolean).length;
         wordCountEl.textContent = `${words} words`;
@@ -611,9 +614,9 @@ const initialChapterData = JSON.stringify({
     }
 
     // Read content after any queued save has finished so we don't send stale data
-    const contentMd = window.__editorMarkdown || '';
+    const contentMd = editorMarkdown.value || '';
     const title = chapterTitle.value || `Chapter ${currentChapterPosition}`;
-    clientLog('saveChapter_content', `title="${title}" mdLen=${contentMd.length} editorMarkdown=${typeof window.__editorMarkdown}`);
+    clientLog('saveChapter_content', `title="${title}" mdLen=${contentMd.length}`);
 
     // Snapshot content at save time — only clear dirty flag if no new edits happened
     const contentAtSaveStart = contentMd;
@@ -643,7 +646,7 @@ const initialChapterData = JSON.stringify({
       clientLog('saveChapter_response', `status=${res.status} ok=${res.ok}`);
       if (res.ok) {
         // Only clear dirty flag if no new edits happened while we were saving
-        const contentNow = window.__editorMarkdown || '';
+        const contentNow = editorMarkdown.value || '';
         if (contentNow === contentAtSaveStart) {
           hasUnsavedChanges = false;
         }
@@ -772,9 +775,9 @@ const initialChapterData = JSON.stringify({
     }, 5000);
   }
 
-  // Hook into editor content changes via the global callback
-  const originalOnContentChange = window.__editorOnContentChange;
-  window.__editorOnContentChange = (md) => {
+  // Hook into editor content changes via the signal callback
+  const originalOnContentChange = editorOnContentChange.value;
+  editorOnContentChange.value = (md) => {
     const words = md.split(/\s+/).filter(Boolean).length;
     wordCountEl.textContent = `${words} words`;
     scheduleAutosave();

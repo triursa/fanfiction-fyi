@@ -102,14 +102,14 @@ export const GET: APIRoute = async ({ url, locals, request }) => {
       ...workIds,
     );
 
-    const tagsByWorkId = new Map<number, Array<{ name: string; type: string }>>();
+    const tagsByWorkId = new Map<number, { name: string; type: string }[]>();
     for (const row of tagRows) {
       const existing = tagsByWorkId.get(row.work_id) ?? [];
       existing.push({ name: row.name, type: row.type });
       tagsByWorkId.set(row.work_id, existing);
     }
 
-    const pseudsByWorkId = new Map<number, Array<{ name: string; icon_key: string }>>();
+    const pseudsByWorkId = new Map<number, { name: string; icon_key: string }[]>();
     for (const row of pseudRows) {
       const existing = pseudsByWorkId.get(row.work_id) ?? [];
       existing.push({ name: row.name, icon_key: row.icon_key });

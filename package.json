@@ -9,7 +9,11 @@
     "preview": "astro preview",
     "astro": "astro",
     "db:migrate": "wrangler d1 execute fanfiction-fyi-db --local --file=schema/001_initial.sql",
-    "db:migrate:remote": "wrangler d1 execute fanfiction-fyi-db --remote --file=schema/001_initial.sql"
+    "db:migrate:remote": "wrangler d1 execute fanfiction-fyi-db --remote --file=schema/001_initial.sql",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "format": "prettier --write .",
+    "format:check": "prettier --check ."
   },
   "dependencies": {
     "@astrojs/cloudflare": "^12.0.0",
@@ -33,11 +37,18 @@
     "marked": "^15.0.0",
     "preact": "^10.0.0",
     "sanitize-html": "^2.13.0",
-    "tiptap": "^1.0.0",
     "turndown": "^7.0.0"
   },
   "devDependencies": {
     "@types/turndown": "^5.0.0",
+    "@typescript-eslint/eslint-plugin": "^8.59.1",
+    "@typescript-eslint/parser": "^8.59.1",
+    "eslint": "^10.3.0",
+    "eslint-config-prettier": "^10.1.8",
+    "eslint-plugin-astro": "^1.7.0",
+    "eslint-plugin-react-hooks": "^7.1.1",
+    "prettier": "^3.8.3",
+    "prettier-plugin-astro": "^0.14.1",
     "wrangler": "^4.85.0"
   }
 }

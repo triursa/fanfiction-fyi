@@ -9,7 +9,7 @@ interface ToastMessage {
 }
 
 let toastIdCounter = 0;
-const listeners: Array<(msg: ToastMessage) => void> = [];
+const listeners: ((msg: ToastMessage) => void)[] = [];
 
 /**
  * Show a toast notification. Can be called from anywhere (even non-Preact code).
