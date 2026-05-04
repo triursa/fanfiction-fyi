@@ -19,19 +19,19 @@
 
 ---
 
-## Phase 1: Drizzle ORM + Type Safety
+## Phase 1: Drizzle ORM + Type Safety ✅ COMPLETE
 **Goal:** Replace raw SQL strings with type-safe queries. Single source of truth for schema.
-**Effort:** ~3-4 days
+**Effort:** ~3-4 days → Completed
 
-| # | Item | Why |
-|---|------|-----|
-| 1.1 | Install Drizzle | `npm i drizzle-orm @neondatabase/serverless` → actually for D1: `npm i drizzle-orm` + `npm i -D drizzle-kit`. Use `drizzle-orm/d1`. |
-| 1.2 | Define schema in `src/lib/schema/` | One file per domain: `users.ts`, `works.ts`, `tags.ts`, `chapters.ts`, `comments.ts`, `collections.ts`, `series.ts`, `kudos.ts`, `bookmarks.ts`, `pseuds.ts`. Mirror all 19 migrations into Drizzle table definitions. |
-| 1.3 | Replace `src/lib/db.ts` | New `db.ts` instantiates Drizzle with `drizzle(d1Binding)`. Keep `queryFirst`/`queryAll` as thin wrappers during migration — delete once all call sites converted. |
-| 1.4 | Convert call sites | Replace all `db.prepare(sql).bind()` calls with Drizzle query builder. Start with auth (critical path), then works/chapters (content), then tags/comments/kudos (features). |
-| 1.5 | Generate TypeScript types | `drizzle-kit generate` → types now derive from schema, not hand-maintained `types.ts`. Delete manual interfaces that overlap. |
-| 1.6 | Migration tooling | `drizzle-kit push` for dev, `drizzle-kit generate` for production migrations. Add `npm run db:push`, `npm run db:generate`, `npm run db:migrate` scripts. |
-| 1.7 | Delete `src/lib/types.ts` (merged) | Once Drizzle types cover everything, remove duplicated interfaces. |
+|| # | Item | Status ||
+||---|------|-------||
+|| 1.1 | Install Drizzle | ✅ Done |
+|| 1.2 | Define schema in `src/lib/schema/` | ✅ Done — users, works, tags, chapters, comments, collections, series, kudos, bookmarks, pseuds, canon, characters, publish-log |
+|| 1.3 | Replace `src/lib/db.ts` | ✅ Done — `getDrizzle()` + `getDb()` helpers. Legacy `queryFirst`/`queryAll`/`run` removed |
+|| 1.4 | Convert call sites | ✅ Done — 70+ files converted to Drizzle ORM |
+|| 1.5 | Generate TypeScript types | ✅ Done — `drizzle-kit generate` outputs migration, types derive from schema |
+|| 1.6 | Migration tooling | ✅ Done — `drizzle-kit generate` + `drizzle.config.ts` |
+|| 1.7 | Delete manual interfaces from `types.ts` | ✅ Done — only UserRole, role utilities, and type aliases remain |
 
 **Verification:** All existing API routes return identical results. `npm run db:push` works against local D1. Types compile clean.
 
