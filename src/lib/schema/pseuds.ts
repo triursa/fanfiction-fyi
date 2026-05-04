@@ -1,4 +1,4 @@
-import { sqliteTable, text, integer, uniqueIndex } from 'drizzle-orm/sqlite-core';
+import { sqliteTable, text, integer } from 'drizzle-orm/sqlite-core';
 import { users } from './users';
 
 export const pseuds = sqliteTable('pseuds', {
@@ -16,7 +16,6 @@ export const pseuds = sqliteTable('pseuds', {
   isDefault: integer('is_default').notNull().default(0),
 });
 
-// Partial unique index: only one default pseud per user
-export const idxPseudsUserDefault = uniqueIndex('idx_pseuds_user_default').on(pseuds.userId);
-// Note: SQLite partial index WHERE clause not directly supported in Drizzle schema DSL;
-// this index gets the structural part right but may need raw SQL for the WHERE clause.
+// Note: the partial unique index `CREATE UNIQUE INDEX idx_pseuds_user_default ON pseuds(user_id)
+// WHERE is_default = 1` cannot be expressed in Drizzle's schema DSL — it is enforced via the
+// raw SQL statement in the migration file (drizzle/0000_tiny_black_tom.sql).

@@ -31,8 +31,10 @@ export const POST: APIRoute = async ({ locals, request }) => {
   if (!rl.allowed) {
     return new Response(JSON.stringify({ error: 'Rate limit exceeded. Try again later.' }), {
       status: 429,
-      headers: { 'Content-Type': 'application/json' },
-      'Retry-After': String(rl.retryAfterSeconds),
+      headers: {
+        'Content-Type': 'application/json',
+        'Retry-After': String(rl.retryAfterSeconds),
+      },
     });
   }
   await recordFailedAttempt(d1, rlKey, 'change-password');

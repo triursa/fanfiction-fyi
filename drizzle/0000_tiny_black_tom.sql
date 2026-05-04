@@ -2,7 +2,7 @@ CREATE TABLE `invite_codes` (
 	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
 	`code` text NOT NULL,
 	`used_by` integer,
-	`created_at` text DEFAULT '(datetime(''now''))' NOT NULL,
+	`created_at` text DEFAULT (datetime('now')) NOT NULL,
 	`used_at` text,
 	FOREIGN KEY (`used_by`) REFERENCES `users`(`id`) ON UPDATE no action ON DELETE no action
 );
@@ -11,7 +11,7 @@ CREATE UNIQUE INDEX `invite_codes_code_unique` ON `invite_codes` (`code`);--> st
 CREATE TABLE `oauth_states` (
 	`state` text PRIMARY KEY NOT NULL,
 	`user_id` integer NOT NULL,
-	`created_at` text DEFAULT 'CURRENT_TIMESTAMP' NOT NULL,
+	`created_at` text DEFAULT CURRENT_TIMESTAMP NOT NULL,
 	FOREIGN KEY (`user_id`) REFERENCES `users`(`id`) ON UPDATE no action ON DELETE no action
 );
 --> statement-breakpoint
@@ -26,7 +26,7 @@ CREATE TABLE `sessions` (
 	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
 	`user_id` integer NOT NULL,
 	`token` text NOT NULL,
-	`created_at` text DEFAULT '(datetime(''now''))' NOT NULL,
+	`created_at` text DEFAULT (datetime('now')) NOT NULL,
 	`expires_at` text NOT NULL,
 	FOREIGN KEY (`user_id`) REFERENCES `users`(`id`) ON UPDATE no action ON DELETE cascade
 );
@@ -42,8 +42,8 @@ CREATE TABLE `users` (
 	`avatar_key` text,
 	`display_name` text,
 	`invite_code` text,
-	`created_at` text DEFAULT '(datetime(''now''))' NOT NULL,
-	`updated_at` text DEFAULT '(datetime(''now''))' NOT NULL,
+	`created_at` text DEFAULT (datetime('now')) NOT NULL,
+	`updated_at` text DEFAULT (datetime('now')) NOT NULL,
 	`banned` integer DEFAULT 0 NOT NULL,
 	`theme` text DEFAULT 'obsidian',
 	`bio` text DEFAULT '',
@@ -60,7 +60,7 @@ CREATE TABLE `pseuds` (
 	`name` text NOT NULL,
 	`description` text,
 	`icon_key` text,
-	`created_at` text DEFAULT '(datetime(''now''))' NOT NULL,
+	`created_at` text DEFAULT (datetime('now')) NOT NULL,
 	`pinned_work_ids` text DEFAULT '[]',
 	`banner_key` text,
 	`theme_color` text,
@@ -68,6 +68,7 @@ CREATE TABLE `pseuds` (
 	FOREIGN KEY (`user_id`) REFERENCES `users`(`id`) ON UPDATE no action ON DELETE cascade
 );
 --> statement-breakpoint
+CREATE UNIQUE INDEX `idx_pseuds_user_default` ON `pseuds` (`user_id`) WHERE is_default = 1;--> statement-breakpoint
 CREATE TABLE `chapter_versions` (
 	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
 	`chapter_id` integer NOT NULL,
@@ -75,7 +76,7 @@ CREATE TABLE `chapter_versions` (
 	`content_md` text,
 	`content_html` text,
 	`note` text,
-	`created_at` text DEFAULT '(datetime(''now''))' NOT NULL,
+	`created_at` text DEFAULT (datetime('now')) NOT NULL,
 	FOREIGN KEY (`chapter_id`) REFERENCES `chapters`(`id`) ON UPDATE no action ON DELETE cascade
 );
 --> statement-breakpoint
@@ -88,8 +89,8 @@ CREATE TABLE `chapters` (
 	`content_html` text,
 	`draft` integer DEFAULT 1 NOT NULL,
 	`word_count` integer DEFAULT 0 NOT NULL,
-	`created_at` text DEFAULT '(datetime(''now''))' NOT NULL,
-	`updated_at` text DEFAULT '(datetime(''now''))' NOT NULL,
+	`created_at` text DEFAULT (datetime('now')) NOT NULL,
+	`updated_at` text DEFAULT (datetime('now')) NOT NULL,
 	`images` text DEFAULT '[]',
 	`mood` text,
 	FOREIGN KEY (`work_id`) REFERENCES `works`(`id`) ON UPDATE no action ON DELETE cascade
@@ -110,7 +111,7 @@ CREATE TABLE `readings` (
 	`work_id` integer NOT NULL,
 	`for_later` integer DEFAULT 0 NOT NULL,
 	`last_chapter` integer,
-	`updated_at` text DEFAULT 'CURRENT_TIMESTAMP' NOT NULL,
+	`updated_at` text DEFAULT CURRENT_TIMESTAMP NOT NULL,
 	FOREIGN KEY (`pseud_id`) REFERENCES `pseuds`(`id`) ON UPDATE no action ON DELETE cascade,
 	FOREIGN KEY (`work_id`) REFERENCES `works`(`id`) ON UPDATE no action ON DELETE cascade
 );
@@ -125,8 +126,8 @@ CREATE TABLE `works` (
 	`word_count` integer DEFAULT 0 NOT NULL,
 	`complete` integer DEFAULT 0 NOT NULL,
 	`published_at` text,
-	`updated_at` text DEFAULT '(datetime(''now''))' NOT NULL,
-	`created_at` text DEFAULT '(datetime(''now''))' NOT NULL
+	`updated_at` text DEFAULT (datetime('now')) NOT NULL,
+	`created_at` text DEFAULT (datetime('now')) NOT NULL
 );
 --> statement-breakpoint
 CREATE TABLE `bookmarks` (
@@ -135,7 +136,7 @@ CREATE TABLE `bookmarks` (
 	`work_id` integer NOT NULL,
 	`notes` text,
 	`private` integer DEFAULT 0 NOT NULL,
-	`created_at` text DEFAULT 'CURRENT_TIMESTAMP' NOT NULL,
+	`created_at` text DEFAULT CURRENT_TIMESTAMP NOT NULL,
 	FOREIGN KEY (`pseud_id`) REFERENCES `pseuds`(`id`) ON UPDATE no action ON DELETE cascade,
 	FOREIGN KEY (`work_id`) REFERENCES `works`(`id`) ON UPDATE no action ON DELETE cascade
 );
@@ -144,7 +145,7 @@ CREATE TABLE `collection_items` (
 	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
 	`collection_id` integer NOT NULL,
 	`work_id` integer NOT NULL,
-	`added_at` text DEFAULT '(datetime(''now''))' NOT NULL,
+	`added_at` text DEFAULT (datetime('now')) NOT NULL,
 	FOREIGN KEY (`collection_id`) REFERENCES `collections`(`id`) ON UPDATE no action ON DELETE cascade,
 	FOREIGN KEY (`work_id`) REFERENCES `works`(`id`) ON UPDATE no action ON DELETE cascade
 );
@@ -155,8 +156,8 @@ CREATE TABLE `collections` (
 	`title` text NOT NULL,
 	`description` text,
 	`privacy` text DEFAULT 'open' NOT NULL,
-	`created_at` text DEFAULT '(datetime(''now''))' NOT NULL,
-	`updated_at` text DEFAULT '(datetime(''now''))' NOT NULL
+	`created_at` text DEFAULT (datetime('now')) NOT NULL,
+	`updated_at` text DEFAULT (datetime('now')) NOT NULL
 );
 --> statement-breakpoint
 CREATE UNIQUE INDEX `collections_name_unique` ON `collections` (`name`);--> statement-breakpoint
@@ -167,7 +168,7 @@ CREATE TABLE `comments` (
 	`pseud_id` integer NOT NULL,
 	`parent_id` integer,
 	`content` text NOT NULL,
-	`created_at` text DEFAULT 'CURRENT_TIMESTAMP' NOT NULL,
+	`created_at` text DEFAULT CURRENT_TIMESTAMP NOT NULL,
 	FOREIGN KEY (`work_id`) REFERENCES `works`(`id`) ON UPDATE no action ON DELETE cascade,
 	FOREIGN KEY (`chapter_id`) REFERENCES `chapters`(`id`) ON UPDATE no action ON DELETE cascade,
 	FOREIGN KEY (`pseud_id`) REFERENCES `pseuds`(`id`) ON UPDATE no action ON DELETE cascade,
@@ -178,7 +179,7 @@ CREATE TABLE `kudos` (
 	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
 	`work_id` integer NOT NULL,
 	`pseud_id` integer NOT NULL,
-	`created_at` text DEFAULT '(datetime(''now''))' NOT NULL,
+	`created_at` text DEFAULT (datetime('now')) NOT NULL,
 	FOREIGN KEY (`work_id`) REFERENCES `works`(`id`) ON UPDATE no action ON DELETE cascade,
 	FOREIGN KEY (`pseud_id`) REFERENCES `pseuds`(`id`) ON UPDATE no action ON DELETE cascade
 );
@@ -196,8 +197,8 @@ CREATE TABLE `series` (
 	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
 	`title` text NOT NULL,
 	`description` text,
-	`created_at` text DEFAULT '(datetime(''now''))' NOT NULL,
-	`updated_at` text DEFAULT '(datetime(''now''))' NOT NULL,
+	`created_at` text DEFAULT (datetime('now')) NOT NULL,
+	`updated_at` text DEFAULT (datetime('now')) NOT NULL,
 	`creator_pseud_id` integer DEFAULT 0 NOT NULL,
 	`complete` integer DEFAULT 0 NOT NULL,
 	FOREIGN KEY (`creator_pseud_id`) REFERENCES `pseuds`(`id`) ON UPDATE no action ON DELETE no action
@@ -223,7 +224,7 @@ CREATE TABLE `chapter_reactions` (
 	`chapter_id` integer NOT NULL,
 	`pseud_id` integer NOT NULL,
 	`reaction` text NOT NULL,
-	`created_at` text DEFAULT '(datetime(''now''))' NOT NULL,
+	`created_at` text DEFAULT (datetime('now')) NOT NULL,
 	FOREIGN KEY (`chapter_id`) REFERENCES `chapters`(`id`) ON UPDATE no action ON DELETE cascade,
 	FOREIGN KEY (`pseud_id`) REFERENCES `pseuds`(`id`) ON UPDATE no action ON DELETE cascade
 );
@@ -235,7 +236,7 @@ CREATE TABLE `character_appearances` (
 	`role` text DEFAULT 'side' NOT NULL,
 	`notes` text,
 	`added_by` integer,
-	`created_at` text DEFAULT 'CURRENT_TIMESTAMP' NOT NULL,
+	`created_at` text DEFAULT CURRENT_TIMESTAMP NOT NULL,
 	FOREIGN KEY (`character_id`) REFERENCES `characters`(`id`) ON UPDATE no action ON DELETE cascade,
 	FOREIGN KEY (`work_id`) REFERENCES `works`(`id`) ON UPDATE no action ON DELETE cascade,
 	FOREIGN KEY (`added_by`) REFERENCES `pseuds`(`id`) ON UPDATE no action ON DELETE set null
@@ -245,8 +246,8 @@ CREATE TABLE `character_groups` (
 	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
 	`name` text NOT NULL,
 	`description` text,
-	`created_at` text DEFAULT 'CURRENT_TIMESTAMP' NOT NULL,
-	`updated_at` text DEFAULT 'CURRENT_TIMESTAMP' NOT NULL
+	`created_at` text DEFAULT CURRENT_TIMESTAMP NOT NULL,
+	`updated_at` text DEFAULT CURRENT_TIMESTAMP NOT NULL
 );
 --> statement-breakpoint
 CREATE TABLE `characters` (
@@ -261,8 +262,8 @@ CREATE TABLE `characters` (
 	`aliases` text,
 	`created_by` integer,
 	`updated_by` integer,
-	`created_at` text DEFAULT 'CURRENT_TIMESTAMP' NOT NULL,
-	`updated_at` text DEFAULT 'CURRENT_TIMESTAMP' NOT NULL,
+	`created_at` text DEFAULT CURRENT_TIMESTAMP NOT NULL,
+	`updated_at` text DEFAULT CURRENT_TIMESTAMP NOT NULL,
 	FOREIGN KEY (`group_id`) REFERENCES `character_groups`(`id`) ON UPDATE no action ON DELETE set null,
 	FOREIGN KEY (`tag_id`) REFERENCES `tags`(`id`) ON UPDATE no action ON DELETE set null,
 	FOREIGN KEY (`created_by`) REFERENCES `pseuds`(`id`) ON UPDATE no action ON DELETE set null,
@@ -274,7 +275,7 @@ CREATE TABLE `work_relations` (
 	`work_id` integer NOT NULL,
 	`related_work_id` integer NOT NULL,
 	`relation_type` text NOT NULL,
-	`created_at` text DEFAULT 'CURRENT_TIMESTAMP' NOT NULL,
+	`created_at` text DEFAULT CURRENT_TIMESTAMP NOT NULL,
 	FOREIGN KEY (`work_id`) REFERENCES `works`(`id`) ON UPDATE no action ON DELETE cascade,
 	FOREIGN KEY (`related_work_id`) REFERENCES `works`(`id`) ON UPDATE no action ON DELETE cascade
 );
@@ -284,7 +285,7 @@ CREATE TABLE `entity_references` (
 	`work_id` integer NOT NULL,
 	`entity_type` text NOT NULL,
 	`entity_id` integer NOT NULL,
-	`created_at` text DEFAULT 'CURRENT_TIMESTAMP' NOT NULL,
+	`created_at` text DEFAULT CURRENT_TIMESTAMP NOT NULL,
 	FOREIGN KEY (`work_id`) REFERENCES `works`(`id`) ON UPDATE no action ON DELETE cascade
 );
 --> statement-breakpoint
@@ -295,7 +296,7 @@ CREATE TABLE `location_edits` (
 	`field` text NOT NULL,
 	`old_value` text,
 	`new_value` text,
-	`created_at` text DEFAULT 'CURRENT_TIMESTAMP' NOT NULL,
+	`created_at` text DEFAULT CURRENT_TIMESTAMP NOT NULL,
 	FOREIGN KEY (`location_id`) REFERENCES `locations`(`id`) ON UPDATE no action ON DELETE cascade,
 	FOREIGN KEY (`pseud_id`) REFERENCES `pseuds`(`id`) ON UPDATE no action ON DELETE set null
 );
@@ -310,8 +311,8 @@ CREATE TABLE `locations` (
 	`parent_location_id` integer,
 	`created_by` integer,
 	`updated_by` integer,
-	`created_at` text DEFAULT 'CURRENT_TIMESTAMP' NOT NULL,
-	`updated_at` text DEFAULT 'CURRENT_TIMESTAMP' NOT NULL,
+	`created_at` text DEFAULT CURRENT_TIMESTAMP NOT NULL,
+	`updated_at` text DEFAULT CURRENT_TIMESTAMP NOT NULL,
 	FOREIGN KEY (`fandom_tag_id`) REFERENCES `tags`(`id`) ON UPDATE no action ON DELETE set null,
 	FOREIGN KEY (`parent_location_id`) REFERENCES `locations`(`id`) ON UPDATE no action ON DELETE set null,
 	FOREIGN KEY (`created_by`) REFERENCES `pseuds`(`id`) ON UPDATE no action ON DELETE set null,
@@ -326,7 +327,7 @@ CREATE TABLE `lore_edits` (
 	`field` text NOT NULL,
 	`old_value` text,
 	`new_value` text,
-	`created_at` text DEFAULT 'CURRENT_TIMESTAMP' NOT NULL,
+	`created_at` text DEFAULT CURRENT_TIMESTAMP NOT NULL,
 	FOREIGN KEY (`lore_entry_id`) REFERENCES `lore_entries`(`id`) ON UPDATE no action ON DELETE cascade,
 	FOREIGN KEY (`pseud_id`) REFERENCES `pseuds`(`id`) ON UPDATE no action ON DELETE set null
 );
@@ -341,8 +342,8 @@ CREATE TABLE `lore_entries` (
 	`fandom_tag_id` integer,
 	`created_by` integer,
 	`updated_by` integer,
-	`created_at` text DEFAULT 'CURRENT_TIMESTAMP' NOT NULL,
-	`updated_at` text DEFAULT 'CURRENT_TIMESTAMP' NOT NULL,
+	`created_at` text DEFAULT CURRENT_TIMESTAMP NOT NULL,
+	`updated_at` text DEFAULT CURRENT_TIMESTAMP NOT NULL,
 	FOREIGN KEY (`fandom_tag_id`) REFERENCES `tags`(`id`) ON UPDATE no action ON DELETE set null,
 	FOREIGN KEY (`created_by`) REFERENCES `pseuds`(`id`) ON UPDATE no action ON DELETE set null,
 	FOREIGN KEY (`updated_by`) REFERENCES `pseuds`(`id`) ON UPDATE no action ON DELETE set null
@@ -360,5 +361,5 @@ CREATE TABLE `publish_log` (
 	`user_id` integer,
 	`request_summary` text,
 	`response_summary` text,
-	`created_at` text DEFAULT 'CURRENT_TIMESTAMP' NOT NULL
+	`created_at` text DEFAULT CURRENT_TIMESTAMP NOT NULL
 );

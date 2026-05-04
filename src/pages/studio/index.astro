@@ -4,7 +4,7 @@ import Base from '@/layouts/Base.astro';
 import CreatorStudio from '@/components/CreatorStudio';
 import { getDrizzle } from '@/lib/db';
 import { sessions } from '@/lib/schema';
-import { eq, and, gt } from 'drizzle-orm';
+import { eq, and, gt, sql } from 'drizzle-orm';
 
 // Auth gate: must be logged in
 const cookie = Astro.request.headers.get('cookie') ?? '';
@@ -12,7 +12,7 @@ const sessionMatch = cookie.match(/session=([a-f0-9]+)/);
 if (!sessionMatch) return Astro.redirect('/login');
 
 const db = getDrizzle(Astro.locals.runtime.env.DB as D1Database);
-const session = await db.select({ userId: sessions.userId }).from(sessions).where(and(eq(sessions.token, sessionMatch[1]), gt(sessions.expiresAt, new Date().toISOString()))).get();
+const session = await db.select({ userId: sessions.userId }).from(sessions).where(and(eq(sessions.token, sessionMatch[1]), gt(sessions.expiresAt, sql`datetime('now')`))).get();
 if (!session) return Astro.redirect('/login');
 ---
 

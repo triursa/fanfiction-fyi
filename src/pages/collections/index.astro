@@ -2,23 +2,23 @@
 export const prerender = false;
 import Base from '../../layouts/Base.astro';
 import { getDrizzle } from '../../lib/db';
-import { collections, collectionItems } from '../../lib/schema';
+import { collections as collectionsTable, collectionItems } from '../../lib/schema';
 import { sql, desc, inArray } from 'drizzle-orm';
 
 const db = getDrizzle(Astro.locals.runtime.env.DB as D1Database);
 
 const collectionRows = await db.select({
-  id: collections.id,
-  name: collections.name,
-  description: collections.description,
-  privacy: collections.privacy,
-  createdAt: collections.createdAt,
-  itemCount: sql<number>`(SELECT COUNT(*) FROM collection_items WHERE collection_id = ${collections.id})`.as('item_count'),
+  id: collectionsTable.id,
+  name: collectionsTable.name,
+  description: collectionsTable.description,
+  privacy: collectionsTable.privacy,
+  createdAt: collectionsTable.createdAt,
+  itemCount: sql<number>`(SELECT COUNT(*) FROM collection_items WHERE collection_id = ${collectionsTable.id})`.as('item_count'),
 })
-  .from(collections)
-  .where(sql`${collections.privacy} IN ('public', 'unrevealed')`)
-  .groupBy(collections.id)
-  .orderBy(desc(collections.createdAt))
+  .from(collectionsTable)
+  .where(sql`${collectionsTable.privacy} IN ('public', 'unrevealed')`)
+  .groupBy(collectionsTable.id)
+  .orderBy(desc(collectionsTable.createdAt))
   .limit(50)
   .all();
 

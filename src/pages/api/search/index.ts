@@ -2,7 +2,7 @@ export const prerender = false;
 
 import { getDrizzle } from '@/lib/db';
 import { tags, taggings, pseuds, creatorships, works } from '@/lib/schema';
-import { inArray, sql, isNotNull, and } from 'drizzle-orm';
+import { inArray, sql, isNotNull, and, eq } from 'drizzle-orm';
 import { corsHeaders, handleCors } from '@/lib/cors';
 import type { APIRoute } from 'astro';
 

@@ -2,7 +2,7 @@
 export const prerender = false;
 import Base from '../../../layouts/Base.astro';
 import { getDrizzle } from '../../../lib/db';
-import { collections, pseuds as pseudsTable, works, collectionItems } from '../../../lib/schema';
+import { collections, pseuds as pseudsTable, works as worksTable, collectionItems } from '../../../lib/schema';
 import { eq, and, isNotNull, sql } from 'drizzle-orm';
 
 const collectionId = Number(Astro.params.id);
@@ -38,15 +38,15 @@ if (!collection) return Astro.redirect('/collections');
 if (!['public', 'unrevealed'].includes(collection.privacy)) return Astro.redirect('/collections');
 
 const workRows = await db.select({
-  id: works.id,
-  title: works.title,
-  summary: works.summary,
-  wordCount: works.wordCount,
-  publishedAt: works.publishedAt,
+  id: worksTable.id,
+  title: worksTable.title,
+  summary: worksTable.summary,
+  wordCount: worksTable.wordCount,
+  publishedAt: worksTable.publishedAt,
 })
-  .from(works)
-  .innerJoin(collectionItems, eq(works.id, collectionItems.workId))
-  .where(and(eq(collectionItems.collectionId, collectionId), isNotNull(works.publishedAt)))
+  .from(worksTable)
+  .innerJoin(collectionItems, eq(worksTable.id, collectionItems.workId))
+  .where(and(eq(collectionItems.collectionId, collectionId), isNotNull(worksTable.publishedAt)))
   .all();
 
 const works = workRows.map(w => ({

@@ -1,7 +1,7 @@
 import { defineMiddleware } from 'astro:middleware';
 import { getDrizzle } from '@/lib/db';
 import { sessions, users } from '@/lib/schema';
-import { eq, gt, sql } from 'drizzle-orm';
+import { and, eq, gt, sql } from 'drizzle-orm';
 import { cspHeaders } from '@/lib/csp';
 
 // Paths accessible without authentication or approval
