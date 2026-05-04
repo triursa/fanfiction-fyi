@@ -1,38 +1,41 @@
 ---
 export const prerender = false;
 import Base from '@/layouts/Base.astro';
-import { queryFirst, queryAll } from '@/lib/db';
+import { getDrizzle } from '@/lib/db';
 import { UserRole, ROLE_LEVEL } from '@/lib/types';
+import { users, sessions } from '@/lib/schema';
+import { eq, and, gt, sql } from 'drizzle-orm';
 
 // Auth gate: mod+ required
 const cookie = Astro.request.headers.get('cookie') ?? '';
 const sessionMatch = cookie.match(/session=([a-f0-9]+)/);
 if (!sessionMatch) return Astro.redirect('/login');
 
-const db = Astro.locals.runtime.env.DB as D1Database;
-const session = await queryFirst<{ user_id: number }>(db, `SELECT user_id FROM sessions WHERE token = ?1 AND expires_at > datetime('now')`, sessionMatch[1]);
+const d1 = Astro.locals.runtime.env.DB as D1Database;
+const db = getDrizzle(d1);
+const session = await db.select({ userId: sessions.userId }).from(sessions).where(and(eq(sessions.token, sessionMatch[1]), gt(sessions.expiresAt, sql`datetime('now')`))).get();
 if (!session) return Astro.redirect('/login');
 
-const currentUser = await queryFirst<{ id: number; email: string; role: string }>(db, `SELECT id, email, role FROM users WHERE id = ?1`, session.user_id);
+const currentUser = await db.select({ id: users.id, email: users.email, role: users.role }).from(users).where(eq(users.id, session.userId)).get();
 if (!currentUser) return Astro.redirect('/login');
 
 const userLevel = ROLE_LEVEL[currentUser.role as UserRole] ?? 0;
 if (userLevel < ROLE_LEVEL[UserRole.Mod]) return Astro.redirect('/');
 
-const comments = await queryAll<{
-  id: number; content: string; created_at: string; work_id: number; work_title: string; pseud_name: string;
-}>(db, `
+// Recent comments with JOINs — use raw D1 for multi-table joins
+const { results: commentRows } = await d1.prepare(`
   SELECT c.id, c.content, c.created_at, c.work_id, w.title as work_title, p.name as pseud_name
   FROM comments c
   JOIN works w ON w.id = c.work_id
   JOIN pseuds p ON p.id = c.pseud_id
   ORDER BY c.created_at DESC
   LIMIT 50
-`);
+`).all<{
+  id: number; content: string; created_at: string; work_id: number; work_title: string; pseud_name: string;
+}>();
 
-const works = await queryAll<{
-  id: number; title: string; published_at: string; word_count: number; author_name: string;
-}>(db, `
+// Recent published works with JOINs — use raw D1
+const { results: workRows } = await d1.prepare(`
   SELECT w.id, w.title, w.published_at, w.word_count, p.name as author_name
   FROM works w
   JOIN creatorships cs ON cs.work_id = w.id AND cs.role = 'author'
@@ -40,7 +43,27 @@ const works = await queryAll<{
   WHERE w.published_at IS NOT NULL
   ORDER BY w.published_at DESC
   LIMIT 25
-`);
+`).all<{
+  id: number; title: string; published_at: string; word_count: number; author_name: string;
+}>();
+
+// Map snake_case results to camelCase for template consistency
+const allComments = (commentRows ?? []).map((c) => ({
+  id: c.id,
+  content: c.content,
+  createdAt: c.created_at,
+  workId: c.work_id,
+  workTitle: c.work_title,
+  pseudName: c.pseud_name,
+}));
+
+const allWorks = (workRows ?? []).map((w) => ({
+  id: w.id,
+  title: w.title,
+  publishedAt: w.published_at,
+  wordCount: w.word_count,
+  authorName: w.author_name,
+}));
 ---
 
 <Base title="Content Moderation — Admin">
@@ -48,32 +71,32 @@ const works = await queryAll<{
 
   <h2 class="section-heading">Recent Comments</h2>
   <div class="comments-list">
-    {comments.map(c => (
+    {allComments.map(c => (
       <div class="comment-card" data-comment-id={c.id}>
         <div class="comment-meta">
-          <span class="comment-author">{c.pseud_name}</span>
-          <span class="comment-work">on <a href={`/works/${c.work_id}`}>{c.work_title}</a></span>
-          <span class="comment-date">{new Date(c.created_at).toLocaleString()}</span>
+          <span class="comment-author">{c.pseudName}</span>
+          <span class="comment-work">on <a href={`/works/${c.workId}`}>{c.workTitle}</a></span>
+          <span class="comment-date">{new Date(c.createdAt).toLocaleString()}</span>
         </div>
         <div class="comment-body">{c.content.length > 300 ? c.content.slice(0, 300) + '…' : c.content}</div>
         <button class="btn-delete-comment" data-comment-id={c.id}>Delete</button>
       </div>
     ))}
-    {comments.length === 0 && <p class="empty-state">No comments found.</p>}
+    {allComments.length === 0 && <p class="empty-state">No comments found.</p>}
   </div>
 
   <h2 class="section-heading">Recent Published Works</h2>
   <div class="works-list">
-    {works.map(w => (
+    {allWorks.map(w => (
       <div class="work-card">
         <div class="work-info">
           <a href={`/works/${w.id}`} class="work-title">{w.title}</a>
-          <span class="work-meta">by {w.author_name} &middot; {w.word_count} words &middot; {new Date(w.published_at).toLocaleDateString()}</span>
+          <span class="work-meta">by {w.authorName} &middot; {w.wordCount} words &middot; {new Date(w.publishedAt).toLocaleDateString()}</span>
         </div>
         <a href={`/works/${w.id}/edit`} class="btn-edit">Edit</a>
       </div>
     ))}
-    {works.length === 0 && <p class="empty-state">No published works found.</p>}
+    {allWorks.length === 0 && <p class="empty-state">No published works found.</p>}
   </div>
 
   <div id="toast" class="toast hidden"></div>

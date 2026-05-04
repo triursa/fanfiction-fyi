@@ -1,10 +1,12 @@
 ---
 export const prerender = false;
-import { queryFirst, queryAll } from '../lib/db';
+import { getDrizzle } from '../lib/db';
+import { users, sessions, pseuds } from '../lib/schema';
 import { ROLE_LEVEL, UserRole } from '../lib/types';
 import { THEMES } from '../styles/themes';
 import BugReport from '../components/BugReport';
 import AdaptiveNav from '../components/AdaptiveNav';
+import { eq, and, gt, sql, asc } from 'drizzle-orm';
 
 // Check auth status from cookie
 const cookie = Astro.request.headers.get('cookie') ?? '';
@@ -16,12 +18,25 @@ let userTheme: string | null = null;
 let themeOverrideCSS = '';
 
 if (sessionMatch) {
-  const db = Astro.locals.runtime.env.DB as D1Database;
-  const session = await queryFirst<any>(db, `SELECT user_id FROM sessions WHERE token = ?1 AND expires_at > datetime('now')`, sessionMatch[1]);
+  const d1 = Astro.locals.runtime.env.DB as D1Database;
+  const db = getDrizzle(d1);
+  const session = await db
+    .select({ userId: sessions.userId })
+    .from(sessions)
+    .where(and(eq(sessions.token, sessionMatch[1]), gt(sessions.expiresAt, sql`(datetime('now'))`)))
+    .get();
   if (session) {
-    user = await queryFirst<any>(db, `SELECT id, email, role, theme, approved, banned FROM users WHERE id = ?1`, session.user_id);
+    user = await db
+      .select({ id: users.id, email: users.email, role: users.role, theme: users.theme, approved: users.approved, banned: users.banned })
+      .from(users)
+      .where(eq(users.id, session.userId))
+      .get();
     if (user) {
-      pseuds = await queryAll<any>(db, `SELECT id, name FROM pseuds WHERE user_id = ?1 ORDER BY id`, user.id);
+      pseuds = await db
+        .select({ id: pseuds.id, name: pseuds.name })
+        .from(pseuds)
+        .where(eq(pseuds.userId, user.id))
+        .orderBy(asc(pseuds.id));
       const userLevel = ROLE_LEVEL[user.role as UserRole] ?? 0;
       isModOrAbove = userLevel >= ROLE_LEVEL[UserRole.Mod];
 

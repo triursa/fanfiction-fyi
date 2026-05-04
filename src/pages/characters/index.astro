@@ -1,32 +1,48 @@
 ---
 export const prerender = false;
 import Base from '../../layouts/Base.astro';
-import { queryAll } from '../../lib/db';
+import { getDrizzle } from '../../lib/db';
+import { characters, characterGroups, characterAppearances } from '../../lib/schema';
+import { eq, asc, isNotNull, sql } from 'drizzle-orm';
 
-const db = Astro.locals.runtime.env.DB as D1Database;
-const initialCharacters = await queryAll<{
-  id: number;
-  name: string;
-  fandom: string | null;
-  short_desc: string | null;
-  avatar_key: string | null;
-  group_id: number | null;
-  group_name: string | null;
-  work_count: number;
-}>(db, `
-  SELECT c.id, c.name, c.fandom, c.short_desc, c.avatar_key, c.group_id,
-         cg.name as group_name,
-         (SELECT COUNT(*) FROM character_appearances ca WHERE ca.character_id = c.id) as work_count
-  FROM characters c
-  LEFT JOIN character_groups cg ON c.group_id = cg.id
-  ORDER BY c.name ASC
-  LIMIT 100
-`);
+const drz = getDrizzle(Astro.locals.runtime.env.DB as D1Database);
+
+const charRows = await drz
+  .select({
+    id: characters.id,
+    name: characters.name,
+    fandom: characters.fandom,
+    shortDesc: characters.shortDesc,
+    avatarKey: characters.avatarKey,
+    groupId: characters.groupId,
+    groupName: characterGroups.name,
+    workCount: sql<number>`(SELECT COUNT(*) FROM character_appearances ca WHERE ca.character_id = ${characters.id})`.as('work_count'),
+  })
+  .from(characters)
+  .leftJoin(characterGroups, eq(characters.groupId, characterGroups.id))
+  .orderBy(asc(characters.name))
+  .limit(100)
+  .all();
+
+// Convert camelCase keys to snake_case for API/template compatibility
+const initialCharacters = charRows.map(c => ({
+  id: c.id,
+  name: c.name,
+  fandom: c.fandom,
+  short_desc: c.shortDesc,
+  avatar_key: c.avatarKey,
+  group_id: c.groupId,
+  group_name: c.groupName,
+  work_count: c.workCount,
+}));
 
 // Get unique fandoms for filter
-const fandomRows = await queryAll<{ fandom: string }>(db, `
-  SELECT DISTINCT fandom FROM characters WHERE fandom IS NOT NULL ORDER BY fandom
-`);
+const fandomRows = await drz
+  .selectDistinct({ fandom: characters.fandom })
+  .from(characters)
+  .where(isNotNull(characters.fandom))
+  .orderBy(asc(characters.fandom))
+  .all();
 const fandoms = fandomRows.map(r => r.fandom);
 ---
 

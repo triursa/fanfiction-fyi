@@ -3,57 +3,75 @@ export const prerender = false;
 import Base from '../../../layouts/Base.astro';
 import { markdownToHtml } from '../../../lib/markdown';
 import { getAuth } from '../../../lib/auth';
-import { queryFirst, queryAll } from '../../../lib/db';
+import { getDrizzle } from '../../../lib/db';
+import { loreEntries, entityReferences, loreEdits, works, tags } from '../../../lib/schema';
+import { eq, and, desc, sql } from 'drizzle-orm';
 
-const db = Astro.locals.runtime.env.DB as D1Database;
-const auth = await getAuth(db, Astro.request);
+const drz = getDrizzle(Astro.locals.runtime.env.DB as D1Database);
+const d1 = Astro.locals.runtime.env.DB as D1Database;
+const auth = await getAuth(d1, Astro.request);
 
 const id = Astro.params.id;
 if (!id) return Astro.redirect('/canon');
 
 let entry: any = null;
-let works: any[] = [];
+let worksList: any[] = [];
 let editHistory: any[] = [];
 
 try {
-  entry = await queryFirst<any>(db,
-    `SELECT * FROM canon_lore WHERE id = ?1`,
-    Number(id)
-  );
+  entry = await drz.select().from(loreEntries).where(eq(loreEntries.id, Number(id))).get();
 } catch {
   // Table may not exist
 }
 
 if (!entry) return Astro.redirect('/canon');
 
-// Fetch works referencing this lore entry
+// Fetch works referencing this lore entry — via entity_references join
 try {
-  works = await queryAll<any>(db,
-    `SELECT w.id, w.title, w.word_count, w.updated_at,
-            (SELECT GROUP_CONCAT(p.name, ', ') FROM pseuds p JOIN creatorships c ON p.id = c.pseud_id WHERE c.work_id = w.id) as authors
-     FROM works w
-     JOIN canon_refs cr ON cr.work_id = w.id
-     WHERE cr.lore_id = ?1
-     ORDER BY w.updated_at DESC
-     LIMIT 20`,
-    entry.id
-  );
+  worksList = await drz
+    .select({
+      id: works.id,
+      title: works.title,
+      wordCount: works.wordCount,
+      updatedAt: works.updatedAt,
+      authors: sql<string>`(SELECT GROUP_CONCAT(p.name, ', ') FROM pseuds p JOIN creatorships c ON p.id = c.pseud_id WHERE c.work_id = ${works.id})`,
+    })
+    .from(entityReferences)
+    .innerJoin(works, eq(entityReferences.workId, works.id))
+    .where(and(eq(entityReferences.entityType, 'lore'), eq(entityReferences.entityId, entry.id)))
+    .orderBy(desc(works.updatedAt))
+    .limit(20)
+    .all();
 } catch {
-  works = [];
+  worksList = [];
 }
 
 // Fetch edit history
 try {
-  editHistory = await queryAll<any>(db,
-    `SELECT * FROM canon_edits WHERE lore_id = ?1 ORDER BY created_at DESC LIMIT 20`,
-    entry.id
-  );
+  editHistory = await drz
+    .select()
+    .from(loreEdits)
+    .where(eq(loreEdits.loreEntryId, entry.id))
+    .orderBy(desc(loreEdits.createdAt))
+    .limit(20)
+    .all();
 } catch {
   editHistory = [];
 }
 
-const bodyHtml = markdownToHtml(entry.body_md || '');
-const canEdit = auth && (auth.user.id === entry.user_id || ['admin', 'mod', 'founder'].includes(auth.user.role));
+// Get fandom name from tag if available
+let fandomName: string | null = null;
+if (entry.fandomTagId) {
+  try {
+    const fandomTag = await drz.select({ name: tags.name }).from(tags).where(eq(tags.id, entry.fandomTagId)).get();
+    fandomName = fandomTag?.name ?? null;
+  } catch {
+    fandomName = null;
+  }
+}
+
+const bodyHtml = markdownToHtml(entry.bodyMd || '');
+const canEdit = auth && (auth.user.id === entry.createdBy || ['admin', 'mod', 'founder'].includes(auth.user.role));
 ---
 
 <Base title={`${entry.title} — Canon`}>

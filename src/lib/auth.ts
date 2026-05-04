@@ -1,6 +1,12 @@
-import type { User, Pseud, UserRole } from './types';
+import type { UserRole } from './types';
 import { ROLE_LEVEL } from './types';
-import { queryFirst, run, queryAll } from './db';
+import { getDrizzle } from './db';
+import { users, sessions, pseuds } from './schema';
+import { eq, and, gt, sql } from 'drizzle-orm';
+
+// Re-export Drizzle-inferred types for use across the app
+export type UserRow = typeof users.$inferSelect;
+export type PseudRow = typeof pseuds.$inferSelect;
 
 const SESSION_COOKIE = 'session';
 const SESSION_DAYS = 30;
@@ -83,39 +89,50 @@ export async function verifyPassword(password: string, stored: string | null): P
 }
 
 export async function createSession(db: D1Database, userId: number): Promise<string> {
+  const drizzle = getDrizzle(db);
   const token = randomHex(32); // 64 hex chars
-  const stmt = `
-    INSERT INTO sessions (user_id, token, created_at, expires_at)
-    VALUES (?1, ?2, datetime('now'), datetime('now', '+${SESSION_DAYS} days'))
-  `;
-  await run(db, stmt, userId, token);
+  await drizzle.insert(sessions).values({
+    userId,
+    token,
+    createdAt: sql`(datetime('now'))`,
+    expiresAt: sql`(datetime('now', '+${SESSION_DAYS} days'))`,
+  });
   return token;
 }
 
-export async function getUserFromSession(db: D1Database, token: string): Promise<{ user: User; pseuds: Pseud[] } | null> {
+export async function getUserFromSession(db: D1Database, token: string): Promise<{ user: UserRow; pseuds: PseudRow[] } | null> {
   if (!token) return null;
-  const row = await queryFirst<{ user_id: number }>(
-    db,
-    `SELECT user_id FROM sessions WHERE token = ?1 AND expires_at > datetime('now')`,
-    token
-  );
-  if (!row) return null;
+  const drizzle = getDrizzle(db);
+  const session = await drizzle
+    .select({ userId: sessions.userId })
+    .from(sessions)
+    .where(and(eq(sessions.token, token), gt(sessions.expiresAt, sql`(datetime('now'))`)))
+    .get();
+  if (!session) return null;
 
-  const user = await queryFirst<User>(db, `SELECT * FROM users WHERE id = ?1`, row.user_id);
+  const user = await drizzle
+    .select()
+    .from(users)
+    .where(eq(users.id, session.userId))
+    .get();
   if (!user) return null;
-  const pseuds = await queryAll<Pseud>(db, `SELECT * FROM pseuds WHERE user_id = ?1`, row.user_id);
-  return { user, pseuds };
+  const pseudRows = await drizzle
+    .select()
+    .from(pseuds)
+    .where(eq(pseuds.userId, session.userId));
+  return { user, pseuds: pseudRows };
 }
 
 export async function deleteSession(db: D1Database, token: string): Promise<void> {
-  await run(db, `DELETE FROM sessions WHERE token = ?1`, token);
+  const drizzle = getDrizzle(db);
+  await drizzle.delete(sessions).where(eq(sessions.token, token));
 }
 
 // Utility for API routes — reads Astro request, returns auth info
 export async function getAuth(
   db: D1Database,
   request: Request
-): Promise<{ user: User; pseuds: Pseud[] } | null> {
+): Promise<{ user: UserRow; pseuds: PseudRow[] } | null> {
   const cookie = request.headers.get('cookie') ?? '';
   const token = parseCookie(cookie)[SESSION_COOKIE];
   if (!token) return null;
@@ -126,7 +143,7 @@ export async function getAuth(
 export async function requireAuth(
   db: D1Database,
   request: Request
-): Promise<{ user: User; pseuds: Pseud[] } | null> {
+): Promise<{ user: UserRow; pseuds: PseudRow[] } | null> {
   const auth = await getAuth(db, request);
   return auth;
 }
@@ -134,8 +151,8 @@ export async function requireAuth(
 // Check if a user is approved (not banned, and approved = 1)
 // Returns: null if unauthenticated, { forbidden: 'banned' } if banned,
 //   { forbidden: 'unapproved' } if not yet approved, or the auth info if OK
-export function checkApproved(auth: { user: User; pseuds: Pseud[] } | null):
-  | { user: User; pseuds: Pseud[] }
+export function checkApproved(auth: { user: UserRow; pseuds: PseudRow[] } | null):
+  | { user: UserRow; pseuds: PseudRow[] }
   | { forbidden: 'banned' | 'unapproved' }
   | null {
   if (!auth) return null;
@@ -150,7 +167,7 @@ export async function requireRole(
   db: D1Database,
   request: Request,
   minimumRole: UserRole
-): Promise<{ user: User; pseuds: Pseud[] } | { forbidden: true } | null> {
+): Promise<{ user: UserRow; pseuds: PseudRow[] } | { forbidden: true } | null> {
   const auth = await requireAuth(db, request);
   if (!auth) return null;
   const userLevel = ROLE_LEVEL[auth.user.role as UserRole] ?? 0;

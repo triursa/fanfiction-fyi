@@ -1,14 +1,16 @@
 ---
 export const prerender = false;
 import Base from '../../../../layouts/Base.astro';
-import { queryFirst, queryAll } from '../../../../lib/db';
+import { getDrizzle } from '../../../../lib/db';
+import { works } from '../../../../lib/schema';
+import { eq } from 'drizzle-orm';
 
 const workId = Number(Astro.params.id);
 if (!workId) return Astro.redirect('/works');
 
-const db = Astro.locals.runtime.env.DB as D1Database;
+const db = getDrizzle(Astro.locals.runtime.env.DB);
 
-const work = await queryFirst<any>(db, `SELECT id, title FROM works WHERE id = ?1`, workId);
+const work = await db.select({ id: works.id, title: works.title }).from(works).where(eq(works.id, workId)).get();
 if (!work) return Astro.redirect('/works');
 ---
 

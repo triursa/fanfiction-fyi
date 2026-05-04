@@ -1,19 +1,58 @@
 ---
 export const prerender = false;
 import Base from '../../layouts/Base.astro';
-import { getDb, queryAll } from '../../lib/db';
+import { getDrizzle } from '../../lib/db';
+import { works, chapters, tags, taggings, pseuds, creatorships } from '../../lib/schema';
+import { eq, and, isNotNull, desc, sql } from 'drizzle-orm';
 
-const db = Astro.locals.runtime.env.DB as D1Database;
+const db = getDrizzle(Astro.locals.runtime.env.DB);
 
 const page = Number(Astro.url.searchParams.get('page')) || 1;
 const limit = 20;
 const offset = (page - 1) * limit;
 
-const works = await queryAll<any>(db, `SELECT w.*, COUNT(c.id) as chapter_count FROM works w LEFT JOIN chapters c ON c.work_id = w.id WHERE w.published_at IS NOT NULL GROUP BY w.id ORDER BY w.updated_at DESC LIMIT ?1 OFFSET ?2`, limit, offset);
+const worksRows = await db
+  .select({
+    id: works.id,
+    title: works.title,
+    summary: works.summary,
+    wordCount: works.wordCount,
+    complete: works.complete,
+    updatedAt: works.updatedAt,
+    publishedAt: works.publishedAt,
+    chapterCount: sql<number>`count(${chapters.id})`,
+  })
+  .from(works)
+  .leftJoin(chapters, eq(chapters.workId, works.id))
+  .where(isNotNull(works.publishedAt))
+  .groupBy(works.id)
+  .orderBy(desc(works.updatedAt))
+  .limit(limit)
+  .offset(offset);
 
-for (const w of works) {
-  w.tags = await queryAll<any>(db, `SELECT t.name, t.type FROM tags t JOIN taggings tg ON t.id = tg.tag_id WHERE tg.work_id = ?1`, w.id);
-  w.pseuds = await queryAll<any>(db, `SELECT p.name, p.icon_key FROM pseuds p JOIN creatorships c ON p.id = c.pseud_id WHERE c.work_id = ?1`, w.id);
+// Cast to any[] for template compatibility (nested tags/pseuds added below)
+const worksList: any[] = worksRows.map(w => ({
+  ...w,
+  word_count: w.wordCount,
+  updated_at: w.updatedAt,
+  published_at: w.publishedAt,
+  chapter_count: w.chapterCount,
+  tags: [],
+  pseuds: [],
+}));
+
+for (const w of worksList) {
+  w.tags = await db
+    .select({ name: tags.name, type: tags.type })
+    .from(taggings)
+    .innerJoin(tags, eq(taggings.tagId, tags.id))
+    .where(eq(taggings.workId, w.id));
+
+  w.pseuds = await db
+    .select({ name: pseuds.name, icon_key: pseuds.iconKey })
+    .from(creatorships)
+    .innerJoin(pseuds, eq(creatorships.pseudId, pseuds.id))
+    .where(eq(creatorships.workId, w.id));
 }
 ---
 
@@ -21,7 +60,7 @@ for (const w of works) {
   <section class="works-listing">
     <h1 class="page-title">Works</h1>
 
-    {works.length === 0 && (
+    {worksList.length === 0 && (
       <div class="empty-state" role="status">
         <p class="placeholder-text">No works have been published yet.</p>
         <a href="/works/create" class="empty-state-cta">Post a Work</a>
@@ -29,7 +68,7 @@ for (const w of works) {
     )}
 
     <div class="works-grid">
-      {works.map(w => (
+      {worksList.map(w => (
         <a href={`/works/${w.id}`} class="work-card">
           <h2 class="work-card__title">{w.title}</h2>
           <p class="work-card__author">By {w.pseuds.map((p: any, i: number) => (
@@ -55,7 +94,7 @@ for (const w of works) {
     </div>
 
     {page > 1 && <a href={`/works?page=${page - 1}`} class="btn-secondary">← Previous</a>}
-    {works.length === limit && <a href={`/works?page=${page + 1}`} class="btn-secondary">Next →</a>}
+    {worksList.length === limit && <a href={`/works?page=${page + 1}`} class="btn-secondary">Next →</a>}
   </section>
 </Base>
 

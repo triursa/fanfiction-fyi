@@ -1,6 +1,8 @@
 export const prerender = false;
 
-import { queryAll } from '@/lib/db';
+import { getDrizzle } from '@/lib/db';
+import { tags, taggings, pseuds, creatorships, works } from '@/lib/schema';
+import { inArray, sql, isNotNull, and } from 'drizzle-orm';
 import { corsHeaders, handleCors } from '@/lib/cors';
 import type { APIRoute } from 'astro';
 
@@ -10,7 +12,8 @@ export const OPTIONS: APIRoute = async ({ request }) => {
 
 export const GET: APIRoute = async ({ url, locals, request }) => {
   const cors = corsHeaders(request);
-  const db = locals.runtime.env.DB as D1Database;
+  const d1 = locals.runtime.env.DB as D1Database;
+  const db = getDrizzle(d1);
 
   const rawQ = url.searchParams.get('q')?.trim() || '';
   const type = url.searchParams.get('type')?.trim() || undefined;
@@ -22,18 +25,17 @@ export const GET: APIRoute = async ({ url, locals, request }) => {
   const complete = url.searchParams.get('complete'); // '1' or '0'
   const wordCountMin = Number(url.searchParams.get('word_min')) || 0;
   const wordCountMax = Number(url.searchParams.get('word_max')) || 0;
-  // Tag IDs filter: comma-separated tag IDs
   const tagIds = url.searchParams.get('tags')?.split(',').map(Number).filter(n => n > 0) || [];
 
   // Sanitize FTS5 query
-  let ftsWhere = '';
+  let ftsMatch = '';
   const ftsBindings: any[] = [];
 
   if (rawQ) {
     const words = rawQ.split(/\s+/).filter(w => /^[\w\u4e00-\u9fff\u3040-\u309f\u30a0-\u30ff\uac00-\ud7af]+$/.test(w));
     const sanitizedQ = words.join(' ').trim();
     if (sanitizedQ) {
-      ftsWhere = `JOIN works_fts f ON f.rowid = w.id AND works_fts MATCH ?`;
+      ftsMatch = `JOIN works_fts f ON f.rowid = w.id AND works_fts MATCH ?`;
       ftsBindings.push(sanitizedQ);
     }
   }
@@ -55,19 +57,18 @@ export const GET: APIRoute = async ({ url, locals, request }) => {
 
   const whereClause = conditions.length > 0 ? 'WHERE ' + conditions.join(' AND ') : '';
 
-  // Build count and data queries from a single source of truth
+  // Build count and data queries
   let countSql: string;
   let countBindings: any[];
   let dataSql: string;
   let dataBindings: any[];
 
-  if (ftsWhere) {
-    // FTS path: include ALL conditions (including published_at) after the MATCH predicate
+  if (ftsMatch) {
     const allConditions = ' AND ' + conditions.join(' AND ');
-    countSql = `SELECT COUNT(*) as total FROM works w JOIN works_fts f ON f.rowid = w.id WHERE works_fts MATCH ?${allConditions}`;
+    countSql = `SELECT COUNT(*) as total FROM works w ${ftsMatch} ${allConditions}`;
     countBindings = [ftsBindings[0], ...bindings];
 
-    dataSql = `SELECT w.id, w.title, w.summary, w.word_count, w.complete, w.published_at, w.updated_at FROM works w JOIN works_fts f ON f.rowid = w.id WHERE works_fts MATCH ?${allConditions} ORDER BY rank`;
+    dataSql = `SELECT w.id, w.title, w.summary, w.word_count, w.complete, w.published_at, w.updated_at FROM works w ${ftsMatch} ${allConditions} ORDER BY rank`;
     dataBindings = [ftsBindings[0], ...bindings];
   } else {
     countSql = `SELECT COUNT(*) as total FROM works w ${whereClause}`;
@@ -80,35 +81,45 @@ export const GET: APIRoute = async ({ url, locals, request }) => {
   dataSql += ' LIMIT ? OFFSET ?';
   dataBindings.push(limit, offset);
 
-  const results = await queryAll<any>(db, dataSql, ...dataBindings);
-  const totalRow = await db.prepare(countSql).bind(...countBindings).first<{ total: number }>();
+  // Use raw D1 for FTS5 + dynamic queries
+  const results = await d1.prepare(dataSql).bind(...dataBindings).all<any>().then(r => r.results ?? []);
+  const totalRow = await d1.prepare(countSql).bind(...countBindings).first<{ total: number }>();
   const total = totalRow?.total ?? 0;
 
-  // Enrich results with pseuds and tags using batched queries
+  // Enrich results with pseuds and tags using Drizzle
   const workIds = results.map((w: any) => w.id);
 
   if (workIds.length > 0) {
-    const placeholders = workIds.map(() => '?').join(', ');
+    // Get pseud names via Drizzle
+    const pseudRows = await db.select({
+      workId: creatorships.workId,
+      pseudName: pseuds.name,
+    }).from(creatorships)
+      .innerJoin(pseuds, eq(pseuds.id, creatorships.pseudId))
+      .where(inArray(creatorships.workId, workIds));
 
-    const pseudRows = await queryAll<{ work_id: number; pseud_name: string | null }>(
-      db,
-      `SELECT w.id AS work_id, (SELECT p.name FROM pseuds p JOIN creatorships c ON p.id = c.pseud_id WHERE c.work_id = w.id LIMIT 1) AS pseud_name FROM works w WHERE w.id IN (${placeholders})`,
-      ...workIds
-    );
-    const pseudByWorkId = new Map<number, string | null>(
-      pseudRows.map(row => [row.work_id, row.pseud_name ?? null])
-    );
+    const pseudByWorkId = new Map<number, string>();
+    for (const row of pseudRows) {
+      if (!pseudByWorkId.has(row.workId)) {
+        pseudByWorkId.set(row.workId, row.pseudName);
+      }
+    }
 
-    const tagRows = await queryAll<{ work_id: number; id: number; name: string; type: string }>(
-      db,
-      `SELECT tg.work_id, t.id, t.name, t.type FROM tags t JOIN taggings tg ON t.id = tg.tag_id WHERE tg.work_id IN (${placeholders}) ORDER BY tg.work_id, t.type, t.name`,
-      ...workIds
-    );
+    // Get tags via Drizzle
+    const tagRows = await db.select({
+      workId: taggings.workId,
+      id: tags.id,
+      name: tags.name,
+      type: tags.type,
+    }).from(taggings)
+      .innerJoin(tags, eq(tags.id, taggings.tagId))
+      .where(inArray(taggings.workId, workIds));
+
     const tagsByWorkId = new Map<number, { id: number; name: string; type: string }[]>();
     for (const row of tagRows) {
-      const tags = tagsByWorkId.get(row.work_id) ?? [];
-      tags.push({ id: row.id, name: row.name, type: row.type });
-      tagsByWorkId.set(row.work_id, tags);
+      const arr = tagsByWorkId.get(row.workId) ?? [];
+      arr.push({ id: row.id, name: row.name, type: row.type });
+      tagsByWorkId.set(row.workId, arr);
     }
 
     for (const w of results) {

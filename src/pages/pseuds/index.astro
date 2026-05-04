@@ -1,20 +1,33 @@
 ---
 export const prerender = false;
 import Base from '../../layouts/Base.astro';
-import { queryAll } from '../../lib/db';
+import { getDrizzle } from '../../lib/db';
+import { pseuds as pseudsTable, creatorships, works } from '../../lib/schema';
+import { eq, and, isNotNull, desc, sql } from 'drizzle-orm';
 
-const db = Astro.locals.runtime.env.DB as D1Database;
+const db = getDrizzle(Astro.locals.runtime.env.DB as D1Database);
 
 // Get all pseuds that have published works
-const pseuds = await queryAll<any>(db, `
-  SELECT p.id, p.name, p.description, p.icon_key, COUNT(c.id) as work_count
-  FROM pseuds p
-  JOIN creatorships c ON c.pseud_id = p.id
-  JOIN works w ON c.work_id = w.id AND w.published_at IS NOT NULL
-  GROUP BY p.id
-  HAVING work_count > 0
-  ORDER BY work_count DESC, p.name ASC
-`);
+const pseudRows = await db.select({
+  id: pseudsTable.id,
+  name: pseudsTable.name,
+  description: pseudsTable.description,
+  iconKey: pseudsTable.iconKey,
+  workCount: sql<number>`COUNT(${creatorships.id})`.as('work_count'),
+})
+  .from(pseudsTable)
+  .innerJoin(creatorships, eq(creatorships.pseudId, pseudsTable.id))
+  .innerJoin(works, and(eq(creatorships.workId, works.id), isNotNull(works.publishedAt)))
+  .groupBy(pseudsTable.id)
+  .having(sql`work_count > 0`)
+  .orderBy(desc(sql`work_count`), pseudsTable.name)
+  .all();
+
+const pseuds = pseudRows.map(p => ({
+  ...p,
+  work_count: p.workCount,
+  icon_key: p.iconKey,
+}));
 ---
 
 <Base title="Authors — fanfiction.fyi">

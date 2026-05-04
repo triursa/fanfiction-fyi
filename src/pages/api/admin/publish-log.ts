@@ -1,26 +1,26 @@
 export const prerender = false;
-import { queryAll } from '@/lib/db';
+import { getDrizzle } from '@/lib/db';
 import { requireRole } from '@/lib/auth';
+import { publishLog } from '@/lib/schema/publish-log';
+import { eq, desc } from 'drizzle-orm';
 import type { APIRoute } from 'astro';
 import { UserRole } from '@/lib/types';
 
 export const GET: APIRoute = async ({ request, locals, url }) => {
-  const db = locals.runtime.env.DB as D1Database;
-  const auth = await requireRole(db, request, UserRole.Admin);
+  const d1 = locals.runtime.env.DB as D1Database;
+  const auth = await requireRole(d1, request, UserRole.Admin);
   if (!auth) return new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401, headers: { 'Content-Type': 'application/json' } });
   if ('forbidden' in auth) return new Response(JSON.stringify({ error: 'Forbidden' }), { status: 403, headers: { 'Content-Type': 'application/json' } });
-  
+
+  const db = getDrizzle(d1);
   const workId = url.searchParams.get('work_id');
   const limit = Math.min(Number(url.searchParams.get('limit') || 50), 200);
-  
-  let query = `SELECT * FROM publish_log`;
-  const params: any[] = [];
+
+  let query = db.select().from(publishLog).orderBy(desc(publishLog.createdAt)).limit(limit);
   if (workId) {
-    query += ` WHERE work_id = ?1`;
-    params.push(Number(workId));
+    query = db.select().from(publishLog).where(eq(publishLog.workId, Number(workId))).orderBy(desc(publishLog.createdAt)).limit(limit);
   }
-  query += ` ORDER BY created_at DESC LIMIT ${limit}`;
-  
-  const logs = await queryAll<any>(db, query, ...params);
+
+  const logs = await query;
   return new Response(JSON.stringify({ logs }), { headers: { 'Content-Type': 'application/json' } });
 };

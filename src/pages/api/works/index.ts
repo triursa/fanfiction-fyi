@@ -1,10 +1,12 @@
 export const prerender = false;
 
-import { queryFirst, run, queryAll } from '@/lib/db';
+import { getDrizzle } from '@/lib/db';
 import { getAuth } from '@/lib/auth';
 import { markdownToHtml } from '@/lib/markdown';
 import { corsHeaders, handleCors } from '@/lib/cors';
 import { checkRateLimit, recordFailedAttempt } from '@/lib/rate-limit';
+import { works, chapters, creatorships, tags, taggings, pseuds } from '@/lib/schema';
+import { eq, and, or, like, gt, lt, gte, lte, sql, desc, asc, count, inArray, isNotNull, isNull } from 'drizzle-orm';
 import type { APIRoute } from 'astro';
 
 export const OPTIONS: APIRoute = async ({ request }) => {
@@ -13,52 +15,99 @@ export const OPTIONS: APIRoute = async ({ request }) => {
 
 export const GET: APIRoute = async ({ url, locals, request }) => {
   const cors = corsHeaders(request);
-  const db = locals.runtime.env.DB as D1Database;
+  const d1 = locals.runtime.env.DB as D1Database;
+  const db = getDrizzle(d1);
   const page = Number(url.searchParams.get('page')) || 1;
   const limit = Math.min(Number(url.searchParams.get('limit')) || 20, 100);
   const offset = (page - 1) * limit;
   const tagType = url.searchParams.get('tag_type');
   const tagName = url.searchParams.get('tag_name');
 
-  let sql = `SELECT w.* FROM works w`;
-  const bindings: any[] = [];
+  // Build query with conditions
+  const conditions = [isNotNull(works.publishedAt)];
 
   if (tagType || tagName) {
-    sql += ` JOIN taggings tg ON tg.work_id = w.id JOIN tags t ON t.id = tg.tag_id WHERE w.published_at IS NOT NULL`;
-    if (tagType) { sql += ` AND t.type = ?`; bindings.push(tagType); }
-    if (tagName) { sql += ` AND t.name LIKE ?`; bindings.push(`%${tagName}%`); }
-  } else {
-    sql += ` WHERE w.published_at IS NOT NULL`;
+    // When filtering by tag, join through taggings/tags
+    const tagConditions = [isNotNull(works.publishedAt)];
+    if (tagType) tagConditions.push(eq(tags.type, tagType));
+    if (tagName) tagConditions.push(like(tags.name, `%${tagName}%`));
+
+    const workRows = await db
+      .select()
+      .from(works)
+      .innerJoin(taggings, eq(taggings.workId, works.id))
+      .innerJoin(tags, eq(tags.id, taggings.tagId))
+      .where(and(...tagConditions))
+      .orderBy(desc(works.updatedAt))
+      .limit(limit)
+      .offset(offset);
+
+    const workList = workRows.map(r => r.works);
+
+    // Enrich with tags and pseuds
+    for (const w of workList) {
+      const wTags = await db
+        .select({ name: tags.name, type: tags.type })
+        .from(tags)
+        .innerJoin(taggings, eq(tags.id, taggings.tagId))
+        .where(eq(taggings.workId, w.id));
+      (w as any).tags = wTags;
+
+      const wPseuds = await db
+        .select({ name: pseuds.name, role: creatorships.role })
+        .from(pseuds)
+        .innerJoin(creatorships, eq(pseuds.id, creatorships.pseudId))
+        .where(eq(creatorships.workId, w.id));
+      (w as any).pseuds = wPseuds;
+    }
+
+    return new Response(JSON.stringify(workList), { headers: { 'Content-Type': 'application/json', ...cors } });
   }
 
-  sql += ` ORDER BY w.updated_at DESC LIMIT ? OFFSET ?`;
-  bindings.push(limit, offset);
+  // No tag filter — simple query
+  const workList = await db
+    .select()
+    .from(works)
+    .where(isNotNull(works.publishedAt))
+    .orderBy(desc(works.updatedAt))
+    .limit(limit)
+    .offset(offset);
 
-  const works = await queryAll<any>(db, sql, ...bindings);
+  for (const w of workList) {
+    const wTags = await db
+      .select({ name: tags.name, type: tags.type })
+      .from(tags)
+      .innerJoin(taggings, eq(tags.id, taggings.tagId))
+      .where(eq(taggings.workId, w.id));
+    (w as any).tags = wTags;
 
-  for (const w of works) {
-    w.tags = await queryAll<any>(db, `SELECT t.name, t.type FROM tags t JOIN taggings tg ON t.id = tg.tag_id WHERE tg.work_id = ?1`, w.id);
-    w.pseuds = await queryAll<any>(db, `SELECT p.name, c.role FROM pseuds p JOIN creatorships c ON p.id = c.pseud_id WHERE c.work_id = ?1`, w.id);
+    const wPseuds = await db
+      .select({ name: pseuds.name, role: creatorships.role })
+      .from(pseuds)
+      .innerJoin(creatorships, eq(pseuds.id, creatorships.pseudId))
+      .where(eq(creatorships.workId, w.id));
+    (w as any).pseuds = wPseuds;
   }
 
-  return new Response(JSON.stringify(works), { headers: { 'Content-Type': 'application/json', ...cors } });
+  return new Response(JSON.stringify(workList), { headers: { 'Content-Type': 'application/json', ...cors } });
 };
 
 export const POST: APIRoute = async ({ request, locals }) => {
-  const db = locals.runtime.env.DB as D1Database;
-  const auth = await getAuth(db, request);
+  const d1 = locals.runtime.env.DB as D1Database;
+  const db = getDrizzle(d1);
+  const auth = await getAuth(d1, request);
   if (!auth) return new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401, headers: { 'Content-Type': 'application/json' } });
 
   // Rate limit: 5 per 5min per user IP
   const clientIp = request.headers.get('CF-Connecting-IP') || 'unknown';
-  const rl = await checkRateLimit(db, clientIp, 'create-work');
+  const rl = await checkRateLimit(d1, clientIp, 'create-work');
   if (!rl.allowed) {
     return new Response(JSON.stringify({ error: 'Rate limit exceeded. Try again later.' }), {
       status: 429,
       headers: { 'Content-Type': 'application/json', 'Retry-After': String(rl.retryAfterSeconds) },
     });
   }
-  await recordFailedAttempt(db, clientIp, 'create-work');
+  await recordFailedAttempt(d1, clientIp, 'create-work');
 
   let body: any;
   try { body = await request.json(); } catch { return new Response(JSON.stringify({ error: 'Invalid JSON' }), { status: 400, headers: { 'Content-Type': 'application/json' } }); }
@@ -73,7 +122,6 @@ export const POST: APIRoute = async ({ request, locals }) => {
   const skipChapter = skip_chapter === true;
 
   // Resolve tag_names (new/freeform tags with name+type) to tag_ids
-  // This allows users to create new tags during work creation without admin rights
   const resolvedTagIds: number[] = [...(Array.isArray(tag_ids) ? tag_ids.filter((id: any) => typeof id === 'number' && id > 0) : [])];
   
   if (Array.isArray(tag_names)) {
@@ -81,30 +129,32 @@ export const POST: APIRoute = async ({ request, locals }) => {
     for (const tn of tag_names) {
       if (!tn.name || !tn.type || !validTypes.includes(tn.type)) continue;
       // Look up existing tag
-      const existing = await queryFirst<any>(db, `SELECT id FROM tags WHERE name = ?1 AND type = ?2`, tn.name, tn.type);
+      const existing = await db.select({ id: tags.id }).from(tags).where(and(eq(tags.name, tn.name), eq(tags.type, tn.type))).get();
       if (existing) {
         if (!resolvedTagIds.includes(existing.id)) resolvedTagIds.push(existing.id);
       } else {
         // Auto-create the tag
-        const tagResult = await run(db, `INSERT OR IGNORE INTO tags (name, type) VALUES (?1, ?2)`, tn.name, tn.type);
-        if (tagResult.meta.last_row_id && !resolvedTagIds.includes(tagResult.meta.last_row_id)) {
-          resolvedTagIds.push(tagResult.meta.last_row_id);
-        } else {
-          // INSERT OR IGNORE may not return last_row_id if it was a duplicate — re-fetch
-          const reFetched = await queryFirst<any>(db, `SELECT id FROM tags WHERE name = ?1 AND type = ?2`, tn.name, tn.type);
-          if (reFetched && !resolvedTagIds.includes(reFetched.id)) resolvedTagIds.push(reFetched.id);
-        }
+        await db.insert(tags).values({ name: tn.name, type: tn.type }).onConflictDoNothing();
+        const reFetched = await db.select({ id: tags.id }).from(tags).where(and(eq(tags.name, tn.name), eq(tags.type, tn.type))).get();
+        if (reFetched && !resolvedTagIds.includes(reFetched.id)) resolvedTagIds.push(reFetched.id);
       }
     }
   }
 
   // Work-level insert (word_count will be 0 if skipping chapter, updated later if chapter included)
-  const workResult = await run(db, `INSERT INTO works (title, summary, notes, language, word_count, complete, published_at, updated_at, created_at) VALUES (?1, ?2, ?3, 'en', 0, 0, ${isDraft ? 'NULL' : "CURRENT_TIMESTAMP"}, datetime('now'), datetime('now'))`,
-    title, summary || null, notes || null);
+  const workResult = await db.insert(works).values({
+    title,
+    summary: summary || null,
+    notes: notes || null,
+    language: 'en',
+    wordCount: 0,
+    complete: 0,
+    publishedAt: isDraft ? null : sql`(datetime('now'))`,
+  });
 
-  const workId = workResult.meta.last_row_id;
+  const workId = Number(workResult.meta?.last_row_id ?? workResult[0]?.meta?.last_row_id);
 
-  await run(db, `INSERT INTO creatorships (pseud_id, work_id, role) VALUES (?1, ?2, 'author')`, pseudId, workId);
+  await db.insert(creatorships).values({ pseudId, workId, role: 'author' });
 
   let chapterId: number | null = null;
 
@@ -119,17 +169,25 @@ export const POST: APIRoute = async ({ request, locals }) => {
       : [];
     const imagesJson = JSON.stringify(validImages);
 
-    const chapterResult = await run(db, `INSERT INTO chapters (work_id, position, title, content_md, content_html, draft, word_count, images, created_at, updated_at) VALUES (?1, 1, ?2, ?3, ?4, ?5, ?6, ?7, datetime('now'), datetime('now'))`,
-      workId, chapter_title || 'Chapter 1', contentMd, contentHtml, isDraft, wordCount, imagesJson);
-    chapterId = chapterResult.meta.last_row_id;
+    const chapterResult = await db.insert(chapters).values({
+      workId,
+      position: 1,
+      title: chapter_title || 'Chapter 1',
+      contentMd,
+      contentHtml,
+      draft: isDraft,
+      wordCount,
+      images: imagesJson,
+    });
+    chapterId = Number(chapterResult.meta?.last_row_id ?? chapterResult[0]?.meta?.last_row_id);
 
     // Update work word_count with chapter's word count
-    await run(db, `UPDATE works SET word_count = ?1 WHERE id = ?2`, wordCount, workId);
+    await db.update(works).set({ wordCount }).where(eq(works.id, workId));
   }
 
   // Apply resolved tag IDs
-  for (const tagId of resolvedTagIds) {
-    await run(db, `INSERT OR IGNORE INTO taggings (tag_id, work_id) VALUES (?1, ?2)`, tagId, workId);
+  for (const tid of resolvedTagIds) {
+    await db.insert(taggings).values({ tagId: tid, workId }).onConflictDoNothing();
   }
 
   // Auto-create rating/category/warning tags if provided
@@ -140,17 +198,18 @@ export const POST: APIRoute = async ({ request, locals }) => {
   ].filter(t => t.name);
 
   for (const t of autoTags) {
-    const existing = await queryFirst<any>(db, `SELECT id FROM tags WHERE name = ?1 AND type = ?2`, t.name, t.type);
+    const existing = await db.select({ id: tags.id }).from(tags).where(and(eq(tags.name, t.name!), eq(tags.type, t.type))).get();
     if (existing) {
-      await run(db, `INSERT OR IGNORE INTO taggings (tag_id, work_id) VALUES (?1, ?2)`, existing.id, workId);
+      await db.insert(taggings).values({ tagId: existing.id, workId }).onConflictDoNothing();
     } else {
-      const tagResult = await run(db, `INSERT OR IGNORE INTO tags (name, type) VALUES (?1, ?2)`, t.name, t.type);
-      if (tagResult.meta.last_row_id) {
-        await run(db, `INSERT OR IGNORE INTO taggings (tag_id, work_id) VALUES (?1, ?2)`, tagResult.meta.last_row_id, workId);
+      const tagResult = await db.insert(tags).values({ name: t.name!, type: t.type }).onConflictDoNothing();
+      const lastRowId = Number(tagResult.meta?.last_row_id ?? tagResult[0]?.meta?.last_row_id);
+      if (lastRowId) {
+        await db.insert(taggings).values({ tagId: lastRowId, workId }).onConflictDoNothing();
       }
     }
   }
 
-  const work = await queryFirst<any>(db, `SELECT * FROM works WHERE id = ?1`, workId);
+  const work = await db.select().from(works).where(eq(works.id, workId)).get();
   return new Response(JSON.stringify({ work, chapter_id: chapterId }), { status: 201, headers: { 'Content-Type': 'application/json' } });
 };

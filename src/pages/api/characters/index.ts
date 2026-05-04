@@ -1,7 +1,9 @@
 export const prerender = false;
 
-import { queryAll, queryFirst } from '@/lib/db';
+import { getDrizzle } from '@/lib/db';
+import { characters, characterGroups, characterAppearances } from '@/lib/schema';
 import { corsHeaders, handleCors } from '@/lib/cors';
+import { eq, and, like, sql, isNotNull, desc, asc, count } from 'drizzle-orm';
 import type { APIRoute } from 'astro';
 
 export const OPTIONS: APIRoute = async ({ request }) => {
@@ -10,7 +12,7 @@ export const OPTIONS: APIRoute = async ({ request }) => {
 
 export const GET: APIRoute = async ({ url, locals, request }) => {
   const cors = corsHeaders(request);
-  const db = locals.runtime.env.DB as D1Database;
+  const drz = getDrizzle(locals.runtime.env.DB as D1Database);
   const params = url.searchParams;
 
   const q = params.get('q') || '';
@@ -22,51 +24,75 @@ export const GET: APIRoute = async ({ url, locals, request }) => {
   const limit = Math.min(Number(params.get('limit') || 25), 100);
   const offset = (page - 1) * limit;
 
+  // Build where conditions
+  const conditions = [];
+  if (q) conditions.push(like(characters.name, `%${q}%`));
+  if (fandom) conditions.push(eq(characters.fandom, fandom));
+  if (groupId) conditions.push(eq(characters.groupId, Number(groupId)));
+  if (hasGroup) conditions.push(isNotNull(characters.groupId));
+
+  const where = conditions.length > 0 ? and(...conditions) : undefined;
+
   // Count query
-  let countSql = `
-    SELECT COUNT(*) as total FROM characters c
-    WHERE 1=1
-  `;
-  const countBindings: any[] = [];
-  let ci = 1;
-
-  if (q) { countSql += ` AND c.name LIKE '%' || $${ci++} || '%'`; countBindings.push(q); }
-  if (fandom) { countSql += ` AND c.fandom = $${ci++}`; countBindings.push(fandom); }
-  if (groupId) { countSql += ` AND c.group_id = $${ci++}`; countBindings.push(Number(groupId)); }
-  if (hasGroup) { countSql += ` AND c.group_id IS NOT NULL`; }
-
-  const countRow = await queryFirst<{ total: number }>(db, countSql, ...countBindings);
+  const countRow = await drz
+    .select({ total: count() })
+    .from(characters)
+    .where(where)
+    .get();
   const total = countRow?.total ?? 0;
 
-  // Data query
-  let dataSql = `
-    SELECT c.*, 
-      (SELECT COUNT(*) FROM character_appearances ca WHERE ca.character_id = c.id) as work_count,
-      cg.name as group_name
-    FROM characters c
-    LEFT JOIN character_groups cg ON c.group_id = cg.id
-    WHERE 1=1
-  `;
-  const dataBindings: any[] = [];
-  let di = 1;
-
-  if (q) { dataSql += ` AND c.name LIKE '%' || $${di++} || '%'`; dataBindings.push(q); }
-  if (fandom) { dataSql += ` AND c.fandom = $${di++}`; dataBindings.push(fandom); }
-  if (groupId) { dataSql += ` AND c.group_id = $${di++}`; dataBindings.push(Number(groupId)); }
-  if (hasGroup) { dataSql += ` AND c.group_id IS NOT NULL`; }
-
-  const validSorts: Record<string, string> = {
-    name: 'c.name ASC',
-    recent: 'c.created_at DESC',
-    works: 'work_count DESC',
+  // Data query with subquery for work_count and left join for group_name
+  const validSorts: Record<string, any> = {
+    name: asc(characters.name),
+    recent: desc(characters.createdAt),
+    works: desc(sql`work_count`),
   };
-  dataSql += ` ORDER BY ${validSorts[sort] || validSorts.name}`;
-  dataSql += ` LIMIT $${di++} OFFSET $${di++}`;
-  dataBindings.push(limit, offset);
 
-  const characters = await queryAll<any>(db, dataSql, ...dataBindings);
+  const charRows = await drz
+    .select({
+      id: characters.id,
+      name: characters.name,
+      fandom: characters.fandom,
+      groupId: characters.groupId,
+      tagId: characters.tagId,
+      description: characters.description,
+      shortDesc: characters.shortDesc,
+      avatarKey: characters.avatarKey,
+      aliases: characters.aliases,
+      createdBy: characters.createdBy,
+      updatedBy: characters.updatedBy,
+      createdAt: characters.createdAt,
+      updatedAt: characters.updatedAt,
+      workCount: sql<number>`(SELECT COUNT(*) FROM character_appearances ca WHERE ca.character_id = ${characters.id})`.as('work_count'),
+      groupName: characterGroups.name,
+    })
+    .from(characters)
+    .leftJoin(characterGroups, eq(characters.groupId, characterGroups.id))
+    .where(where)
+    .orderBy(validSorts[sort] || validSorts.name)
+    .limit(limit)
+    .offset(offset);
 
-  return new Response(JSON.stringify({ characters, total, page, limit }), {
+  // Convert camelCase keys to snake_case for API compatibility
+  const charactersResult = charRows.map(c => ({
+    id: c.id,
+    name: c.name,
+    fandom: c.fandom,
+    group_id: c.groupId,
+    tag_id: c.tagId,
+    description: c.description,
+    short_desc: c.shortDesc,
+    avatar_key: c.avatarKey,
+    aliases: c.aliases,
+    created_by: c.createdBy,
+    updated_by: c.updatedBy,
+    created_at: c.createdAt,
+    updated_at: c.updatedAt,
+    work_count: c.workCount,
+    group_name: c.groupName,
+  }));
+
+  return new Response(JSON.stringify({ characters: charactersResult, total, page, limit }), {
     headers: { 'Content-Type': 'application/json', ...cors },
   });
 };

@@ -1,6 +1,8 @@
 ---
 export const prerender = false;
-import { queryFirst, queryAll } from '../../../lib/db';
+import { getDrizzle } from '../../../lib/db';
+import { works, chapters, creatorships, readings, sessions, users, pseuds as pseudsTable, tags, taggings, chapterReactions } from '../../../lib/schema';
+import { eq, and, isNotNull, sql } from 'drizzle-orm';
 import { markdownToHtml } from '../../../lib/markdown';
 import { THEMES } from '../../../styles/themes';
 import ReadingMode from '../../../components/ReadingMode';
@@ -12,40 +14,94 @@ if (!workId) return Astro.redirect('/works');
 
 const chapterParam = Astro.url.searchParams.get('chapter');
 
-const db = Astro.locals.runtime.env.DB as D1Database;
+const d1 = Astro.locals.runtime.env.DB as D1Database;
+const db = getDrizzle(d1);
 
-const work = await queryFirst<any>(db, `SELECT * FROM works WHERE id = ?1 AND draft = 0`, workId);
-if (!work) return Astro.redirect('/works');
+const workRow = await db.select().from(works).where(and(eq(works.id, workId), isNotNull(works.publishedAt))).get();
+if (!workRow) return Astro.redirect('/works');
+
+// Map to snake_case for template compatibility
+const work: any = {
+  ...workRow,
+  published_at: workRow.publishedAt,
+  updated_at: workRow.updatedAt,
+  created_at: workRow.createdAt,
+  end_notes: workRow.endNotes,
+  word_count: workRow.wordCount,
+};
 
 // Check auth for reading progress
-let authUser = null;
+let authUser: any = null;
 let userPseudId: number | null = null;
 let readingProgress: any = null;
 const cookie = Astro.request.headers.get('cookie') ?? '';
 const sessionMatch = cookie.match(/session=([a-f0-9]+)/);
 if (sessionMatch) {
-  const session = await queryFirst<any>(db, `SELECT user_id FROM sessions WHERE token = ?1 AND expires_at > datetime('now')`, sessionMatch[1]);
+  const session = await db.select({ userId: sessions.userId }).from(sessions)
+    .where(and(eq(sessions.token, sessionMatch[1]), sql`${sessions.expiresAt} > datetime('now')`))
+    .get();
   if (session) {
-    authUser = await queryFirst<any>(db, `SELECT id, theme, reading_font_size, mood_disabled FROM users WHERE id = ?1`, session.user_id);
+    authUser = await db.select({
+      id: users.id,
+      theme: users.theme,
+      readingFontSize: users.readingFontSize,
+      moodDisabled: users.moodDisabled,
+    }).from(users).where(eq(users.id, session.userId)).get();
     if (authUser) {
-      const userPseud = await queryFirst<any>(db, `SELECT id FROM pseuds WHERE user_id = ?1 ORDER BY id LIMIT 1`, authUser.id);
+      // Map to snake_case for template compatibility
+      (authUser as any).reading_font_size = authUser.readingFontSize;
+      (authUser as any).mood_disabled = authUser.moodDisabled;
+      const userPseud = await db.select({ id: pseudsTable.id }).from(pseudsTable)
+        .where(eq(pseudsTable.userId, authUser.id))
+        .orderBy(pseudsTable.id)
+        .limit(1)
+        .get();
       userPseudId = userPseud?.id ?? null;
     }
   }
 }
 
 if (userPseudId) {
-  readingProgress = await queryFirst<any>(db, `SELECT * FROM readings WHERE pseud_id = ?1 AND work_id = ?2`, userPseudId, workId);
+  const rp = await db.select().from(readings)
+    .where(and(eq(readings.pseudId, userPseudId), eq(readings.workId, workId)))
+    .get();
+  if (rp) {
+    readingProgress = { ...rp, last_chapter: rp.lastChapter, for_later: rp.forLater };
+  }
 }
 
 // Get all published chapters
-const chapters = await queryAll<any>(db, `SELECT id, position, title, draft, word_count FROM chapters WHERE work_id = ?1 AND draft = 0 ORDER BY position`, workId);
+const chaptersRows = await db
+  .select({
+    id: chapters.id,
+    position: chapters.position,
+    title: chapters.title,
+    draft: chapters.draft,
+    wordCount: chapters.wordCount,
+  })
+  .from(chapters)
+  .where(and(eq(chapters.workId, workId), eq(chapters.draft, 0)))
+  .orderBy(chapters.position);
+
+// Map to snake_case for template compatibility
+const chapters: any[] = chaptersRows.map(c => ({
+  ...c,
+  word_count: c.wordCount,
+}));
+
 if (!chapters.length) return Astro.redirect('/works');
 
 // Current chapter
 const chapterId = chapterParam ? Number(chapterParam) : (readingProgress?.last_chapter || chapters[0].id);
 const currentChapter = chapters.find((c: any) => c.id === chapterId) || chapters[0];
-const currentChapterData = await queryFirst<any>(db, `SELECT * FROM chapters WHERE id = ?1`, currentChapter.id);
+const currentChapterDataRow = await db.select().from(chapters).where(eq(chapters.id, currentChapter.id)).get();
+// Map to snake_case for template compatibility
+const currentChapterData: any = currentChapterDataRow ? {
+  ...currentChapterDataRow,
+  content_html: currentChapterDataRow.contentHtml,
+  content_md: currentChapterDataRow.contentMd,
+  word_count: currentChapterDataRow.wordCount,
+} : null;
 
 // Previous/next chapters
 const currentIndex = chapters.findIndex((c: any) => c.id === currentChapter.id);
@@ -57,21 +113,44 @@ const totalWords = chapters.reduce((sum: number, c: any) => sum + (c.word_count 
 const readingTimeMinutes = Math.max(1, Math.ceil(totalWords / 230)); // 230 wpm average
 
 // Tags for context
-const tags = await queryAll<any>(db, `SELECT t.* FROM tags t JOIN taggings tg ON t.id = tg.tag_id WHERE tg.work_id = ?1`, workId);
-const pseuds = await queryAll<any>(db, `SELECT p.name, p.icon_key FROM pseuds p JOIN creatorships c ON p.id = c.pseud_id WHERE c.work_id = ?1`, workId);
+const tagsRows = await db
+  .select({ id: tags.id, name: tags.name, type: tags.type })
+  .from(taggings)
+  .innerJoin(tags, eq(taggings.tagId, tags.id))
+  .where(eq(taggings.workId, workId));
+
+const pseudsRows = await db
+  .select({ name: pseudsTable.name, iconKey: pseudsTable.iconKey })
+  .from(creatorships)
+  .innerJoin(pseudsTable, eq(creatorships.pseudId, pseudsTable.id))
+  .where(eq(creatorships.workId, workId));
+
+// Map to snake_case for template compatibility
+const tags: any[] = tagsRows;
+const pseuds: any[] = pseudsRows.map(p => ({ ...p, icon_key: p.iconKey }));
 
 // ── Canon Deep-Dive: Build canon index for this work's fandom ──
 const fandomTag = tags.find((t: any) => t.type === 'fandom');
 const fandomTagId = fandomTag ? fandomTag.id : null;
-const canonIndex = fandomTagId ? await buildCanonIndex(db, fandomTagId) : new Map();
+const canonIndex = fandomTagId ? await buildCanonIndex(d1, fandomTagId) : new Map();
 
 // Chapter reactions for current chapter
-let reactionRows: any[] = [];
+let reactionRows: { reaction: string; cnt: number }[] = [];
 let myReactions: string[] = [];
 if (currentChapter.id) {
-  reactionRows = await queryAll<{ reaction: string; cnt: number }>(db, `SELECT reaction, COUNT(*) as cnt FROM chapter_reactions WHERE chapter_id = ?1 GROUP BY reaction`, currentChapter.id);
+  reactionRows = await db
+    .select({
+      reaction: chapterReactions.reaction,
+      cnt: sql<number>`count(${chapterReactions.id})`,
+    })
+    .from(chapterReactions)
+    .where(eq(chapterReactions.chapterId, currentChapter.id))
+    .groupBy(chapterReactions.reaction);
   if (userPseudId) {
-    const myRows = await queryAll<{ reaction: string }>(db, `SELECT reaction FROM chapter_reactions WHERE chapter_id = ?1 AND pseud_id = ?2`, currentChapter.id, userPseudId);
+    const myRows = await db
+      .select({ reaction: chapterReactions.reaction })
+      .from(chapterReactions)
+      .where(and(eq(chapterReactions.chapterId, currentChapter.id), eq(chapterReactions.pseudId, userPseudId)));
     myReactions = myRows.map(r => r.reaction);
   }
 }

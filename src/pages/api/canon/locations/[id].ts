@@ -1,11 +1,13 @@
 export const prerender = false;
 
-import { queryAll, queryFirst, run } from '@/lib/db';
+import { getDrizzle } from '@/lib/db';
 import { requireAuth } from '@/lib/auth';
 import { corsHeaders, handleCors } from '@/lib/cors';
 import { markdownToHtml } from '@/lib/markdown';
 import type { APIRoute } from 'astro';
 import { UserRole, hasRoleLevel } from '@/lib/types';
+import { eq, and, sql, asc } from 'drizzle-orm';
+import { locations, locationEdits, entityReferences, tags } from '@/lib/schema';
 
 export const OPTIONS: APIRoute = async ({ request }) => {
   return handleCors(request) ?? new Response(null, { status: 405 });
@@ -21,20 +23,21 @@ function slugify(name: string): string {
 }
 
 async function ensureUniqueSlug(
-  db: D1Database,
+  db: ReturnType<typeof getDrizzle>,
   baseSlug: string,
   excludeId?: number,
 ): Promise<string> {
   let slug = baseSlug;
   let suffix = 2;
   while (true) {
-    let sql = `SELECT id FROM locations WHERE slug = ?1`;
-    const params: unknown[] = [slug];
+    const conditions = [eq(locations.slug, slug)];
     if (excludeId) {
-      sql += ` AND id != ?2`;
-      params.push(excludeId);
+      conditions.push(sql`${locations.id} != ${excludeId}`);
     }
-    const existing = await queryFirst<{ id: number }>(db, sql, ...params);
+    const existing = await db.select({ id: locations.id })
+      .from(locations)
+      .where(and(...conditions))
+      .get();
     if (!existing) return slug;
     slug = `${baseSlug}-${suffix++}`;
   }
@@ -43,7 +46,8 @@ async function ensureUniqueSlug(
 // GET /api/canon/locations/[id] — Single location
 export const GET: APIRoute = async ({ params, locals, request }) => {
   const cors = corsHeaders(request);
-  const db = locals.runtime.env.DB as D1Database;
+  const d1 = locals.runtime.env.DB as D1Database;
+  const db = getDrizzle(d1);
   const id = Number(params.id);
   if (!id) {
     return new Response(
@@ -53,16 +57,16 @@ export const GET: APIRoute = async ({ params, locals, request }) => {
   }
 
   try {
-    const location = await queryFirst<any>(
-      db,
+    // Use raw SQL for the self-join + tag join
+    const locRow = await d1.prepare(
       `SELECT l.*, p.name as parent_name, t.name as fandom_name
        FROM locations l
        LEFT JOIN locations p ON l.parent_location_id = p.id
        LEFT JOIN tags t ON l.fandom_tag_id = t.id
-       WHERE l.id = ?1`,
-      id,
-    );
-    if (!location) {
+       WHERE l.id = ?1`
+    ).bind(id).first<any>();
+
+    if (!locRow) {
       return new Response(
         JSON.stringify({ error: 'Location not found' }),
         { status: 404, headers: { 'Content-Type': 'application/json', ...cors } },
@@ -70,27 +74,29 @@ export const GET: APIRoute = async ({ params, locals, request }) => {
     }
 
     // Children locations
-    const children = await queryAll<any>(
-      db,
-      `SELECT id, name, slug FROM locations WHERE parent_location_id = ?1 ORDER BY name ASC`,
-      id,
-    );
-    location.children = children;
+    const children = await db.select({
+      id: locations.id,
+      name: locations.name,
+      slug: locations.slug,
+    })
+      .from(locations)
+      .where(eq(locations.parentLocationId, id))
+      .orderBy(asc(locations.name));
 
     // Works referencing this location
-    const works = await queryAll<any>(
-      db,
+    const { results: works } = await d1.prepare(
       `SELECT w.id, w.title, w.summary, w.word_count, w.published_at
        FROM entity_references er
        JOIN works w ON er.work_id = w.id
        WHERE er.entity_type = 'location' AND er.entity_id = ?1
-       ORDER BY w.updated_at DESC`,
-      id,
-    );
-    location.works_referencing = works;
+       ORDER BY w.updated_at DESC`
+    ).bind(id).all<any>();
+
+    locRow.children = children;
+    locRow.works_referencing = works;
 
     return new Response(
-      JSON.stringify(location),
+      JSON.stringify(locRow),
       { headers: { 'Content-Type': 'application/json', ...cors } },
     );
   } catch (e: any) {
@@ -103,9 +109,10 @@ export const GET: APIRoute = async ({ params, locals, request }) => {
 
 // PUT /api/canon/locations/[id] — Update location
 export const PUT: APIRoute = async ({ params, request, locals }) => {
-  const db = locals.runtime.env.DB as D1Database;
+  const d1 = locals.runtime.env.DB as D1Database;
+  const db = getDrizzle(d1);
   const cors = corsHeaders(request);
-  const auth = await requireAuth(db, request);
+  const auth = await requireAuth(d1, request);
   if (!auth) {
     return new Response(
       JSON.stringify({ error: 'Unauthorized' }),
@@ -122,11 +129,7 @@ export const PUT: APIRoute = async ({ params, request, locals }) => {
   }
 
   try {
-    const existing = await queryFirst<any>(
-      db,
-      `SELECT * FROM locations WHERE id = ?1`,
-      id,
-    );
+    const existing = await db.select().from(locations).where(eq(locations.id, id)).get();
     if (!existing) {
       return new Response(
         JSON.stringify({ error: 'Location not found' }),
@@ -136,8 +139,8 @@ export const PUT: APIRoute = async ({ params, request, locals }) => {
 
     // Permission: creator or admin/mod
     const isCreator =
-      existing.created_by &&
-      auth.pseuds.some((p) => p.id === existing.created_by);
+      existing.createdBy &&
+      auth.pseuds.some((p) => p.id === existing.createdBy);
     const isPrivileged = hasRoleLevel(auth.user.role as UserRole, UserRole.Mod);
     if (!isCreator && !isPrivileged) {
       return new Response(
@@ -157,92 +160,81 @@ export const PUT: APIRoute = async ({ params, request, locals }) => {
     }
 
     const pseudId = auth.pseuds[0]?.id ?? null;
-    const updates: string[] = [];
-    const bindings: unknown[] = [];
-    let idx = 1;
+    const updateValues: Record<string, any> = {};
     const changedFields: { field: string; oldValue: string | null; newValue: string | null }[] = [];
 
     if (body.name !== undefined && body.name !== existing.name) {
       const newSlug = await ensureUniqueSlug(db, slugify(body.name), id);
       changedFields.push({ field: 'name', oldValue: existing.name, newValue: body.name });
-      updates.push(`name = ?${idx++}`);
-      bindings.push(body.name);
-      updates.push(`slug = ?${idx++}`);
-      bindings.push(newSlug);
+      updateValues.name = body.name;
+      updateValues.slug = newSlug;
     }
 
-    if (body.description_md !== undefined && body.description_md !== existing.description_md) {
+    if (body.description_md !== undefined && body.description_md !== existing.descriptionMd) {
       const descHtml = markdownToHtml(body.description_md);
-      changedFields.push({ field: 'description_md', oldValue: existing.description_md, newValue: body.description_md });
-      changedFields.push({ field: 'description_html', oldValue: existing.description_html, newValue: descHtml });
-      updates.push(`description_md = ?${idx++}`);
-      bindings.push(body.description_md);
-      updates.push(`description_html = ?${idx++}`);
-      bindings.push(descHtml);
+      changedFields.push({ field: 'description_md', oldValue: existing.descriptionMd, newValue: body.description_md });
+      changedFields.push({ field: 'description_html', oldValue: existing.descriptionHtml, newValue: descHtml });
+      updateValues.descriptionMd = body.description_md;
+      updateValues.descriptionHtml = descHtml;
     }
 
     if (body.fandom_tag_id !== undefined) {
       const newVal = body.fandom_tag_id ? Number(body.fandom_tag_id) : null;
-      const oldVal = existing.fandom_tag_id;
+      const oldVal = existing.fandomTagId;
       if (newVal !== oldVal) {
         changedFields.push({
           field: 'fandom_tag_id',
           oldValue: String(oldVal ?? ''),
           newValue: String(newVal ?? ''),
         });
-        updates.push(`fandom_tag_id = ?${idx++}`);
-        bindings.push(newVal);
+        updateValues.fandomTagId = newVal;
       }
     }
 
     if (body.parent_location_id !== undefined) {
       const newVal = body.parent_location_id ? Number(body.parent_location_id) : null;
-      const oldVal = existing.parent_location_id;
+      const oldVal = existing.parentLocationId;
       if (newVal !== oldVal) {
         changedFields.push({
           field: 'parent_location_id',
           oldValue: String(oldVal ?? ''),
           newValue: String(newVal ?? ''),
         });
-        updates.push(`parent_location_id = ?${idx++}`);
-        bindings.push(newVal);
+        updateValues.parentLocationId = newVal;
       }
     }
 
-    if (updates.length === 0) {
+    if (Object.keys(updateValues).length === 0) {
       return new Response(
         JSON.stringify({ error: 'No fields to update' }),
         { status: 400, headers: { 'Content-Type': 'application/json', ...cors } },
       );
     }
 
-    updates.push(`updated_by = ?${idx++}`);
-    bindings.push(pseudId);
-    updates.push(`updated_at = CURRENT_TIMESTAMP`);
+    updateValues.updatedBy = pseudId;
+    updateValues.updatedAt = sql`CURRENT_TIMESTAMP`;
 
-    bindings.push(id);
-    const sql = `UPDATE locations SET ${updates.join(', ')} WHERE id = ?${idx}`;
-    await run(db, sql, ...bindings);
+    await db.update(locations).set(updateValues).where(eq(locations.id, id));
 
     // Create location_edits for each changed field
     for (const change of changedFields) {
-      await run(
-        db,
-        `INSERT INTO location_edits (location_id, pseud_id, field, old_value, new_value)
-         VALUES (?1, ?2, ?3, ?4, ?5)`,
-        id, pseudId, change.field, change.oldValue, change.newValue,
-      );
+      await db.insert(locationEdits).values({
+        locationId: id,
+        pseudId,
+        field: change.field,
+        oldValue: change.oldValue,
+        newValue: change.newValue,
+      });
     }
 
-    const updated = await queryFirst<any>(
-      db,
+    // Use raw SQL for the self-join + tag join response
+    const updated = await d1.prepare(
       `SELECT l.*, p.name as parent_name, t.name as fandom_name
        FROM locations l
        LEFT JOIN locations p ON l.parent_location_id = p.id
        LEFT JOIN tags t ON l.fandom_tag_id = t.id
-       WHERE l.id = ?1`,
-      id,
-    );
+       WHERE l.id = ?1`
+    ).bind(id).first<any>();
 
     return new Response(
       JSON.stringify(updated),
@@ -258,9 +250,10 @@ export const PUT: APIRoute = async ({ params, request, locals }) => {
 
 // DELETE /api/canon/locations/[id] — Delete location (admin/mod only)
 export const DELETE: APIRoute = async ({ params, request, locals }) => {
-  const db = locals.runtime.env.DB as D1Database;
+  const d1 = locals.runtime.env.DB as D1Database;
+  const db = getDrizzle(d1);
   const cors = corsHeaders(request);
-  const auth = await requireAuth(db, request);
+  const auth = await requireAuth(d1, request);
   if (!auth) {
     return new Response(
       JSON.stringify({ error: 'Unauthorized' }),
@@ -285,11 +278,7 @@ export const DELETE: APIRoute = async ({ params, request, locals }) => {
   }
 
   try {
-    const existing = await queryFirst<any>(
-      db,
-      `SELECT * FROM locations WHERE id = ?1`,
-      id,
-    );
+    const existing = await db.select().from(locations).where(eq(locations.id, id)).get();
     if (!existing) {
       return new Response(
         JSON.stringify({ error: 'Location not found' }),
@@ -298,7 +287,7 @@ export const DELETE: APIRoute = async ({ params, request, locals }) => {
     }
 
     // location_edits and entity_references cascade on delete
-    await run(db, `DELETE FROM locations WHERE id = ?1`, id);
+    await db.delete(locations).where(eq(locations.id, id));
     return new Response(
       JSON.stringify({ ok: true }),
       { headers: { 'Content-Type': 'application/json', ...cors } },

@@ -1,35 +1,38 @@
 ---
 export const prerender = false;
 import Base from '../../layouts/Base.astro';
+import { getDrizzle } from '../../lib/db';
+import { sessions, users, pseuds as pseudsTable, characters, characterGroups } from '../../lib/schema';
+import { eq, and, gt, sql, isNotNull, asc } from 'drizzle-orm';
 
 // Auth gate — redirect if not logged in
 const cookie = Astro.request.headers.get('cookie') ?? '';
 const sessionMatch = cookie.match(/session=([a-f0-9]+)/);
 if (!sessionMatch) return Astro.redirect('/login');
 
-const db = Astro.locals.runtime.env.DB as D1Database;
-const session = await queryFirst<any>(db, `SELECT user_id FROM sessions WHERE token = ?1 AND expires_at > datetime('now')`, sessionMatch[1]);
+const drz = getDrizzle(Astro.locals.runtime.env.DB as D1Database);
+const session = await drz.select({ userId: sessions.userId }).from(sessions).where(and(eq(sessions.token, sessionMatch[1]), gt(sessions.expiresAt, sql`datetime('now')`))).get();
 if (!session) return Astro.redirect('/login');
 
-import { queryFirst, queryAll } from '../../lib/db';
+const user = await drz.select({ id: users.id, role: users.role }).from(users).where(eq(users.id, session.userId)).get();
+if (!user) return Astro.redirect('/login');
 
-const user = await queryFirst<any>(db, `SELECT id, role FROM users WHERE id = ?1`, session.user_id);
-const pseuds = await queryAll<any>(db, `SELECT id, name FROM pseuds WHERE user_id = ?1 ORDER BY id`, user.id);
+const pseudList = await drz.select({ id: pseudsTable.id, name: pseudsTable.name }).from(pseudsTable).where(eq(pseudsTable.userId, user.id)).orderBy(asc(pseudsTable.id)).all();
 
 // Fetch character groups for dropdown
-const groups = await queryAll<{ id: number; name: string }>(db, `SELECT id, name FROM character_groups ORDER BY name`);
+const groups = await drz.select({ id: characterGroups.id, name: characterGroups.name }).from(characterGroups).orderBy(asc(characterGroups.name)).all();
 
 // Fetch existing fandoms for autocomplete
-const fandomRows = await queryAll<{ fandom: string }>(db, `SELECT DISTINCT fandom FROM characters WHERE fandom IS NOT NULL ORDER BY fandom`);
+const fandomRows = await drz.selectDistinct({ fandom: characters.fandom }).from(characters).where(isNotNull(characters.fandom)).orderBy(asc(characters.fandom)).all();
 const fandoms = fandomRows.map(r => r.fandom);
 
 // If editing (query param ?edit=ID), load character data
 const editId = Number(Astro.url.searchParams.get('edit'));
 let editChar: any = null;
 if (editId) {
-  editChar = await queryFirst<any>(db, `SELECT * FROM characters WHERE id = ?1`, editId);
+  editChar = await drz.select().from(characters).where(eq(characters.id, editId)).get();
   // Permission check
-  const isCreator = editChar?.created_by && pseuds.some(p => p.id === editChar.created_by);
+  const isCreator = editChar?.createdBy && pseudList.some(p => p.id === editChar.createdBy);
   const isPrivileged = ['admin', 'mod', 'founder'].includes(user.role);
   if (!editChar || (!isCreator && !isPrivileged)) return Astro.redirect('/characters');
 }

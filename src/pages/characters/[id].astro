@@ -1,66 +1,67 @@
 ---
 export const prerender = false;
 import Base from '../../layouts/Base.astro';
-import { queryFirst, queryAll } from '../../lib/db';
+import { getDrizzle } from '../../lib/db';
+import { characters, characterGroups, characterAppearances, works, tags, sessions, users, pseuds as pseudsTable } from '../../lib/schema';
+import { eq, and, ne, desc, gt, sql, asc } from 'drizzle-orm';
 import { markdownToHtml } from '../../lib/markdown';
 
 const id = Number(Astro.params.id);
 if (!id) return Astro.redirect('/characters');
 
-const db = Astro.locals.runtime.env.DB as D1Database;
+const drz = getDrizzle(Astro.locals.runtime.env.DB as D1Database);
 
-const character = await queryFirst<{
-  id: number;
-  name: string;
-  fandom: string | null;
-  group_id: number | null;
-  tag_id: number | null;
-  description: string | null;
-  short_desc: string | null;
-  avatar_key: string | null;
-  aliases: string | null;
-  created_by: number | null;
-  created_at: string;
-  updated_at: string;
-}>(db, `SELECT * FROM characters WHERE id = ?1`, id);
+const character = await drz.select().from(characters).where(eq(characters.id, id)).get();
 
 if (!character) return Astro.redirect('/characters');
 
 // Group info
-let group = null;
+let group: any = null;
 let groupSiblings: any[] = [];
-if (character.group_id) {
-  group = await queryFirst<any>(db, `SELECT * FROM character_groups WHERE id = ?1`, character.group_id);
-  groupSiblings = await queryAll<any>(
-    db,
-    `SELECT id, name, fandom FROM characters WHERE group_id = ?1 AND id != ?2`,
-    character.group_id, id
-  );
+if (character.groupId) {
+  group = await drz.select().from(characterGroups).where(eq(characterGroups.id, character.groupId)).get();
+  groupSiblings = await drz
+    .select({ id: characters.id, name: characters.name, fandom: characters.fandom })
+    .from(characters)
+    .where(and(eq(characters.groupId, character.groupId), ne(characters.id, id)))
+    .all();
 }
 
 // Appearances
-const appearances = await queryAll<{
-  id: number;
-  character_id: number;
-  work_id: number;
-  role: string;
-  notes: string | null;
-  work_title: string;
-  work_summary: string | null;
-  word_count: number;
-  work_complete: number;
-  published_at: string | null;
-}>(db, `
-  SELECT ca.id, ca.character_id, ca.work_id, ca.role, ca.notes,
-         w.title as work_title, w.summary as work_summary, w.word_count,
-         w.complete as work_complete, w.published_at
-  FROM character_appearances ca
-  JOIN works w ON ca.work_id = w.id
-  WHERE ca.character_id = ?1
-  ORDER BY ca.created_at DESC
-`, id);
+const appearances = await drz
+  .select({
+    id: characterAppearances.id,
+    characterId: characterAppearances.characterId,
+    workId: characterAppearances.workId,
+    role: characterAppearances.role,
+    notes: characterAppearances.notes,
+    workTitle: works.title,
+    workSummary: works.summary,
+    wordCount: works.wordCount,
+    workComplete: works.complete,
+    publishedAt: works.publishedAt,
+  })
+  .from(characterAppearances)
+  .innerJoin(works, eq(characterAppearances.workId, works.id))
+  .where(eq(characterAppearances.characterId, id))
+  .orderBy(desc(characterAppearances.createdAt))
+  .all();
 
-const workCount = appearances.length;
+// Convert to snake_case for template compatibility
+const appearancesSnake = appearances.map(a => ({
+  id: a.id,
+  character_id: a.characterId,
+  work_id: a.workId,
+  role: a.role,
+  notes: a.notes,
+  work_title: a.workTitle,
+  work_summary: a.workSummary,
+  word_count: a.wordCount,
+  work_complete: a.workComplete,
+  published_at: a.publishedAt,
+}));
+
+const workCount = appearancesSnake.length;
 
 // Parse aliases
 let aliases: string[] = [];
@@ -70,9 +71,9 @@ try { aliases = character.aliases ? JSON.parse(character.aliases) : []; } catch 
 const descriptionHtml = character.description ? markdownToHtml(character.description) : '';
 
 // Linked tag
-let linkedTag = null;
-if (character.tag_id) {
-  linkedTag = await queryFirst<any>(db, `SELECT * FROM tags WHERE id = ?1`, character.tag_id);
+let linkedTag: any = null;
+if (character.tagId) {
+  linkedTag = await drz.select().from(tags).where(eq(tags.id, character.tagId)).get();
 }
 
 // Auth check for edit
@@ -80,17 +81,33 @@ const cookie = Astro.request.headers.get('cookie') ?? '';
 const sessionMatch = cookie.match(/session=([a-f0-9]+)/);
 let canEdit = false;
 if (sessionMatch) {
-  const session = await queryFirst<any>(db, `SELECT user_id FROM sessions WHERE token = ?1 AND expires_at > datetime('now')`, sessionMatch[1]);
+  const session = await drz.select({ userId: sessions.userId }).from(sessions).where(and(eq(sessions.token, sessionMatch[1]), gt(sessions.expiresAt, sql`datetime('now')`))).get();
   if (session) {
-    const user = await queryFirst<any>(db, `SELECT id, role FROM users WHERE id = ?1`, session.user_id);
+    const user = await drz.select({ id: users.id, role: users.role }).from(users).where(eq(users.id, session.userId)).get();
     if (user) {
-      const pseuds = await queryAll<any>(db, `SELECT id FROM pseuds WHERE user_id = ?1`, user.id);
-      const isCreator = character.created_by && pseuds.some(p => p.id === character.created_by);
+      const userPseuds = await drz.select({ id: pseudsTable.id }).from(pseudsTable).where(eq(pseudsTable.userId, user.id)).orderBy(asc(pseudsTable.id)).all();
+      const isCreator = character.createdBy && userPseuds.some(p => p.id === character.createdBy);
       const isPrivileged = ['admin', 'mod', 'founder'].includes(user.role);
       canEdit = isCreator || isPrivileged;
     }
   }
 }
+
+// Convert character to snake_case for template
+const char = {
+  id: character.id,
+  name: character.name,
+  fandom: character.fandom,
+  group_id: character.groupId,
+  tag_id: character.tagId,
+  description: character.description,
+  short_desc: character.shortDesc,
+  avatar_key: character.avatarKey,
+  aliases: character.aliases,
+  created_by: character.createdBy,
+  created_at: character.createdAt,
+  updated_at: character.updatedAt,
+};
 
 const ROLE_LABELS: Record<string, string> = {
   protagonist: 'Protagonist',
@@ -109,19 +126,19 @@ const ROLE_COLORS: Record<string, string> = {
 };
 ---
 
-<Base title={`${character.name} — Character Library — fanfiction.fyi`}>
+<Base title={`${char.name} — Character Library — fanfiction.fyi`}>
   <div class="char-profile">
     <!-- Header -->
     <div class="char-profile-header">
       <div class="char-profile-avatar">
-        {character.avatar_key
-          ? <img src={`/api/storage/${character.avatar_key}`} alt={character.name} />
-          : <div class="char-avatar-lg">{character.name.charAt(0).toUpperCase()}</div>
+        {char.avatar_key
+          ? <img src={`/api/storage/${char.avatar_key}`} alt={char.name} />
+          : <div class="char-avatar-lg">{char.name.charAt(0).toUpperCase()}</div>
         }
       </div>
       <div class="char-profile-meta">
-        <h1 class="char-profile-name">{character.name}</h1>
-        {character.fandom && <span class="char-profile-fandom">{character.fandom}</span>}
+        <h1 class="char-profile-name">{char.name}</h1>
+        {char.fandom && <span class="char-profile-fandom">{char.fandom}</span>}
         {aliases.length > 0 && (
           <div class="char-profile-aliases">
             Also known as: {aliases.map((a, i) => (
@@ -129,7 +146,7 @@ const ROLE_COLORS: Record<string, string> = {
             ))}
           </div>
         )}
-        {character.short_desc && <p class="char-profile-short">{character.short_desc}</p>}
+        {char.short_desc && <p class="char-profile-short">{char.short_desc}</p>}
         <div class="char-profile-stats">
           <span class="stat">{workCount} {workCount === 1 ? 'work' : 'works'}</span>
           {group && <span class="stat">Group: <a href={`/characters?group_id=${group.id}`}>{group.name}</a></span>}
@@ -165,9 +182,9 @@ const ROLE_COLORS: Record<string, string> = {
     <!-- Appearances -->
     <section class="char-profile-section">
       <h2 class="section-title">Appearances ({workCount})</h2>
-      {appearances.length > 0 ? (
+      {appearancesSnake.length > 0 ? (
         <div class="appearances-list">
-          {appearances.map(a => (
+          {appearancesSnake.map(a => (
             <a href={`/works/${a.work_id}`} class="appearance-card">
               <div class="appearance-body">
                 <span class="appearance-title">{a.work_title}</span>

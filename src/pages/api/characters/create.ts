@@ -1,8 +1,10 @@
 export const prerender = false;
 
-import { queryFirst, queryAll, run } from '@/lib/db';
+import { getDrizzle } from '@/lib/db';
+import { characters, tags } from '@/lib/schema';
 import { requireAuth } from '@/lib/auth';
 import { corsHeaders, handleCors } from '@/lib/cors';
+import { eq, and, sql } from 'drizzle-orm';
 import type { APIRoute } from 'astro';
 
 export const OPTIONS: APIRoute = async ({ request }) => {
@@ -11,8 +13,9 @@ export const OPTIONS: APIRoute = async ({ request }) => {
 
 // POST /api/characters — Create a new character
 export const POST: APIRoute = async ({ request, locals }) => {
-  const db = locals.runtime.env.DB as D1Database;
-  const auth = await requireAuth(db, request);
+  const d1 = locals.runtime.env.DB as D1Database;
+  const drz = getDrizzle(d1);
+  const auth = await requireAuth(d1, request);
   if (!auth) return new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401, headers: { 'Content-Type': 'application/json' } });
 
   let body: any;
@@ -20,7 +23,7 @@ export const POST: APIRoute = async ({ request, locals }) => {
     return new Response(JSON.stringify({ error: 'Invalid JSON' }), { status: 400, headers: { 'Content-Type': 'application/json' } });
   }
 
-  const { name, fandom, group_id, description, short_desc, avatar_key, aliases } = body || {};
+  const { name, fandom: fandomVal, group_id, description, short_desc, avatar_key, aliases } = body || {};
   if (!name || typeof name !== 'string' || !name.trim()) {
     return new Response(JSON.stringify({ error: 'Name is required' }), { status: 400, headers: { 'Content-Type': 'application/json' } });
   }
@@ -30,43 +33,40 @@ export const POST: APIRoute = async ({ request, locals }) => {
 
   // Auto-create a matching character tag if one doesn't exist
   let tagId: number | null = null;
-  const existingTag = await queryFirst<{ id: number }>(
-    db,
-    `SELECT id FROM tags WHERE name = ?1 AND type = 'character'`,
-    name.trim()
-  );
+  const existingTag = await drz
+    .select({ id: tags.id })
+    .from(tags)
+    .where(and(eq(tags.name, name.trim()), eq(tags.type, 'character')))
+    .get();
   if (existingTag) {
     tagId = existingTag.id;
   } else {
     try {
-      const tagResult = await run(db, `INSERT INTO tags (name, type) VALUES (?1, 'character')`, name.trim());
-      tagId = tagResult.meta.last_row_id as number;
+      const inserted = await drz.insert(tags).values({ name: name.trim(), type: 'character' }).returning({ id: tags.id }).get();
+      tagId = inserted.id;
     } catch {
       // Tag creation failed (race condition?), try fetching again
-      const retryTag = await queryFirst<{ id: number }>(
-        db,
-        `SELECT id FROM tags WHERE name = ?1 AND type = 'character'`,
-        name.trim()
-      );
+      const retryTag = await drz
+        .select({ id: tags.id })
+        .from(tags)
+        .where(and(eq(tags.name, name.trim()), eq(tags.type, 'character')))
+        .get();
       tagId = retryTag?.id ?? null;
     }
   }
 
-  const result = await run(
-    db,
-    `INSERT INTO characters (name, fandom, group_id, tag_id, description, short_desc, avatar_key, aliases, created_by, updated_by)
-     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?9)`,
-    name.trim(),
-    fandom || null,
-    group_id || null,
+  const inserted = await drz.insert(characters).values({
+    name: name.trim(),
+    fandom: fandomVal || null,
+    groupId: group_id || null,
     tagId,
-    description || null,
-    short_desc || null,
-    avatar_key || null,
-    aliasesStr,
-    pseudId
-  );
+    description: description || null,
+    shortDesc: short_desc || null,
+    avatarKey: avatar_key || null,
+    aliases: aliasesStr,
+    createdBy: pseudId,
+    updatedBy: pseudId,
+  }).returning().get();
 
-  const character = await queryFirst<any>(db, `SELECT * FROM characters WHERE id = ?1`, result.meta.last_row_id);
-  return new Response(JSON.stringify(character), { status: 201, headers: { 'Content-Type': 'application/json' } });
+  return new Response(JSON.stringify(inserted), { status: 201, headers: { 'Content-Type': 'application/json' } });
 };

@@ -1,8 +1,10 @@
 export const prerender = false;
 
 import type { APIRoute } from 'astro';
+import { getDrizzle } from '@/lib/db';
 import { requireAuth } from '@/lib/auth';
-import { queryFirst, run } from '@/lib/db';
+import { users, pseuds, creatorships, chapters } from '@/lib/schema';
+import { eq, and, or, like, gt, lt, gte, lte, sql, desc, asc, count, inArray } from 'drizzle-orm';
 import { uploadImage, deleteImage, deleteImages, parseMultipart, UploadError } from '@/lib/storage';
 import { checkRateLimit, recordFailedAttempt } from '@/lib/rate-limit';
 
@@ -11,7 +13,7 @@ import { checkRateLimit, recordFailedAttempt } from '@/lib/rate-limit';
  * 
  * Accepts multipart/form-data with:
  *   - file: the image file (gif/png/jpg/webp)
- *   - type: "avatar" | "pseud" | "chapter"
+ *   - type: "avatar" | "pseud" | "chapter" | "banner"
  *   - id: (for pseud/chapter type) the pseud ID or work ID
  *   - chapterId: (for chapter type) the chapter ID (for tracking images on the chapter)
  * 
@@ -24,9 +26,10 @@ import { checkRateLimit, recordFailedAttempt } from '@/lib/rate-limit';
  * Returns: { key: string, url: string }
  */
 export const POST: APIRoute = async ({ locals, request }) => {
-  const db = locals.runtime.env.DB as D1Database;
+  const d1 = locals.runtime.env.DB as D1Database;
+  const db = getDrizzle(d1);
   const bucket = locals.runtime.env.MEDIA as R2Bucket;
-  const auth = await requireAuth(db, request);
+  const auth = await requireAuth(d1, request);
   if (!auth) {
     return new Response(JSON.stringify({ error: 'Auth required' }), {
       status: 401,
@@ -36,14 +39,14 @@ export const POST: APIRoute = async ({ locals, request }) => {
 
   // Rate limit: 5 per 5min per user ID
   const rlKey = `user:${auth.user.id}`;
-  const rl = await checkRateLimit(db, rlKey, 'upload');
+  const rl = await checkRateLimit(d1, rlKey, 'upload');
   if (!rl.allowed) {
     return new Response(JSON.stringify({ error: 'Rate limit exceeded. Try again later.' }), {
       status: 429,
       headers: { 'Content-Type': 'application/json', 'Retry-After': String(rl.retryAfterSeconds) },
     });
   }
-  await recordFailedAttempt(db, rlKey, 'upload');
+  await recordFailedAttempt(d1, rlKey, 'upload');
 
   let files: Map<string, { data: ArrayBuffer; type: string; size: number; filename: string }>;
   let fields: Map<string, string>;
@@ -96,10 +99,12 @@ export const POST: APIRoute = async ({ locals, request }) => {
       // For workId=0 (new work drafts), skip ownership check — no work exists yet
       // For workId>0, verify the user owns this work
       if (workId > 0) {
-        const creatorship = await queryFirst<any>(db, 
-          'SELECT * FROM creatorships WHERE work_id = ?1 AND pseud_id IN (SELECT id FROM pseuds WHERE user_id = ?2)', 
-          workId, auth.user.id
-        );
+        const userPseudIds = auth.pseuds.map(p => p.id);
+        const creatorship = await db
+          .select()
+          .from(creatorships)
+          .where(and(eq(creatorships.workId, workId), inArray(creatorships.pseudId, userPseudIds)))
+          .get();
         if (!creatorship) {
           return new Response(JSON.stringify({ error: 'You do not have permission to upload images for this work.' }), {
             status: 403,
@@ -119,11 +124,11 @@ export const POST: APIRoute = async ({ locals, request }) => {
       if (chapterIdStr) {
         const chapterId = parseInt(chapterIdStr, 10);
         if (!isNaN(chapterId)) {
-          const chapter = await queryFirst<any>(db, 'SELECT images FROM chapters WHERE id = ?1', chapterId);
+          const chapter = await db.select({ images: chapters.images }).from(chapters).where(eq(chapters.id, chapterId)).get();
           if (chapter) {
             const images: string[] = chapter.images ? JSON.parse(chapter.images) : [];
             images.push(result.key);
-            await run(db, "UPDATE chapters SET images = ? WHERE id = ?", JSON.stringify(images), chapterId);
+            await db.update(chapters).set({ images: JSON.stringify(images) }).where(eq(chapters.id, chapterId));
           }
         }
       }
@@ -137,8 +142,8 @@ export const POST: APIRoute = async ({ locals, request }) => {
 
     if (type === 'avatar') {
       // Upload user avatar
-      const user = await queryFirst<any>(db, 'SELECT avatar_key FROM users WHERE id = ?', auth.user.id);
-      const oldKey = user?.avatar_key;
+      const user = await db.select({ avatarKey: users.avatarKey }).from(users).where(eq(users.id, auth.user.id)).get();
+      const oldKey = user?.avatarKey;
 
       const result = await uploadImage(bucket, 'avatars', auth.user.id, {
         arrayBuffer: async () => file.data,
@@ -147,7 +152,7 @@ export const POST: APIRoute = async ({ locals, request }) => {
       });
 
       // Update DB
-      await run(db, "UPDATE users SET avatar_key = ?, updated_at = datetime('now') WHERE id = ?", result.key, auth.user.id);
+      await db.update(users).set({ avatarKey: result.key, updatedAt: sql`datetime('now')` }).where(eq(users.id, auth.user.id));
 
       // Clean up old avatar from R2 (async, don't block response)
       if (oldKey) {
@@ -177,7 +182,7 @@ export const POST: APIRoute = async ({ locals, request }) => {
       }
 
       // Verify pseud ownership
-      const pseud = await queryFirst<any>(db, 'SELECT icon_key FROM pseuds WHERE id = ? AND user_id = ?', pseudId, auth.user.id);
+      const pseud = await db.select({ iconKey: pseuds.iconKey }).from(pseuds).where(and(eq(pseuds.id, pseudId), eq(pseuds.userId, auth.user.id))).get();
       if (!pseud) {
         return new Response(JSON.stringify({ error: 'Pseud not found or not yours.' }), {
           status: 404,
@@ -185,7 +190,7 @@ export const POST: APIRoute = async ({ locals, request }) => {
         });
       }
 
-      const oldKey = pseud.icon_key;
+      const oldKey = pseud.iconKey;
       const result = await uploadImage(bucket, 'pseuds', pseudId, {
         arrayBuffer: async () => file.data,
         type: file.type,
@@ -193,7 +198,7 @@ export const POST: APIRoute = async ({ locals, request }) => {
       });
 
       // Update DB
-      await run(db, 'UPDATE pseuds SET icon_key = ? WHERE id = ? AND user_id = ?', result.key, pseudId, auth.user.id);
+      await db.update(pseuds).set({ iconKey: result.key }).where(and(eq(pseuds.id, pseudId), eq(pseuds.userId, auth.user.id)));
 
       // Clean up old icon
       if (oldKey) {
@@ -223,7 +228,7 @@ export const POST: APIRoute = async ({ locals, request }) => {
       }
 
       // Verify pseud ownership
-      const pseud = await queryFirst<any>(db, 'SELECT banner_key FROM pseuds WHERE id = ? AND user_id = ?', pseudId, auth.user.id);
+      const pseud = await db.select({ bannerKey: pseuds.bannerKey }).from(pseuds).where(and(eq(pseuds.id, pseudId), eq(pseuds.userId, auth.user.id))).get();
       if (!pseud) {
         return new Response(JSON.stringify({ error: 'Pseud not found or not yours.' }), {
           status: 404,
@@ -240,12 +245,12 @@ export const POST: APIRoute = async ({ locals, request }) => {
       });
 
       // Clean up old banner
-      if (pseud.banner_key) {
-        await deleteImage(bucket, pseud.banner_key).catch(() => {});
+      if (pseud.bannerKey) {
+        await deleteImage(bucket, pseud.bannerKey).catch(() => {});
       }
 
       // Update DB
-      await run(db, 'UPDATE pseuds SET banner_key = ? WHERE id = ? AND user_id = ?', result.key, pseudId, auth.user.id);
+      await db.update(pseuds).set({ bannerKey: result.key }).where(and(eq(pseuds.id, pseudId), eq(pseuds.userId, auth.user.id)));
 
       return new Response(JSON.stringify({ key: result.key, url: `/api/storage/${result.key}` }), {
         status: 201,
@@ -268,15 +273,16 @@ export const POST: APIRoute = async ({ locals, request }) => {
 
 /**
  * DELETE /api/upload — remove an avatar/icon/chapter image
- * Body: { type: "avatar" | "pseud" | "chapter", id?: number, key?: string }
+ * Body: { type: "avatar" | "pseud" | "chapter" | "banner", id?: number, key?: string }
  * 
  * For chapter type: { type: "chapter", key: "chapters/{workId}/..." } 
  * Removes from R2 and removes from the chapter's images array if chapterId provided.
  */
 export const DELETE: APIRoute = async ({ locals, request }) => {
-  const db = locals.runtime.env.DB as D1Database;
+  const d1 = locals.runtime.env.DB as D1Database;
+  const db = getDrizzle(d1);
   const bucket = locals.runtime.env.MEDIA as R2Bucket;
-  const auth = await requireAuth(db, request);
+  const auth = await requireAuth(d1, request);
   if (!auth) {
     return new Response(JSON.stringify({ error: 'Auth required' }), {
       status: 401,
@@ -295,10 +301,10 @@ export const DELETE: APIRoute = async ({ locals, request }) => {
   const { type, id: pseudId, key, chapterId } = body || {};
 
   if (type === 'avatar') {
-    const user = await queryFirst<any>(db, 'SELECT avatar_key FROM users WHERE id = ?', auth.user.id);
-    if (user?.avatar_key) {
-      await deleteImage(bucket, user.avatar_key);
-      await run(db, "UPDATE users SET avatar_key = NULL, updated_at = datetime('now') WHERE id = ?", auth.user.id);
+    const user = await db.select({ avatarKey: users.avatarKey }).from(users).where(eq(users.id, auth.user.id)).get();
+    if (user?.avatarKey) {
+      await deleteImage(bucket, user.avatarKey);
+      await db.update(users).set({ avatarKey: null, updatedAt: sql`datetime('now')` }).where(eq(users.id, auth.user.id));
     }
     return new Response(JSON.stringify({ success: true }), {
       headers: { 'Content-Type': 'application/json' },
@@ -312,16 +318,16 @@ export const DELETE: APIRoute = async ({ locals, request }) => {
         headers: { 'Content-Type': 'application/json' },
       });
     }
-    const pseud = await queryFirst<any>(db, 'SELECT icon_key, banner_key FROM pseuds WHERE id = ? AND user_id = ?', pseudId, auth.user.id);
+    const pseud = await db.select({ iconKey: pseuds.iconKey, bannerKey: pseuds.bannerKey }).from(pseuds).where(and(eq(pseuds.id, pseudId), eq(pseuds.userId, auth.user.id))).get();
     if (!pseud) {
       return new Response(JSON.stringify({ error: 'Pseud not found' }), {
         status: 404,
         headers: { 'Content-Type': 'application/json' },
       });
     }
-    if (pseud.icon_key) {
-      await deleteImage(bucket, pseud.icon_key);
-      await run(db, 'UPDATE pseuds SET icon_key = NULL WHERE id = ? AND user_id = ?', pseudId, auth.user.id);
+    if (pseud.iconKey) {
+      await deleteImage(bucket, pseud.iconKey);
+      await db.update(pseuds).set({ iconKey: null }).where(and(eq(pseuds.id, pseudId), eq(pseuds.userId, auth.user.id)));
     }
     return new Response(JSON.stringify({ success: true }), {
       headers: { 'Content-Type': 'application/json' },
@@ -335,16 +341,16 @@ export const DELETE: APIRoute = async ({ locals, request }) => {
         headers: { 'Content-Type': 'application/json' },
       });
     }
-    const pseud = await queryFirst<any>(db, 'SELECT banner_key FROM pseuds WHERE id = ? AND user_id = ?', pseudId, auth.user.id);
+    const pseud = await db.select({ bannerKey: pseuds.bannerKey }).from(pseuds).where(and(eq(pseuds.id, pseudId), eq(pseuds.userId, auth.user.id))).get();
     if (!pseud) {
       return new Response(JSON.stringify({ error: 'Pseud not found' }), {
         status: 404,
         headers: { 'Content-Type': 'application/json' },
       });
     }
-    if (pseud.banner_key) {
-      await deleteImage(bucket, pseud.banner_key);
-      await run(db, 'UPDATE pseuds SET banner_key = NULL WHERE id = ? AND user_id = ?', pseudId, auth.user.id);
+    if (pseud.bannerKey) {
+      await deleteImage(bucket, pseud.bannerKey);
+      await db.update(pseuds).set({ bannerKey: null }).where(and(eq(pseuds.id, pseudId), eq(pseuds.userId, auth.user.id)));
     }
     return new Response(JSON.stringify({ success: true }), {
       headers: { 'Content-Type': 'application/json' },
@@ -385,10 +391,12 @@ export const DELETE: APIRoute = async ({ locals, request }) => {
     }
 
     // Verify ownership
-    const creatorship = await queryFirst<any>(db, 
-      'SELECT * FROM creatorships WHERE work_id = ?1 AND pseud_id IN (SELECT id FROM pseuds WHERE user_id = ?2)', 
-      workId, auth.user.id
-    );
+    const userPseudIds = auth.pseuds.map(p => p.id);
+    const creatorship = await db
+      .select()
+      .from(creatorships)
+      .where(and(eq(creatorships.workId, workId), inArray(creatorships.pseudId, userPseudIds)))
+      .get();
     if (!creatorship) {
       return new Response(JSON.stringify({ error: 'You do not have permission to delete images for this work.' }), {
         status: 403,
@@ -401,11 +409,11 @@ export const DELETE: APIRoute = async ({ locals, request }) => {
 
     // Remove from chapter's images array if chapterId provided
     if (chapterId) {
-      const chapter = await queryFirst<any>(db, 'SELECT images FROM chapters WHERE id = ?', chapterId);
+      const chapter = await db.select({ images: chapters.images }).from(chapters).where(eq(chapters.id, chapterId)).get();
       if (chapter?.images) {
         const images: string[] = JSON.parse(chapter.images);
         const filtered = images.filter((k: string) => k !== key);
-        await run(db, "UPDATE chapters SET images = ? WHERE id = ?", JSON.stringify(filtered), chapterId);
+        await db.update(chapters).set({ images: JSON.stringify(filtered) }).where(eq(chapters.id, chapterId));
       }
     }
 

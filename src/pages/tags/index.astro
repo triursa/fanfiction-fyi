@@ -1,23 +1,24 @@
 ---
 export const prerender = false;
 import Base from '../../layouts/Base.astro';
-import { queryAll } from '../../lib/db';
+import { getDrizzle } from '../../lib/db';
+import { tags, taggings } from '../../lib/schema';
+import { sql, eq, desc } from 'drizzle-orm';
 
 // SSR: fetch initial data for first paint
-const db = Astro.locals.runtime.env.DB as D1Database;
-const initialTags = await queryAll<{
-  id: number;
-  name: string;
-  type: string;
-  work_count: number;
-}>(db, `
-  SELECT t.id, t.name, t.type, COUNT(tg.work_id) as work_count
-  FROM tags t
-  LEFT JOIN taggings tg ON t.id = tg.tag_id
-  GROUP BY t.id
-  ORDER BY work_count DESC
-  LIMIT 100
-`);
+const db = getDrizzle(Astro.locals.runtime.env.DB as D1Database);
+const initialTags = await db
+  .select({
+    id: tags.id,
+    name: tags.name,
+    type: tags.type,
+    work_count: sql<number>`COUNT(${taggings.workId})`,
+  })
+  .from(tags)
+  .leftJoin(taggings, eq(tags.id, taggings.tagId))
+  .groupBy(tags.id)
+  .orderBy(desc(sql`work_count`))
+  .limit(100);
 ---
 
 <Base title="Browse Tags — fanfiction.fyi">

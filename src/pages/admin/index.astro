@@ -1,29 +1,36 @@
 ---
 export const prerender = false;
 import Base from '@/layouts/Base.astro';
-import { queryFirst, queryAll } from '@/lib/db';
+import { getDrizzle } from '@/lib/db';
 import { UserRole, ROLE_LEVEL } from '@/lib/types';
+import { users, sessions, works, comments, tags } from '@/lib/schema';
+import { eq, and, gt, sql, count } from 'drizzle-orm';
 
 // Auth gate: admin+ required
 const cookie = Astro.request.headers.get('cookie') ?? '';
 const sessionMatch = cookie.match(/session=([a-f0-9]+)/);
 if (!sessionMatch) return Astro.redirect('/login');
 
-const db = Astro.locals.runtime.env.DB as D1Database;
-const session = await queryFirst<{ user_id: number }>(db, `SELECT user_id FROM sessions WHERE token = ?1 AND expires_at > datetime('now')`, sessionMatch[1]);
+const d1 = Astro.locals.runtime.env.DB as D1Database;
+const db = getDrizzle(d1);
+const session = await db.select({ userId: sessions.userId }).from(sessions).where(and(eq(sessions.token, sessionMatch[1]), gt(sessions.expiresAt, sql`datetime('now')`))).get();
 if (!session) return Astro.redirect('/login');
 
-const user = await queryFirst<{ id: number; email: string; role: string }>(db, `SELECT id, email, role FROM users WHERE id = ?1`, session.user_id);
+const user = await db.select({ id: users.id, email: users.email, role: users.role }).from(users).where(eq(users.id, session.userId)).get();
 if (!user) return Astro.redirect('/login');
 
 const userLevel = ROLE_LEVEL[user.role as UserRole] ?? 0;
 if (userLevel < ROLE_LEVEL[UserRole.Admin]) return Astro.redirect('/');
 
 // Stats
-const userCount = await queryFirst<{ cnt: number }>(db, `SELECT COUNT(*) as cnt FROM users`);
-const workCount = await queryFirst<{ cnt: number }>(db, `SELECT COUNT(*) as cnt FROM works`);
-const commentCount = await queryFirst<{ cnt: number }>(db, `SELECT COUNT(*) as cnt FROM comments`);
-const tagCount = await queryFirst<{ cnt: number }>(db, `SELECT COUNT(*) as cnt FROM tags`);
+const [userCountRow] = await db.select({ cnt: count() }).from(users);
+const [workCountRow] = await db.select({ cnt: count() }).from(works);
+const [commentCountRow] = await db.select({ cnt: count() }).from(comments);
+const [tagCountRow] = await db.select({ cnt: count() }).from(tags);
+const userCount = userCountRow?.cnt ?? 0;
+const workCount = workCountRow?.cnt ?? 0;
+const commentCount = commentCountRow?.cnt ?? 0;
+const tagCount = tagCountRow?.cnt ?? 0;
 ---
 
 <Base title="Admin Dashboard">
@@ -31,22 +38,22 @@ const tagCount = await queryFirst<{ cnt: number }>(db, `SELECT COUNT(*) as cnt F
 
   <div class="stats-grid">
     <div class="stat-card">
-      <span class="stat-number">{userCount?.cnt ?? 0}</span>
+      <span class="stat-number">{userCount}</span>
       <span class="stat-label">Users</span>
       <a href="/admin/users" class="stat-link">Manage users &rarr;</a>
     </div>
     <div class="stat-card">
-      <span class="stat-number">{workCount?.cnt ?? 0}</span>
+      <span class="stat-number">{workCount}</span>
       <span class="stat-label">Works</span>
       <a href="/admin/content" class="stat-link">Moderate content &rarr;</a>
     </div>
     <div class="stat-card">
-      <span class="stat-number">{commentCount?.cnt ?? 0}</span>
+      <span class="stat-number">{commentCount}</span>
       <span class="stat-label">Comments</span>
       <a href="/admin/content" class="stat-link">Moderate content &rarr;</a>
     </div>
     <div class="stat-card">
-      <span class="stat-number">{tagCount?.cnt ?? 0}</span>
+      <span class="stat-number">{tagCount}</span>
       <span class="stat-label">Tags</span>
       <a href="/admin/tags" class="stat-link">Manage tags &rarr;</a>
     </div>
