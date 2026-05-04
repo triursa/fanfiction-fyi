@@ -11,7 +11,7 @@
 | # | Item | Why |
 |---|------|-----|
 | 0.1 | Remove `tiptap` v1 package | Dead dependency — `package.json` has both v1 (`tiptap: ^1.0.0`) and v2 (`@tiptap/*`). Only v2 is imported. Run `npm uninstall tiptap`. |
-| 0.2 | Add `.env.example` | Document required env vars (` GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, etc.). No secrets, just keys. |
+| 0.2 | Add `.env.example` | Document required env vars (`GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, etc.). No secrets, just keys. |
 | 0.3 | Add ESLint + Prettier | Zero linting or formatting config exists. Add `eslint`, `@typescript-eslint/*`, `prettier`, `eslint-config-prettier`. One `npm run lint` script. |
 | 0.4 | Extract Editor globals → Preact signals | `(window as any).__editorMarkdown` etc. are fragile. Replace with `@preact/signals` — 3 signals: `editorMarkdown`, `editorContent`, `editorImageKeys`. |
 

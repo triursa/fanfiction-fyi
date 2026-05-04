@@ -6,14 +6,14 @@ export const editorImageKeys = signal<string[]>([]);
 
 /**
  * Set content in the editor from outside the Preact component tree.
- * The Editor component registers a handler that actually updates the TipTap editor.
- * Callers should call `editorSetContent.value = md` to trigger it.
+ * The Editor component registers a handler on mount that actually updates the TipTap editor.
+ * Callers invoke it as `editorSetContent.value?.(md)`.
  */
 export const editorSetContent = signal<((mdOrHtml: string) => void) | undefined>(undefined);
 
 /**
  * Callback invoked whenever the editor content changes.
- * The Editor component sets this on every update; consumers can override
- * to receive change notifications.
+ * Consumers (e.g. the draft page) set this to receive change notifications;
+ * the Editor component reads and calls it on every update.
  */
 export const editorOnContentChange = signal<((md: string) => void) | undefined>(undefined);
