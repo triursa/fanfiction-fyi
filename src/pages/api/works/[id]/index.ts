@@ -50,7 +50,7 @@ export const PUT: APIRoute = async ({ params, request, locals }) => {
   let body: any;
   try { body = await request.json(); } catch { return new Response(JSON.stringify({ error: 'Invalid JSON' }), { status: 400, headers: { 'Content-Type': 'application/json' } }); }
 
-  let workLogId: number = 0;
+  let workLogId = 0;
   if (body.publish) {
     workLogId = await logPublishAttempt(db, { workId, step: 'work_publish', userId: auth.user.id, requestSummary: JSON.stringify({ publish: true }) });
   }

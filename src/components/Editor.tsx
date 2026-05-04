@@ -10,6 +10,7 @@ import Image from '@tiptap/extension-image';
 import CharacterCount from '@tiptap/extension-character-count';
 import { common, createLowlight } from 'lowlight';
 import { markdownToHtml, htmlToMarkdown } from '@/lib/markdown';
+import { editorMarkdown, editorContent, editorImageKeys, editorSetContent, editorOnContentChange } from '@/lib/editor-signals';
 import LinkDialog from './LinkDialog';
 
 const lowlight = createLowlight(common);
@@ -85,26 +86,20 @@ export default function TipTapEditor({
     }
   }, [workId]);
 
-  // Initialize image key tracking
-  useEffect(() => {
-    if (!(window as any).__editorImageKeys) {
-      (window as any).__editorImageKeys = [];
-    }
-  }, []);
-
   // Expose setContent for external chapter loading (used by draft workspace)
   useEffect(() => {
-    (window as any).__editorSetContent = (mdOrHtml: string) => {
+    const handler = (mdOrHtml: string) => {
       if (!editorRef.current) return;
       // If it looks like HTML, set directly; otherwise convert from markdown
       const html = mdOrHtml.includes('<') ? mdOrHtml : markdownToHtml(mdOrHtml);
       editorRef.current.commands.setContent(html);
-      // Update global state
+      // Update signal state
       const md = htmlToMarkdown(editorRef.current.getHTML());
-      (window as any).__editorMarkdown = md;
-      (window as any).__editorContent = md;
+      editorMarkdown.value = md;
+      editorContent.value = md;
     };
-    return () => { (window as any).__editorSetContent = undefined; };
+    editorSetContent.value = handler;
+    return () => { editorSetContent.value = undefined; };
   }, []);
 
   useEffect(() => {
@@ -138,13 +133,13 @@ export default function TipTapEditor({
       onUpdate: ({ editor: e }) => {
         const html = e.getHTML();
         const md = htmlToMarkdown(html);
-        // Expose markdown to global for form submission
-        (window as any).__editorMarkdown = md;
-        (window as any).__editorContent = md;
+        // Expose markdown via signals for form submission
+        editorMarkdown.value = md;
+        editorContent.value = md;
         onContentChangeRef.current?.(md);
-        // Call global autosave hook if set (used by draft workspace)
-        if ((window as any).__editorOnContentChange) {
-          (window as any).__editorOnContentChange(md);
+        // Call autosave hook if set (used by draft workspace)
+        if (editorOnContentChange.value) {
+          editorOnContentChange.value(md);
         }
       },
       onFocus: ({ editor: e }) => {
@@ -158,10 +153,10 @@ export default function TipTapEditor({
     });
 
     editorRef.current = editor;
-    // Set initial markdown content on global
+    // Set initial markdown content via signals
     const initialMd = content ? htmlToMarkdown(editor.getHTML()) : '';
-    (window as any).__editorMarkdown = initialMd;
-    (window as any).__editorContent = initialMd;
+    editorMarkdown.value = initialMd;
+    editorContent.value = initialMd;
     setIsEditorReady(true);
 
     return () => {
@@ -205,10 +200,10 @@ export default function TipTapEditor({
         alt: file.name.replace(/\.[^.]+$/, ''),
       }).run();
       // Track the image key for form submission
-      const imageKeys = (window as any).__editorImageKeys || [];
+      const imageKeys = [...editorImageKeys.value];
       if (!imageKeys.includes(result.key)) {
         imageKeys.push(result.key);
-        (window as any).__editorImageKeys = imageKeys;
+        editorImageKeys.value = imageKeys;
       }
     } catch (e: any) {
       alert(e.message || 'Image upload failed');
