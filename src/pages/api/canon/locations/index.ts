@@ -1,10 +1,12 @@
 export const prerender = false;
 
-import { queryAll, queryFirst, run } from '@/lib/db';
+import { getDrizzle } from '@/lib/db';
 import { requireAuth } from '@/lib/auth';
 import { corsHeaders, handleCors } from '@/lib/cors';
 import { markdownToHtml } from '@/lib/markdown';
 import type { APIRoute } from 'astro';
+import { eq, and, sql } from 'drizzle-orm';
+import { locations } from '@/lib/schema';
 
 export const OPTIONS: APIRoute = async ({ request }) => {
   return handleCors(request) ?? new Response(null, { status: 405 });
@@ -27,20 +29,21 @@ function slugify(name: string): string {
 }
 
 async function ensureUniqueSlug(
-  db: D1Database,
+  db: ReturnType<typeof getDrizzle>,
   baseSlug: string,
   excludeId?: number,
 ): Promise<string> {
   let slug = baseSlug;
   let suffix = 2;
   while (true) {
-    let sql = `SELECT id FROM locations WHERE slug = ?1`;
-    const params: unknown[] = [slug];
+    const conditions = [eq(locations.slug, slug)];
     if (excludeId) {
-      sql += ` AND id != ?2`;
-      params.push(excludeId);
+      conditions.push(sql`${locations.id} != ${excludeId}`);
     }
-    const existing = await queryFirst<{ id: number }>(db, sql, ...params);
+    const existing = await db.select({ id: locations.id })
+      .from(locations)
+      .where(and(...conditions))
+      .get();
     if (!existing) return slug;
     slug = `${baseSlug}-${suffix++}`;
   }
@@ -49,7 +52,7 @@ async function ensureUniqueSlug(
 // GET /api/canon/locations — Browse/search locations
 export const GET: APIRoute = async ({ url, locals, request }) => {
   const cors = corsHeaders(request);
-  const db = locals.runtime.env.DB as D1Database;
+  const d1 = locals.runtime.env.DB as D1Database;
 
   const rawQ = url.searchParams.get('q')?.trim() || '';
   const fandomTagId = url.searchParams.get('fandom_tag_id') || '';
@@ -86,8 +89,7 @@ export const GET: APIRoute = async ({ url, locals, request }) => {
     const whereClause = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
 
     // Count
-    const countSql = `SELECT COUNT(*) as total FROM ${fromClause} ${whereClause}`;
-    const countRow = await queryFirst<{ total: number }>(db, countSql, ...bindings);
+    const countRow = await d1.prepare(`SELECT COUNT(*) as total FROM ${fromClause} ${whereClause}`).bind(...bindings).first<{ total: number }>();
     const total = countRow?.total ?? 0;
 
     // Data with parent name and fandom name
@@ -102,10 +104,10 @@ export const GET: APIRoute = async ({ url, locals, request }) => {
     `;
     const dataBindings = [...bindings, limit, offset];
 
-    const locations = await queryAll<any>(db, dataSql, ...dataBindings);
+    const { results: locs } = await d1.prepare(dataSql).bind(...dataBindings).all<any>();
 
     return new Response(
-      JSON.stringify({ locations, total, page, limit }),
+      JSON.stringify({ locations: locs, total, page, limit }),
       { headers: { 'Content-Type': 'application/json', ...cors } },
     );
   } catch (e: any) {
@@ -118,9 +120,10 @@ export const GET: APIRoute = async ({ url, locals, request }) => {
 
 // POST /api/canon/locations — Create location
 export const POST: APIRoute = async ({ request, locals }) => {
-  const db = locals.runtime.env.DB as D1Database;
+  const d1 = locals.runtime.env.DB as D1Database;
+  const db = getDrizzle(d1);
   const cors = corsHeaders(request);
-  const auth = await requireAuth(db, request);
+  const auth = await requireAuth(d1, request);
   if (!auth) {
     return new Response(
       JSON.stringify({ error: 'Unauthorized' }),
@@ -153,28 +156,28 @@ export const POST: APIRoute = async ({ request, locals }) => {
   try {
     const slug = await ensureUniqueSlug(db, baseSlug);
 
-    const result = await run(
-      db,
-      `INSERT INTO locations (name, slug, description_md, description_html, fandom_tag_id, parent_location_id, created_by, updated_by)
-       VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)`,
-      name, slug, description_md ?? null, descriptionHtml,
-      fandom_tag_id ? Number(fandom_tag_id) : null,
-      parent_location_id ? Number(parent_location_id) : null,
-      pseudId, pseudId,
-    );
+    await db.insert(locations).values({
+      name,
+      slug,
+      descriptionMd: description_md ?? null,
+      descriptionHtml,
+      fandomTagId: fandom_tag_id ? Number(fandom_tag_id) : null,
+      parentLocationId: parent_location_id ? Number(parent_location_id) : null,
+      createdBy: pseudId,
+      updatedBy: pseudId,
+    });
 
-    const location = await queryFirst<any>(
-      db,
+    // Retrieve the created location using raw D1 for self-join
+    const { results: [created] } = await d1.prepare(
       `SELECT l.*, p.name as parent_name, t.name as fandom_name
        FROM locations l
        LEFT JOIN locations p ON l.parent_location_id = p.id
        LEFT JOIN tags t ON l.fandom_tag_id = t.id
-       WHERE l.id = ?1`,
-      result.meta.last_row_id,
-    );
+       WHERE l.slug = ?1`
+    ).bind(slug).all<any>();
 
     return new Response(
-      JSON.stringify(location),
+      JSON.stringify(created),
       { status: 201, headers: { 'Content-Type': 'application/json', ...cors } },
     );
   } catch (e: any) {

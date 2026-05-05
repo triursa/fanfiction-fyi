@@ -1,38 +1,66 @@
 ---
 export const prerender = false;
 import Base from '../../layouts/Base.astro';
-import { queryAll, queryFirst } from '../../lib/db';
+import { getDrizzle } from '../../lib/db';
+import { users, sessions, pseuds as pseudsTable, bookmarks, works } from '../../lib/schema';
+import { eq, and, gt, desc, sql } from 'drizzle-orm';
 
-const db = Astro.locals.runtime.env.DB as D1Database;
+const d1 = Astro.locals.runtime.env.DB as D1Database;
+const db = getDrizzle(d1);
 
 // Auth check
 const cookie = Astro.request.headers.get('cookie') ?? '';
 const sessionMatch = cookie.match(/session=([a-f0-9]+)/);
 if (!sessionMatch) return Astro.redirect('/login');
 
-const session = await queryFirst<any>(db, `SELECT user_id FROM sessions WHERE token = ?1 AND expires_at > datetime('now')`, sessionMatch[1]);
+const session = await db.select({ userId: sessions.userId })
+  .from(sessions)
+  .where(and(eq(sessions.token, sessionMatch[1]), gt(sessions.expiresAt, sql`(datetime('now'))`)))
+  .get();
 if (!session) return Astro.redirect('/login');
 
-const user = await queryFirst<any>(db, `SELECT * FROM users WHERE id = ?1`, session.user_id);
+const user = await db.select().from(users).where(eq(users.id, session.userId)).get();
 if (!user) return Astro.redirect('/login');
 
-const pseuds = await queryAll<any>(db, `SELECT id, name FROM pseuds WHERE user_id = ?1 ORDER BY id`, user.id);
-const pseudId = pseuds[0]?.id;
+const userPseuds = await db.select({ id: pseudsTable.id, name: pseudsTable.name })
+  .from(pseudsTable)
+  .where(eq(pseudsTable.userId, user.id))
+  .orderBy(pseudsTable.id)
+  .all();
+const pseudId = userPseuds[0]?.id;
 
 if (!pseudId) {
   // No pseud — shouldn't happen but handle gracefully
   return Astro.redirect('/login');
 }
 
-const bookmarks = await queryAll<any>(
-  db,
-  `SELECT b.*, w.title, w.summary, w.word_count, w.complete, w.updated_at as work_updated_at
-   FROM bookmarks b
-   JOIN works w ON b.work_id = w.id
-   WHERE b.pseud_id = ?1
-   ORDER BY b.created_at DESC`,
-  pseudId
-);
+const bookmarkRows = await db.select({
+  id: bookmarks.id,
+  pseudId: bookmarks.pseudId,
+  workId: bookmarks.workId,
+  notes: bookmarks.notes,
+  private: bookmarks.private,
+  createdAt: bookmarks.createdAt,
+  title: works.title,
+  summary: works.summary,
+  wordCount: works.wordCount,
+  complete: works.complete,
+  workUpdatedAt: works.updatedAt,
+})
+  .from(bookmarks)
+  .innerJoin(works, eq(bookmarks.workId, works.id))
+  .where(eq(bookmarks.pseudId, pseudId))
+  .orderBy(desc(bookmarks.createdAt))
+  .all();
+
+const bookmarks = bookmarkRows.map(b => ({
+  ...b,
+  // Map camelCase back to snake_case for template compatibility
+  work_id: b.workId,
+  word_count: b.wordCount,
+  work_updated_at: b.workUpdatedAt,
+  created_at: b.createdAt,
+}));
 ---
 
 <Base title="Bookmarks — fanfiction.fyi">

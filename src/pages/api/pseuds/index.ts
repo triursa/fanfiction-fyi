@@ -1,30 +1,37 @@
 export const prerender = false;
 
-import { queryAll, run } from '@/lib/db';
+import { getDrizzle } from '@/lib/db';
+import { pseuds, creatorships, serialWorks } from '@/lib/schema';
 import { getAuth, requireAuth } from '@/lib/auth';
+import { eq, and, sql, desc, count } from 'drizzle-orm';
 import type { APIRoute } from 'astro';
 
 export const GET: APIRoute = async ({ request, locals }) => {
-  const db = locals.runtime.env.DB as D1Database;
-  const auth = await requireAuth(db, request);
+  const d1 = locals.runtime.env.DB as D1Database;
+  const drz = getDrizzle(d1);
+  const auth = await requireAuth(d1, request);
   if (!auth) return new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401, headers: { 'Content-Type': 'application/json' } });
-  const pseuds = await queryAll<any>(db, `
+
+  // Complex JOIN + GROUP BY with two COUNT(DISTINCT) — use sql template for API-compatible output
+  const pseudsResult = await drz.all<any>(sql`
     SELECT p.*,
       COUNT(DISTINCT c.work_id) as work_count,
       COUNT(DISTINCT sw.series_id) as series_count
     FROM pseuds p
     LEFT JOIN creatorships c ON c.pseud_id = p.id
     LEFT JOIN serial_works sw ON sw.work_id = c.work_id
-    WHERE p.user_id = ?1
+    WHERE p.user_id = ${auth.user.id}
     GROUP BY p.id
     ORDER BY p.is_default DESC, p.id
-  `, auth.user.id);
-  return new Response(JSON.stringify(pseuds), { headers: { 'Content-Type': 'application/json' } });
+  `);
+
+  return new Response(JSON.stringify(pseudsResult), { headers: { 'Content-Type': 'application/json' } });
 };
 
 export const POST: APIRoute = async ({ request, locals }) => {
-  const db = locals.runtime.env.DB as D1Database;
-  const auth = await requireAuth(db, request);
+  const d1 = locals.runtime.env.DB as D1Database;
+  const drz = getDrizzle(d1);
+  const auth = await requireAuth(d1, request);
   if (!auth) return new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401, headers: { 'Content-Type': 'application/json' } });
 
   let body: any;
@@ -43,7 +50,9 @@ export const POST: APIRoute = async ({ request, locals }) => {
     return new Response(JSON.stringify({ error: 'Name must be 1–100 characters' }), { status: 400, headers: { 'Content-Type': 'application/json' } });
   }
 
-  const existing = await queryAll<any>(db, `SELECT id FROM pseuds WHERE user_id = ?1 AND name = ?2`, auth.user.id, trimmedName);
+  const existing = await drz.select({ id: pseuds.id })
+    .from(pseuds)
+    .where(and(eq(pseuds.userId, auth.user.id), eq(pseuds.name, trimmedName)));
   if (existing.length > 0) {
     return new Response(JSON.stringify({ error: 'You already have a pseud with that name' }), { status: 409, headers: { 'Content-Type': 'application/json' } });
   }
@@ -58,14 +67,36 @@ export const POST: APIRoute = async ({ request, locals }) => {
   }
 
   // If this is the user's first pseud, make it default
-  const pseudCount = await queryAll<any>(db, `SELECT COUNT(*) as cnt FROM pseuds WHERE user_id = ?1`, auth.user.id);
-  const isDefault = (pseudCount[0].cnt === 0) ? 1 : 0;
+  const countRow = await drz.select({ cnt: count() })
+    .from(pseuds)
+    .where(eq(pseuds.userId, auth.user.id))
+    .get();
+  const isDefault = (countRow?.cnt === 0) ? 1 : 0;
 
-  const result = await run(db,
-    `INSERT INTO pseuds (user_id, name, description, icon_key, theme_color, is_default, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, datetime('now'))`,
-    auth.user.id, trimmedName, desc, iconKey, themeColor, isDefault
-  );
-  const pseud = await queryAll<any>(db, `SELECT *, 0 as work_count, 0 as series_count FROM pseuds WHERE id = ?1`, result.meta.last_row_id);
+  const [inserted] = await drz.insert(pseuds).values({
+    userId: auth.user.id,
+    name: trimmedName,
+    description: desc,
+    iconKey,
+    themeColor,
+    isDefault,
+  }).returning();
 
-  return new Response(JSON.stringify(pseud[0]), { status: 201, headers: { 'Content-Type': 'application/json' } });
+  // Convert camelCase to snake_case for API compatibility
+  const pseudResult = {
+    id: inserted.id,
+    user_id: inserted.userId,
+    name: inserted.name,
+    description: inserted.description,
+    icon_key: inserted.iconKey,
+    theme_color: inserted.themeColor,
+    is_default: inserted.isDefault,
+    created_at: inserted.createdAt,
+    pinned_work_ids: inserted.pinnedWorkIds,
+    banner_key: inserted.bannerKey,
+    work_count: 0,
+    series_count: 0,
+  };
+
+  return new Response(JSON.stringify(pseudResult), { status: 201, headers: { 'Content-Type': 'application/json' } });
 };

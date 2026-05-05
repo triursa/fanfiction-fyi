@@ -1,8 +1,10 @@
 export const prerender = false;
 
-import { queryFirst, queryAll, run } from '@/lib/db';
+import { getDrizzle } from '@/lib/db';
+import { characters, characterGroups, characterAppearances, works, tags } from '@/lib/schema';
 import { requireAuth } from '@/lib/auth';
 import { corsHeaders, handleCors } from '@/lib/cors';
+import { eq, and, ne, desc, count, sql } from 'drizzle-orm';
 import type { APIRoute } from 'astro';
 
 export const OPTIONS: APIRoute = async ({ request }) => {
@@ -11,55 +13,62 @@ export const OPTIONS: APIRoute = async ({ request }) => {
 
 export const GET: APIRoute = async ({ params, locals, request }) => {
   const cors = corsHeaders(request);
-  const db = locals.runtime.env.DB as D1Database;
+  const drz = getDrizzle(locals.runtime.env.DB as D1Database);
   const id = Number(params.id);
   if (!id) {
     return new Response(JSON.stringify({ error: 'Invalid character ID' }), { status: 400, headers: { 'Content-Type': 'application/json', ...cors } });
   }
 
-  const character = await queryFirst<any>(db, `SELECT * FROM characters WHERE id = ?1`, id);
+  const character = await drz.select().from(characters).where(eq(characters.id, id)).get();
   if (!character) {
     return new Response(JSON.stringify({ error: 'Character not found' }), { status: 404, headers: { 'Content-Type': 'application/json', ...cors } });
   }
 
   // Group info
   let group = null;
-  if (character.group_id) {
-    group = await queryFirst<any>(db, `SELECT * FROM character_groups WHERE id = ?1`, character.group_id);
+  if (character.groupId) {
+    group = await drz.select().from(characterGroups).where(eq(characterGroups.id, character.groupId)).get();
   }
 
   // Group siblings (other characters in the same group)
   let groupSiblings: any[] = [];
-  if (character.group_id) {
-    groupSiblings = await queryAll<any>(
-      db,
-      `SELECT id, name, fandom FROM characters WHERE group_id = ?1 AND id != ?2`,
-      character.group_id, id
-    );
+  if (character.groupId) {
+    groupSiblings = await drz
+      .select({ id: characters.id, name: characters.name, fandom: characters.fandom })
+      .from(characters)
+      .where(and(eq(characters.groupId, character.groupId), ne(characters.id, id)))
+      .all();
   }
 
   // Appearances
-  const appearances = await queryAll<any>(
-    db,
-    `SELECT ca.*, w.title as work_title, w.id as work_id
-     FROM character_appearances ca
-     JOIN works w ON ca.work_id = w.id
-     WHERE ca.character_id = ?1
-     ORDER BY ca.created_at DESC`,
-    id
-  );
+  const appearances = await drz
+    .select({
+      id: characterAppearances.id,
+      characterId: characterAppearances.characterId,
+      workId: characterAppearances.workId,
+      role: characterAppearances.role,
+      notes: characterAppearances.notes,
+      addedBy: characterAppearances.addedBy,
+      createdAt: characterAppearances.createdAt,
+      workTitle: works.title,
+    })
+    .from(characterAppearances)
+    .innerJoin(works, eq(characterAppearances.workId, works.id))
+    .where(eq(characterAppearances.characterId, id))
+    .orderBy(desc(characterAppearances.createdAt))
+    .all();
 
   // Work count
-  const workCount = await queryFirst<{ count: number }>(
-    db,
-    `SELECT COUNT(*) as count FROM character_appearances WHERE character_id = ?1`,
-    id
-  );
+  const workCountRow = await drz
+    .select({ count: count() })
+    .from(characterAppearances)
+    .where(eq(characterAppearances.characterId, id))
+    .get();
 
   // Linked tag
   let tag = null;
-  if (character.tag_id) {
-    tag = await queryFirst<any>(db, `SELECT * FROM tags WHERE id = ?1`, character.tag_id);
+  if (character.tagId) {
+    tag = await drz.select().from(tags).where(eq(tags.id, character.tagId)).get();
   }
 
   return new Response(JSON.stringify({
@@ -67,7 +76,7 @@ export const GET: APIRoute = async ({ params, locals, request }) => {
     group,
     group_siblings: groupSiblings,
     appearances,
-    work_count: workCount?.count ?? 0,
+    work_count: workCountRow?.count ?? 0,
     tag,
   }), {
     headers: { 'Content-Type': 'application/json', ...cors },
@@ -75,18 +84,19 @@ export const GET: APIRoute = async ({ params, locals, request }) => {
 };
 
 export const PUT: APIRoute = async ({ params, request, locals }) => {
-  const db = locals.runtime.env.DB as D1Database;
-  const auth = await requireAuth(db, request);
+  const d1 = locals.runtime.env.DB as D1Database;
+  const drz = getDrizzle(d1);
+  const auth = await requireAuth(d1, request);
   if (!auth) return new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401, headers: { 'Content-Type': 'application/json' } });
 
   const id = Number(params.id);
   if (!id) return new Response(JSON.stringify({ error: 'Invalid character ID' }), { status: 400, headers: { 'Content-Type': 'application/json' } });
 
-  const existing = await queryFirst<any>(db, `SELECT * FROM characters WHERE id = ?1`, id);
+  const existing = await drz.select().from(characters).where(eq(characters.id, id)).get();
   if (!existing) return new Response(JSON.stringify({ error: 'Character not found' }), { status: 404, headers: { 'Content-Type': 'application/json' } });
 
   // Permission: creator or admin/mod
-  const isCreator = existing.created_by && auth.pseuds.some(p => p.id === existing.created_by);
+  const isCreator = existing.createdBy && auth.pseuds.some(p => p.id === existing.createdBy);
   const isPrivileged = ['admin', 'mod', 'founder'].includes(auth.user.role);
   if (!isCreator && !isPrivileged) {
     return new Response(JSON.stringify({ error: 'Forbidden' }), { status: 403, headers: { 'Content-Type': 'application/json' } });
@@ -97,40 +107,45 @@ export const PUT: APIRoute = async ({ params, request, locals }) => {
     return new Response(JSON.stringify({ error: 'Invalid JSON' }), { status: 400, headers: { 'Content-Type': 'application/json' } });
   }
 
-  const allowedFields = ['name', 'fandom', 'group_id', 'description', 'short_desc', 'avatar_key', 'aliases'];
-  const updates: string[] = [];
-  const bindings: any[] = [];
-  let idx = 1;
+  const allowedFields: Record<string, any> = {
+    name: characters.name,
+    fandom: characters.fandom,
+    group_id: characters.groupId,
+    description: characters.description,
+    short_desc: characters.shortDesc,
+    avatar_key: characters.avatarKey,
+    aliases: characters.aliases,
+  };
 
-  for (const field of allowedFields) {
+  const updates: Record<string, any> = {};
+  let hasUpdates = false;
+
+  for (const [field, column] of Object.entries(allowedFields)) {
     if (body[field] !== undefined) {
-      updates.push(`${field} = $${idx++}`);
-      // Serialize aliases if it's an array
-      bindings.push(field === 'aliases' && Array.isArray(body[field]) ? JSON.stringify(body[field]) : body[field]);
+      updates[column] = field === 'aliases' && Array.isArray(body[field]) ? JSON.stringify(body[field]) : body[field];
+      hasUpdates = true;
     }
   }
 
-  if (updates.length === 0) {
+  if (!hasUpdates) {
     return new Response(JSON.stringify({ error: 'No fields to update' }), { status: 400, headers: { 'Content-Type': 'application/json' } });
   }
 
   // Always update updated_by and updated_at
   const pseudId = auth.pseuds[0]?.id ?? null;
-  updates.push(`updated_by = $${idx++}`);
-  bindings.push(pseudId);
-  updates.push(`updated_at = CURRENT_TIMESTAMP`);
+  updates[characters.updatedBy] = pseudId;
+  updates[characters.updatedAt] = sql`CURRENT_TIMESTAMP`;
 
-  bindings.push(id);
-  const sql = `UPDATE characters SET ${updates.join(', ')} WHERE id = $${idx}`;
-  await run(db, sql, ...bindings);
+  await drz.update(characters).set(updates).where(eq(characters.id, id));
 
-  const updated = await queryFirst<any>(db, `SELECT * FROM characters WHERE id = ?1`, id);
+  const updated = await drz.select().from(characters).where(eq(characters.id, id)).get();
   return new Response(JSON.stringify(updated), { headers: { 'Content-Type': 'application/json' } });
 };
 
 export const DELETE: APIRoute = async ({ params, request, locals }) => {
-  const db = locals.runtime.env.DB as D1Database;
-  const auth = await requireAuth(db, request);
+  const d1 = locals.runtime.env.DB as D1Database;
+  const drz = getDrizzle(d1);
+  const auth = await requireAuth(d1, request);
   if (!auth) return new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401, headers: { 'Content-Type': 'application/json' } });
 
   const isPrivileged = ['admin', 'mod', 'founder'].includes(auth.user.role);
@@ -141,10 +156,10 @@ export const DELETE: APIRoute = async ({ params, request, locals }) => {
   const id = Number(params.id);
   if (!id) return new Response(JSON.stringify({ error: 'Invalid character ID' }), { status: 400, headers: { 'Content-Type': 'application/json' } });
 
-  const existing = await queryFirst<any>(db, `SELECT * FROM characters WHERE id = ?1`, id);
+  const existing = await drz.select().from(characters).where(eq(characters.id, id)).get();
   if (!existing) return new Response(JSON.stringify({ error: 'Character not found' }), { status: 404, headers: { 'Content-Type': 'application/json' } });
 
   // character_appearances cascade on delete
-  await run(db, `DELETE FROM characters WHERE id = ?1`, id);
+  await drz.delete(characters).where(eq(characters.id, id));
   return new Response(JSON.stringify({ ok: true }), { headers: { 'Content-Type': 'application/json' } });
 };

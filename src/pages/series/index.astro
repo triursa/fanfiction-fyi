@@ -1,45 +1,43 @@
 ---
 export const prerender = false;
 import Base from '../../layouts/Base.astro';
-import { queryAll, queryFirst } from '../../lib/db';
+import { getDrizzle } from '../../lib/db';
+import { series as seriesTable, pseuds, serialWorks, works, tags, taggings } from '../../lib/schema';
+import { eq, sql, count, desc, inArray } from 'drizzle-orm';
 
-const db = Astro.locals.runtime.env.DB as D1Database;
+const d1 = Astro.locals.runtime.env.DB as D1Database;
+const db = getDrizzle(d1);
 
 const page = Number(Astro.url.searchParams.get('page')) || 1;
 const limit = 20;
 const offset = (page - 1) * limit;
 
-const series = await queryAll<any>(
-  db,
+// Series listing with work count — use raw D1 for GROUP BY + subquery
+const seriesResult = await d1.prepare(
   `SELECT s.*, p.name as creator_name,
           (SELECT COUNT(*) FROM serial_works WHERE series_id = s.id) as work_count
    FROM series s
    JOIN pseuds p ON s.creator_pseud_id = p.id
    ORDER BY s.updated_at DESC
-   LIMIT ? OFFSET ?`,
-  limit,
-  offset
-);
+   LIMIT ? OFFSET ?`
+).bind(limit, offset).all<any>();
 
-// Enrich with fandom tags
+const series = seriesResult.results;
+
+// Enrich with fandom tags and word counts
 for (const s of series) {
   if (s.work_count > 0) {
-    // Get fandom tag names from works in the series
-    s.fandoms = await queryAll<any>(
-      db,
+    s.fandoms = await d1.prepare(
       `SELECT DISTINCT t.name FROM tags t
        JOIN taggings tg ON t.id = tg.tag_id
        JOIN serial_works sw ON sw.work_id = tg.work_id
        WHERE sw.series_id = ?1 AND t.type = 'fandom'
-       LIMIT 3`,
-      s.id
-    );
-    // Get total word count
-    const stats = await queryFirst<any>(
-      db,
-      `SELECT COALESCE(SUM(w.word_count), 0) as total_words FROM serial_works sw JOIN works w ON w.id = sw.work_id WHERE sw.series_id = ?1`,
-      s.id
-    );
+       LIMIT 3`
+    ).bind(s.id).all<any>().then(r => r.results);
+
+    const stats = await d1.prepare(
+      `SELECT COALESCE(SUM(w.word_count), 0) as total_words FROM serial_works sw JOIN works w ON w.id = sw.work_id WHERE sw.series_id = ?1`
+    ).bind(s.id).first<{ total_words: number }>();
     s.total_words = stats?.total_words ?? 0;
   } else {
     s.fandoms = [];
@@ -47,8 +45,9 @@ for (const s of series) {
   }
 }
 
-const totalSeries = await queryFirst<any>(db, `SELECT COUNT(*) as cnt FROM series`);
-const totalPages = Math.ceil((totalSeries?.cnt ?? 0) / limit);
+const [totalRow] = await db.select({ cnt: count() }).from(seriesTable);
+const totalSeries = totalRow?.cnt ?? 0;
+const totalPages = Math.ceil(totalSeries / limit);
 ---
 
 <Base title="Series — fanfiction.fyi">

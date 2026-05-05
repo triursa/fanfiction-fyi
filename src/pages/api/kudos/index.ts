@@ -1,12 +1,15 @@
 export const prerender = false;
 
-import { queryFirst, run } from '@/lib/db';
+import { getDrizzle } from '@/lib/db';
 import { getAuth } from '@/lib/auth';
+import { kudos } from '@/lib/schema';
+import { eq, and, or, like, gt, lt, gte, lte, sql, desc, asc, count, inArray } from 'drizzle-orm';
 import type { APIRoute } from 'astro';
 
 export const POST: APIRoute = async ({ request, locals }) => {
-  const db = locals.runtime.env.DB as D1Database;
-  const auth = await getAuth(db, request);
+  const d1 = locals.runtime.env.DB as D1Database;
+  const db = getDrizzle(d1);
+  const auth = await getAuth(d1, request);
   if (!auth) return new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401, headers: { 'Content-Type': 'application/json' } });
 
   let body: any;
@@ -21,7 +24,7 @@ export const POST: APIRoute = async ({ request, locals }) => {
   if (!pseudId) return new Response(JSON.stringify({ error: 'No pseud found' }), { status: 400, headers: { 'Content-Type': 'application/json' } });
 
   try {
-    await run(db, `INSERT INTO kudos (work_id, pseud_id, created_at) VALUES (?1, ?2, datetime('now'))`, work_id, pseudId);
+    await db.insert(kudos).values({ workId: work_id, pseudId });
     return new Response(JSON.stringify({ ok: true }), { status: 201, headers: { 'Content-Type': 'application/json' } });
   } catch (e: any) {
     if (e.message?.includes('UNIQUE constraint failed')) {

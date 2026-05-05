@@ -1,6 +1,5 @@
 export const prerender = false;
 
-import { queryAll } from '@/lib/db';
 import { corsHeaders, handleCors } from '@/lib/cors';
 import type { APIRoute } from 'astro';
 
@@ -11,7 +10,7 @@ export const OPTIONS: APIRoute = async ({ request }) => {
 // GET /api/canon/locations/[id]/history — Edit history for a location
 export const GET: APIRoute = async ({ params, locals, request }) => {
   const cors = corsHeaders(request);
-  const db = locals.runtime.env.DB as D1Database;
+  const d1 = locals.runtime.env.DB as D1Database;
   const id = Number(params.id);
   if (!id) {
     return new Response(
@@ -21,15 +20,14 @@ export const GET: APIRoute = async ({ params, locals, request }) => {
   }
 
   try {
-    const edits = await queryAll<any>(
-      db,
+    // JOIN with pseuds — use raw SQL for simplicity since we need pseud_name
+    const { results: edits } = await d1.prepare(
       `SELECT le.*, p.name as pseud_name
        FROM location_edits le
        LEFT JOIN pseuds p ON le.pseud_id = p.id
        WHERE le.location_id = ?1
-       ORDER BY le.created_at DESC`,
-      id,
-    );
+       ORDER BY le.created_at DESC`
+    ).bind(id).all<any>();
 
     return new Response(
       JSON.stringify({ edits }),

@@ -2,49 +2,84 @@
 export const prerender = false;
 import Base from '../../../layouts/Base.astro';
 import TagChips from '../../../components/TagChips';
-import { queryFirst, queryAll } from '../../../lib/db';
+import { getDrizzle } from '../../../lib/db';
+import { works, tags, taggings, pseuds, creatorships, workRelations } from '../../../lib/schema';
+import { eq, and, desc } from 'drizzle-orm';
 import { getAuth } from '../../../lib/auth';
 
 const workId = Number(Astro.params.id);
 if (!workId) return Astro.redirect('/works');
 
-const db = Astro.locals.runtime.env.DB as D1Database;
+const d1 = Astro.locals.runtime.env.DB as D1Database;
+const db = getDrizzle(d1);
 
-const work = await queryFirst<any>(db, `SELECT * FROM works WHERE id = ?1`, workId);
+const work = await db.select().from(works).where(eq(works.id, workId)).get();
 if (!work) return Astro.redirect('/works');
 
-const tags = await queryAll<any>(db, `SELECT t.id, t.name, t.type FROM tags t JOIN taggings tg ON t.id = tg.tag_id WHERE tg.work_id = ?1`, workId);
-const pseuds = await queryAll<any>(db, `SELECT p.*, c.role FROM pseuds p JOIN creatorships c ON p.id = c.pseud_id WHERE c.work_id = ?1`, workId);
+const tagsRows = await db
+  .select({ id: tags.id, name: tags.name, type: tags.type })
+  .from(taggings)
+  .innerJoin(tags, eq(taggings.tagId, tags.id))
+  .where(eq(taggings.workId, workId));
+
+const pseudsRows = await db
+  .select({
+    id: pseuds.id,
+    userId: pseuds.userId,
+    name: pseuds.name,
+    description: pseuds.description,
+    iconKey: pseuds.iconKey,
+    createdAt: pseuds.createdAt,
+    pinnedWorkIds: pseuds.pinnedWorkIds,
+    bannerKey: pseuds.bannerKey,
+    themeColor: pseuds.themeColor,
+    isDefault: pseuds.isDefault,
+    role: creatorships.role,
+  })
+  .from(creatorships)
+  .innerJoin(pseuds, eq(creatorships.pseudId, pseuds.id))
+  .where(eq(creatorships.workId, workId));
 
 // Auth check
-const auth = await getAuth(db, Astro.request);
+const auth = await getAuth(d1, Astro.request);
 if (!auth) return Astro.redirect('/login');
-const isOwner = auth.pseuds.some(p => pseuds.some(wp => wp.id === p.id));
+const isOwner = auth.pseuds.some(p => pseudsRows.some(wp => wp.id === p.id));
 if (!isOwner) return Astro.redirect(`/works/${workId}`);
 
 // Group tags by type for pre-filling
 const initialTagState: Record<string, { id: number; name: string }[]> = {};
-for (const t of tags) {
+for (const t of tagsRows) {
   if (['fandom', 'character', 'relationship', 'freeform'].includes(t.type)) {
     if (!initialTagState[t.type]) initialTagState[t.type] = [];
     initialTagState[t.type].push({ id: t.id, name: t.name });
   }
 }
 
-const ratingTag = tags.find(t => t.type === 'rating');
-const categoryTag = tags.find(t => t.type === 'category');
-const warningTag = tags.find(t => t.type === 'warning');
+const ratingTag = tagsRows.find(t => t.type === 'rating');
+const categoryTag = tagsRows.find(t => t.type === 'category');
+const warningTag = tagsRows.find(t => t.type === 'warning');
 
 const initialTagsJson = JSON.stringify(initialTagState);
 
 // Fetch existing relations for this work
-const existingRelations = await queryAll<any>(
-  db,
-  `SELECT wr.id, wr.related_work_id, wr.relation_type, w.title as related_title
-   FROM work_relations wr JOIN works w ON w.id = wr.related_work_id
-   WHERE wr.work_id = ?1 ORDER BY wr.created_at DESC`,
-  workId
-);
+const existingRelationsRows = await db
+  .select({
+    id: workRelations.id,
+    relatedWorkId: workRelations.relatedWorkId,
+    relationType: workRelations.relationType,
+    relatedTitle: works.title,
+  })
+  .from(workRelations)
+  .innerJoin(works, eq(workRelations.relatedWorkId, works.id))
+  .where(eq(workRelations.workId, workId))
+  .orderBy(desc(workRelations.createdAt));
+
+const existingRelations = existingRelationsRows.map(r => ({
+  ...r,
+  related_work_id: r.relatedWorkId,
+  relation_type: r.relationType,
+  related_title: r.relatedTitle,
+}));
 const existingRelationsJson = JSON.stringify(existingRelations);
 
 const RELATION_TYPES = [

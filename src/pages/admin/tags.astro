@@ -1,33 +1,42 @@
 ---
 export const prerender = false;
 import Base from '@/layouts/Base.astro';
-import { queryFirst, queryAll } from '@/lib/db';
+import { getDrizzle } from '@/lib/db';
 import { UserRole, ROLE_LEVEL } from '@/lib/types';
+import { users, sessions } from '@/lib/schema';
+import { eq, and, gt, sql } from 'drizzle-orm';
 
 // Auth gate: admin+ required
 const cookie = Astro.request.headers.get('cookie') ?? '';
 const sessionMatch = cookie.match(/session=([a-f0-9]+)/);
 if (!sessionMatch) return Astro.redirect('/login');
 
-const db = Astro.locals.runtime.env.DB as D1Database;
-const session = await queryFirst<{ user_id: number }>(db, `SELECT user_id FROM sessions WHERE token = ?1 AND expires_at > datetime('now')`, sessionMatch[1]);
+const d1 = Astro.locals.runtime.env.DB as D1Database;
+const db = getDrizzle(d1);
+const session = await db.select({ userId: sessions.userId }).from(sessions).where(and(eq(sessions.token, sessionMatch[1]), gt(sessions.expiresAt, sql`datetime('now')`))).get();
 if (!session) return Astro.redirect('/login');
 
-const currentUser = await queryFirst<{ id: number; email: string; role: string }>(db, `SELECT id, email, role FROM users WHERE id = ?1`, session.user_id);
+const currentUser = await db.select({ id: users.id, email: users.email, role: users.role }).from(users).where(eq(users.id, session.userId)).get();
 if (!currentUser) return Astro.redirect('/login');
 
 const userLevel = ROLE_LEVEL[currentUser.role as UserRole] ?? 0;
 if (userLevel < ROLE_LEVEL[UserRole.Admin]) return Astro.redirect('/');
 
-const tags = await queryAll<{
-  id: number; name: string; type: string; work_count: number;
-}>(db, `
+// Tags with work counts — GROUP BY + LEFT JOIN, use raw D1
+const { results: tagRows } = await d1.prepare(`
   SELECT t.id, t.name, t.type, COUNT(tg.id) as work_count
   FROM tags t
   LEFT JOIN taggings tg ON tg.tag_id = t.id
   GROUP BY t.id
   ORDER BY work_count DESC, t.name ASC
-`);
+`).all<{ id: number; name: string; type: string; work_count: number }>();
+
+const allTags = (tagRows ?? []).map((t) => ({
+  id: t.id,
+  name: t.name,
+  type: t.type,
+  workCount: t.work_count,
+}));
 ---
 
 <Base title="Tag Management — Admin">
@@ -45,12 +54,12 @@ const tags = await queryAll<{
         </tr>
       </thead>
       <tbody>
-        {tags.map(t => (
+        {allTags.map(t => (
           <tr>
             <td>{t.id}</td>
             <td>{t.name}</td>
             <td><span class={`tag-type tag-type-${t.type}`}>{t.type}</span></td>
-            <td>{t.work_count}</td>
+            <td>{t.workCount}</td>
           </tr>
         ))}
       </tbody>
@@ -65,8 +74,8 @@ const tags = await queryAll<{
         <label for="source-tag">Source (will be deleted)</label>
         <select id="source-tag">
           <option value="">— Select source tag —</option>
-          {tags.map(t => (
-            <option value={t.id}>{t.name} ({t.type}, {t.work_count} works)</option>
+          {allTags.map(t => (
+            <option value={t.id}>{t.name} ({t.type}, {t.workCount} works)</option>
           ))}
         </select>
       </div>
@@ -74,8 +83,8 @@ const tags = await queryAll<{
         <label for="target-tag">Target (will remain)</label>
         <select id="target-tag">
           <option value="">— Select target tag —</option>
-          {tags.map(t => (
-            <option value={t.id}>{t.name} ({t.type}, {t.work_count} works)</option>
+          {allTags.map(t => (
+            <option value={t.id}>{t.name} ({t.type}, {t.workCount} works)</option>
           ))}
         </select>
       </div>

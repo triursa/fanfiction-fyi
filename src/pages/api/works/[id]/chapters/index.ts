@@ -1,13 +1,16 @@
 export const prerender = false;
 
-import { queryFirst, queryAll, run } from '@/lib/db';
+import { getDrizzle } from '@/lib/db';
 import { getAuth } from '@/lib/auth';
 import { markdownToHtml } from '@/lib/markdown';
+import { works, chapters, creatorships, pseuds } from '@/lib/schema';
+import { eq, and, isNotNull, isNull, sql, desc, inArray } from 'drizzle-orm';
 import type { APIRoute } from 'astro';
 
 export const POST: APIRoute = async ({ params, request, locals }) => {
-  const db = locals.runtime.env.DB as D1Database;
-  const auth = await getAuth(db, request);
+  const d1 = locals.runtime.env.DB as D1Database;
+  const db = getDrizzle(d1);
+  const auth = await getAuth(d1, request);
   if (!auth) return new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401, headers: { 'Content-Type': 'application/json' } });
 
   let body: any;
@@ -16,38 +19,53 @@ export const POST: APIRoute = async ({ params, request, locals }) => {
   const { work_id: workId } = body || {};
   if (!workId) return new Response(JSON.stringify({ error: 'work_id required' }), { status: 400, headers: { 'Content-Type': 'application/json' } });
 
-  const creatorship = await queryFirst<any>(db, `SELECT * FROM creatorships WHERE work_id = ?1 AND pseud_id IN (SELECT id FROM pseuds WHERE user_id = ?2)`, workId, auth.user.id);
+  // Check ownership via creatorships + pseuds
+  const creatorship = await db.select().from(creatorships)
+    .innerJoin(pseuds, eq(pseuds.id, creatorships.pseudId))
+    .where(and(eq(creatorships.workId, workId), eq(pseuds.userId, auth.user.id)))
+    .get();
   if (!creatorship) return new Response(JSON.stringify({ error: 'Forbidden: not a creator of this work' }), { status: 403, headers: { 'Content-Type': 'application/json' } });
 
-  // Read title and content from the same body (first json() consumed the stream)
   const title = body?.title || 'Chapter';
   const contentMd = body?.content_md || '';
   const contentHtml = contentMd ? markdownToHtml(contentMd) : null;
   const wordCount = contentMd ? contentMd.split(/\s+/).filter(Boolean).length : 0;
 
-  const maxPos = await queryFirst<{ max_pos: number }>(db, `SELECT MAX(position) as max_pos FROM chapters WHERE work_id = ?1`, workId);
-  const position = (maxPos?.max_pos ?? 0) + 1;
+  const maxPos = await db.select({ maxPos: sql<number>`MAX(${chapters.position})`.as('max_pos') })
+    .from(chapters).where(eq(chapters.workId, workId)).get();
+  const position = (maxPos?.maxPos ?? 0) + 1;
 
   const draft = body?.draft !== undefined ? (body.draft ? 1 : 0) : 1;
-  const result = await run(db, `INSERT INTO chapters (work_id, position, title, content_md, content_html, draft, word_count, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, datetime('now'), datetime('now'))`, workId, position, title, contentMd, contentHtml, draft, wordCount);
-  const chapter = await queryFirst<any>(db, `SELECT * FROM chapters WHERE id = ?1`, result.meta.last_row_id);
 
-  return new Response(JSON.stringify(chapter), { status: 201, headers: { 'Content-Type': 'application/json' } });
+  const [inserted] = await db.insert(chapters).values({
+    workId,
+    position,
+    title,
+    contentMd,
+    contentHtml,
+    draft,
+    wordCount,
+  }).returning();
+
+  return new Response(JSON.stringify(inserted), { status: 201, headers: { 'Content-Type': 'application/json' } });
 };
 
 export const GET: APIRoute = async ({ url, locals }) => {
-  const db = locals.runtime.env.DB as D1Database;
+  const d1 = locals.runtime.env.DB as D1Database;
+  const db = getDrizzle(d1);
   const workId = Number(url.pathname.split('/')[3]);
   if (!workId || isNaN(workId)) {
     return new Response(JSON.stringify({ error: 'Invalid work ID' }), { status: 400, headers: { 'Content-Type': 'application/json' } });
   }
-  const work = await queryFirst<any>(db, `SELECT id, published_at FROM works WHERE id = ?1`, workId);
+  const work = await db.select({ id: works.id, publishedAt: works.publishedAt }).from(works).where(eq(works.id, workId)).get();
   if (!work) {
     return new Response(JSON.stringify({ error: 'Work not found' }), { status: 404, headers: { 'Content-Type': 'application/json' } });
   }
-  if (!work.published_at) {
+  if (!work.publishedAt) {
     return new Response(JSON.stringify({ error: 'Work not found' }), { status: 404, headers: { 'Content-Type': 'application/json' } });
   }
-  const chapters = await queryAll<any>(db, `SELECT * FROM chapters WHERE work_id = ?1 AND draft = 0 ORDER BY position`, workId);
-  return new Response(JSON.stringify(chapters), { headers: { 'Content-Type': 'application/json' } });
+  const chapterRows = await db.select().from(chapters)
+    .where(and(eq(chapters.workId, workId), eq(chapters.draft, 0)))
+    .orderBy(chapters.position);
+  return new Response(JSON.stringify(chapterRows), { headers: { 'Content-Type': 'application/json' } });
 };

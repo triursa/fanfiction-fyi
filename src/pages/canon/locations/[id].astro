@@ -3,10 +3,13 @@ export const prerender = false;
 import Base from '../../../layouts/Base.astro';
 import { markdownToHtml } from '../../../lib/markdown';
 import { getAuth } from '../../../lib/auth';
-import { queryFirst, queryAll } from '../../../lib/db';
+import { getDrizzle } from '../../../lib/db';
+import { locations, entityReferences, locationEdits, works, pseuds as pseudsTable, tags } from '../../../lib/schema';
+import { eq, and, desc, asc, like, sql, count } from 'drizzle-orm';
 
-const db = Astro.locals.runtime.env.DB as D1Database;
-const auth = await getAuth(db, Astro.request);
+const drz = getDrizzle(Astro.locals.runtime.env.DB as D1Database);
+const d1 = Astro.locals.runtime.env.DB as D1Database;
+const auth = await getAuth(d1, Astro.request);
 
 const id = Astro.params.id;
 if (!id) return Astro.redirect('/canon?tab=locations');
@@ -14,14 +17,11 @@ if (!id) return Astro.redirect('/canon?tab=locations');
 let location: any = null;
 let parentLocation: any = null;
 let childLocations: any[] = [];
-let works: any[] = [];
+let worksList: any[] = [];
 let editHistory: any[] = [];
 
 try {
-  location = await queryFirst<any>(db,
-    `SELECT * FROM canon_locations WHERE id = ?1`,
-    Number(id)
-  );
+  location = await drz.select().from(locations).where(eq(locations.id, Number(id))).get();
 } catch {
   // Table may not exist
 }
@@ -29,12 +29,10 @@ try {
 if (!location) return Astro.redirect('/canon?tab=locations');
 
 // Parent location
-if (location.parent_id) {
+if (location.parentLocationId) {
   try {
-    parentLocation = await queryFirst<any>(db,
-      `SELECT id, name FROM canon_locations WHERE id = ?1`,
-      location.parent_id
-    );
+    const parentRow = await drz.select({ id: locations.id, name: locations.name }).from(locations).where(eq(locations.id, location.parentLocationId)).get();
+    parentLocation = parentRow ? { id: parentRow.id, name: parentRow.name } : null;
   } catch {
     parentLocation = null;
   }
@@ -42,42 +40,63 @@ if (location.parent_id) {
 
 // Child locations
 try {
-  childLocations = await queryAll<any>(db,
-    `SELECT id, name FROM canon_locations WHERE parent_id = ?1 ORDER BY name`,
-    location.id
-  );
+  const childRows = await drz
+    .select({ id: locations.id, name: locations.name })
+    .from(locations)
+    .where(eq(locations.parentLocationId, location.id))
+    .orderBy(asc(locations.name))
+    .all();
+  childLocations = childRows;
 } catch {
   childLocations = [];
 }
 
-// Works referencing
+// Works referencing — via entity_references join
 try {
-  works = await queryAll<any>(db,
-    `SELECT w.id, w.title, w.word_count, w.updated_at,
-            (SELECT GROUP_CONCAT(p.name, ', ') FROM pseuds p JOIN creatorships c ON p.id = c.pseud_id WHERE c.work_id = w.id) as authors
-     FROM works w
-     JOIN canon_refs cr ON cr.work_id = w.id
-     WHERE cr.location_id = ?1
-     ORDER BY w.updated_at DESC
-     LIMIT 20`,
-    location.id
-  );
+  worksList = await drz
+    .select({
+      id: works.id,
+      title: works.title,
+      wordCount: works.wordCount,
+      updatedAt: works.updatedAt,
+      authors: sql<string>`(SELECT GROUP_CONCAT(p.name, ', ') FROM pseuds p JOIN creatorships c ON p.id = c.pseud_id WHERE c.work_id = ${works.id})`,
+    })
+    .from(entityReferences)
+    .innerJoin(works, eq(entityReferences.workId, works.id))
+    .where(and(eq(entityReferences.entityType, 'location'), eq(entityReferences.entityId, location.id)))
+    .orderBy(desc(works.updatedAt))
+    .limit(20)
+    .all();
 } catch {
-  works = [];
+  worksList = [];
 }
 
 // Edit history
 try {
-  editHistory = await queryAll<any>(db,
-    `SELECT * FROM canon_edits WHERE location_id = ?1 ORDER BY created_at DESC LIMIT 20`,
-    location.id
-  );
+  editHistory = await drz
+    .select()
+    .from(locationEdits)
+    .where(eq(locationEdits.locationId, location.id))
+    .orderBy(desc(locationEdits.createdAt))
+    .limit(20)
+    .all();
 } catch {
   editHistory = [];
 }
 
-const descHtml = markdownToHtml(location.description_md || '');
-const canEdit = auth && (auth.user.id === location.user_id || ['admin', 'mod', 'founder'].includes(auth.user.role));
+// Get fandom name from tag if available
+let fandomName: string | null = null;
+if (location.fandomTagId) {
+  try {
+    const fandomTag = await drz.select({ name: tags.name }).from(tags).where(eq(tags.id, location.fandomTagId)).get();
+    fandomName = fandomTag?.name ?? null;
+  } catch {
+    fandomName = null;
+  }
+}
+
+const descHtml = markdownToHtml(location.descriptionMd || '');
+const canEdit = auth && (auth.user.id === location.createdBy || ['admin', 'mod', 'founder'].includes(auth.user.role));
 ---
 
 <Base title={`${location.name} — Canon`}>
@@ -86,7 +105,7 @@ const canEdit = auth && (auth.user.id === location.user_id || ['admin', 'mod', '
       <h1 class="page-title">{location.name}</h1>
 
       <div class="location-badges">
-        {location.fandom && <span class="m3-chip location-badge location-badge--fandom">{location.fandom}</span>}
+        {fandomName && <span class="m3-chip location-badge location-badge--fandom">{fandomName}</span>}
       </div>
 
       <!-- Parent location breadcrumb -->
@@ -112,7 +131,7 @@ const canEdit = auth && (auth.user.id === location.user_id || ['admin', 'mod', '
       )}
 
       <!-- Description -->
-      {location.description_md && (
+      {location.descriptionMd && (
         <div class="location-desc prose" set:html={descHtml} />
       )}
 
@@ -122,16 +141,16 @@ const canEdit = auth && (auth.user.id === location.user_id || ['admin', 'mod', '
     </article>
 
     <!-- Works referencing -->
-    {works.length > 0 && (
+    {worksList.length > 0 && (
       <section class="location-works">
         <h2 class="section-title">Works Referencing</h2>
         <div class="works-list">
-          {works.map(w => (
+          {worksList.map(w => (
             <a href={`/works/${w.id}`} class="work-ref-card">
               <span class="work-ref__title">{w.title}</span>
               <span class="work-ref__meta">
                 {w.authors && <Fragment>by {w.authors} · </Fragment>}
-                {Number(w.word_count).toLocaleString()} words
+                {Number(w.wordCount).toLocaleString()} words
               </span>
             </a>
           ))}
@@ -146,8 +165,8 @@ const canEdit = auth && (auth.user.id === location.user_id || ['admin', 'mod', '
         <ol class="edit-timeline">
           {editHistory.map(edit => (
             <li class="edit-timeline__item">
-              <span class="edit-timeline__date">{new Date(edit.created_at).toLocaleDateString()}</span>
-              <span class="edit-timeline__desc">{edit.description || 'Updated location'}</span>
+              <span class="edit-timeline__date">{new Date(edit.createdAt).toLocaleDateString()}</span>
+              <span class="edit-timeline__desc">{edit.field ? `Changed ${edit.field}` : 'Updated location'}</span>
             </li>
           ))}
         </ol>

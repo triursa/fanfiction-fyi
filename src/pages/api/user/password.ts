@@ -2,7 +2,9 @@ export const prerender = false;
 
 import type { APIRoute } from 'astro';
 import { requireAuth, hashPassword, verifyPassword } from '@/lib/auth';
-import { run } from '@/lib/db';
+import { getDrizzle } from '@/lib/db';
+import { users } from '@/lib/schema';
+import { eq, sql } from 'drizzle-orm';
 import { checkRateLimit, recordFailedAttempt } from '@/lib/rate-limit';
 
 /**
@@ -13,8 +15,9 @@ import { checkRateLimit, recordFailedAttempt } from '@/lib/rate-limit';
  * D1 eventual consistency: changes may take 500-800ms to be visible in subsequent reads
  */
 export const POST: APIRoute = async ({ locals, request }) => {
-  const db = locals.runtime.env.DB as D1Database;
-  const auth = await requireAuth(db, request);
+  const d1 = locals.runtime.env.DB as D1Database;
+  const db = getDrizzle(d1);
+  const auth = await requireAuth(d1, request);
   if (!auth) {
     return new Response(JSON.stringify({ error: 'Auth required' }), {
       status: 401,
@@ -24,14 +27,17 @@ export const POST: APIRoute = async ({ locals, request }) => {
 
   // Rate limit: 5 per 5min per user ID
   const rlKey = `user:${auth.user.id}`;
-  const rl = await checkRateLimit(db, rlKey, 'change-password');
+  const rl = await checkRateLimit(d1, rlKey, 'change-password');
   if (!rl.allowed) {
     return new Response(JSON.stringify({ error: 'Rate limit exceeded. Try again later.' }), {
       status: 429,
-      headers: { 'Content-Type': 'application/json', 'Retry-After': String(rl.retryAfterSeconds) },
+      headers: {
+        'Content-Type': 'application/json',
+        'Retry-After': String(rl.retryAfterSeconds),
+      },
     });
   }
-  await recordFailedAttempt(db, rlKey, 'change-password');
+  await recordFailedAttempt(d1, rlKey, 'change-password');
 
   let body: { current_password?: string; new_password?: string };
   try {
@@ -59,8 +65,8 @@ export const POST: APIRoute = async ({ locals, request }) => {
   }
 
   // If user has existing password, verify current_password
-  if (auth.user.password_hash) {
-    const { valid } = await verifyPassword(current_password, auth.user.password_hash);
+  if (auth.user.passwordHash) {
+    const { valid } = await verifyPassword(current_password, auth.user.passwordHash);
     if (!valid) {
       return new Response(JSON.stringify({ error: 'Current password is incorrect' }), {
         status: 403,
@@ -68,10 +74,13 @@ export const POST: APIRoute = async ({ locals, request }) => {
       });
     }
   }
-  // If user has NO password_hash (OAuth-only), skip current_password check
+  // If user has NO passwordHash (OAuth-only), skip current_password check
 
   const hashed = await hashPassword(new_password);
-  await run(db, `UPDATE users SET password_hash = ?, updated_at = datetime('now') WHERE id = ?`, hashed, auth.user.id);
+  await db.update(users).set({
+    passwordHash: hashed,
+    updatedAt: sql`datetime('now')`,
+  }).where(eq(users.id, auth.user.id));
 
   return new Response(JSON.stringify({ success: true }), {
     headers: { 'Content-Type': 'application/json' },

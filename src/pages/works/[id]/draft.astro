@@ -3,35 +3,99 @@ export const prerender = false;
 import Base from '../../../layouts/Base.astro';
 import Editor from '../../../components/Editor';
 import Toast from '../../../components/Toast';
-import { queryFirst, queryAll } from '../../../lib/db';
+import { getDrizzle } from '../../../lib/db';
+import { works, chapters, creatorships } from '../../../lib/schema';
+import { eq, and, asc, sql } from 'drizzle-orm';
 import { getAuth } from '../../../lib/auth';
 import { htmlToMarkdown } from '../../../lib/markdown';
 
 const workId = Number(Astro.params.id);
 if (!workId) return Astro.redirect('/works');
 
-const db = Astro.locals.runtime.env.DB as D1Database;
+const d1 = Astro.locals.runtime.env.DB as D1Database;
+const db = getDrizzle(d1);
 
-const work = await queryFirst<any>(db, `SELECT * FROM works WHERE id = ?1`, workId);
+const work = await db.select().from(works).where(eq(works.id, workId)).get();
 if (!work) return Astro.redirect('/works');
 
-const chapters = await queryAll<any>(db, `SELECT id, position, title, draft, mood, word_count, content_md, content_html FROM chapters WHERE work_id = ?1 ORDER BY position`, workId);
+const chaptersRows = await db
+  .select({
+    id: chapters.id,
+    position: chapters.position,
+    title: chapters.title,
+    draft: chapters.draft,
+    mood: chapters.mood,
+    wordCount: chapters.wordCount,
+    contentMd: chapters.contentMd,
+    contentHtml: chapters.contentHtml,
+  })
+  .from(chapters)
+  .where(eq(chapters.workId, workId))
+  .orderBy(asc(chapters.position));
+
+// Cast to any[] for template compatibility
+const chapterList: any[] = chaptersRows.map(c => ({
+  ...c,
+  word_count: c.wordCount,
+  content_md: c.contentMd,
+  content_html: c.contentHtml,
+}));
 
 // Auth check — verify the user owns this work
-const auth = await getAuth(db, Astro.request);
+const auth = await getAuth(d1, Astro.request);
 if (!auth) return Astro.redirect('/login');
-const creatorships = await queryAll<any>(db, `SELECT * FROM creatorships WHERE work_id = ?1 AND pseud_id IN (${auth.pseuds.map(() => '?').join(',')})`, workId, ...auth.pseuds.map(p => p.id));
-if (creatorships.length === 0) return Astro.redirect(`/works/${workId}`);
+// Check creatorships with IN clause for user's pseuds
+if (auth.pseuds.length > 0) {
+  const creatorshipCheck = await db
+    .select({ id: creatorships.id })
+    .from(creatorships)
+    .where(and(
+      eq(creatorships.workId, workId),
+      sql`${creatorships.pseudId} IN (${sql.join(auth.pseuds.map(p => sql`${p.id}`), sql`, `)})`
+    ))
+    .limit(1);
+  if (creatorshipCheck.length === 0) return Astro.redirect(`/works/${workId}`);
+} else {
+  return Astro.redirect(`/works/${workId}`);
+}
 
 // If no chapters exist, auto-create one
-if (chapters.length === 0) {
-  await db.prepare(`INSERT INTO chapters (work_id, position, title, content_md, content_html, draft, word_count, created_at, updated_at) VALUES (?1, 1, 'Chapter 1', '', NULL, 1, 0, datetime('now'), datetime('now'))`).bind(workId).run();
-  const newChapter = await queryFirst<any>(db, `SELECT id, position, title, draft, mood, word_count, content_md, content_html FROM chapters WHERE work_id = ?1 ORDER BY position LIMIT 1`, workId);
-  if (newChapter) chapters.push(newChapter);
+if (chapterList.length === 0) {
+  await db.insert(chapters).values({
+    workId: workId,
+    position: 1,
+    title: 'Chapter 1',
+    contentMd: '',
+    contentHtml: null,
+    draft: 1,
+    wordCount: 0,
+  });
+  const newChapter = await db
+    .select({
+      id: chapters.id,
+      position: chapters.position,
+      title: chapters.title,
+      draft: chapters.draft,
+      mood: chapters.mood,
+      wordCount: chapters.wordCount,
+      contentMd: chapters.contentMd,
+      contentHtml: chapters.contentHtml,
+    })
+    .from(chapters)
+    .where(eq(chapters.workId, workId))
+    .orderBy(asc(chapters.position))
+    .limit(1)
+    .get();
+  if (newChapter) chapterList.push({
+    ...newChapter,
+    word_count: newChapter.wordCount,
+    content_md: newChapter.contentMd,
+    content_html: newChapter.contentHtml,
+  });
 }
 
 // Prepare initial chapter data for the editor
-const initialChapter = chapters[0] || null;
+const initialChapter = chapterList[0] || null;
 const initialContent = initialChapter?.content_md || '';
 const initialContentHtml = initialChapter?.content_html || '';
 
@@ -41,7 +105,7 @@ const defaultPseudId = pseuds.find(p => p.name === auth.user.display_name)?.id ?
 const workData = JSON.stringify({
   id: work.id,
   title: work.title,
-  chapters: chapters.map(c => ({
+  chapters: chapterList.map(c => ({
     id: c.id,
     position: c.position,
     title: c.title,

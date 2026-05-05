@@ -1,21 +1,23 @@
 ---
 export const prerender = false;
 import Base from '../../../layouts/Base.astro';
-import { queryFirst, queryAll, run } from '../../../lib/db';
+import { getDrizzle } from '../../../lib/db';
+import { series as seriesTable, serialWorks, works as worksTable, creatorships } from '../../../lib/schema';
+import { eq, sql, inArray } from 'drizzle-orm';
 import { getAuth } from '../../../lib/auth';
 
 const seriesId = Number(Astro.params.id);
 if (!seriesId) return Astro.redirect('/series');
 
-const db = Astro.locals.runtime.env.DB as D1Database;
-const auth = await getAuth(db, Astro.request);
+const d1 = Astro.locals.runtime.env.DB as D1Database;
+const db = getDrizzle(d1);
+const auth = await getAuth(d1, Astro.request);
 if (!auth) return Astro.redirect('/login');
 
-const series = await queryFirst<any>(
-  db,
-  `SELECT s.*, p.name as creator_name FROM series s JOIN pseuds p ON s.creator_pseud_id = p.id WHERE s.id = ?1`,
-  seriesId
-);
+// Series detail with creator name — raw D1 for JOIN
+const series = await d1.prepare(
+  `SELECT s.*, p.name as creator_name FROM series s JOIN pseuds p ON s.creator_pseud_id = p.id WHERE s.id = ?1`
+).bind(seriesId).first<any>();
 if (!series) return Astro.redirect('/series');
 
 // Check ownership
@@ -23,27 +25,24 @@ const isOwner = auth.pseuds.some((p: any) => p.id === series.creator_pseud_id);
 if (!isOwner) return Astro.redirect(`/series/${seriesId}`);
 
 // Get works in series
-const seriesWorks = await queryAll<any>(
-  db,
+const seriesWorksResult = await d1.prepare(
   `SELECT w.id, w.title, w.published_at, sw.position
    FROM serial_works sw JOIN works w ON w.id = sw.work_id
-   WHERE sw.series_id = ?1 ORDER BY sw.position`,
-  seriesId
-);
+   WHERE sw.series_id = ?1 ORDER BY sw.position`
+).bind(seriesId).all<any>();
+const seriesWorks = seriesWorksResult.results;
 
 // Get user's works NOT yet in this series (for adding)
 const pseudIds = auth.pseuds.map((p: any) => p.id);
-const availableWorks = await queryAll<any>(
-  db,
+const placeholders = pseudIds.map(() => '?').join(',');
+const availableWorksResult = await d1.prepare(
   `SELECT w.id, w.title, w.published_at FROM works w
    JOIN creatorships c ON c.work_id = w.id
-   WHERE c.pseud_id IN (${pseudIds.map(() => '?').join(',')})
+   WHERE c.pseud_id IN (${placeholders})
    AND w.id NOT IN (SELECT work_id FROM serial_works WHERE series_id = ?)
-   ORDER BY w.title`,
-  ...pseudIds,
-  seriesId
-);
-
+   ORDER BY w.title`
+).bind(...pseudIds, seriesId).all<any>();
+const availableWorks = availableWorksResult.results;
 const pseuds = auth.pseuds;
 const defaultPseud = pseuds[0]?.id ?? null;
 ---

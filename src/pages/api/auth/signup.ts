@@ -1,12 +1,15 @@
 export const prerender = false;
 
-import { queryFirst, run } from '@/lib/db';
+import { getDrizzle } from '@/lib/db';
+import { users, inviteCodes, pseuds } from '@/lib/schema';
 import { hashPassword, createSession, setSessionCookie } from '@/lib/auth';
 import { checkRateLimit, recordFailedAttempt, clearRateLimit } from '@/lib/rate-limit';
+import { eq, sql } from 'drizzle-orm';
 import type { APIRoute } from 'astro';
 
 export const POST: APIRoute = async ({ request, locals, clientAddress }) => {
-  const db = locals.runtime.env.DB as D1Database;
+  const d1 = locals.runtime.env.DB as D1Database;
+  const db = getDrizzle(d1);
 
   let body: any;
   try { body = await request.json(); } catch {
@@ -28,7 +31,7 @@ export const POST: APIRoute = async ({ request, locals, clientAddress }) => {
 
   // Rate limit by IP to prevent signup spam
   const rateLimitKey = (clientAddress || request.headers.get('x-forwarded-for') || 'unknown').split(',')[0].trim();
-  const rateLimit = await checkRateLimit(db, rateLimitKey, 'signup');
+  const rateLimit = await checkRateLimit(d1, rateLimitKey, 'signup');
   if (!rateLimit.allowed) {
     return new Response(JSON.stringify({ error: `Too many signup attempts. Try again in ${rateLimit.retryAfterSeconds}s.`, retryAfter: rateLimit.retryAfterSeconds }), {
       status: 429,
@@ -36,16 +39,24 @@ export const POST: APIRoute = async ({ request, locals, clientAddress }) => {
     });
   }
 
-  const invite = await queryFirst<{ id: number; used_by: number | null }>(db, `SELECT id, used_by FROM invite_codes WHERE code = ?1`, invite_code);
+  const invite = await db
+    .select({ id: inviteCodes.id, usedBy: inviteCodes.usedBy })
+    .from(inviteCodes)
+    .where(eq(inviteCodes.code, invite_code))
+    .get();
   if (!invite) {
-    await recordFailedAttempt(db, rateLimitKey, 'signup');
+    await recordFailedAttempt(d1, rateLimitKey, 'signup');
     return new Response(JSON.stringify({ error: 'Invalid invite code' }), { status: 400, headers: { 'Content-Type': 'application/json' } });
   }
-  if (invite.used_by !== null) {
+  if (invite.usedBy !== null) {
     return new Response(JSON.stringify({ error: 'Invite code already used' }), { status: 400, headers: { 'Content-Type': 'application/json' } });
   }
 
-  const existing = await queryFirst<{ id: number }>(db, `SELECT id FROM users WHERE email = ?1`, email);
+  const existing = await db
+    .select({ id: users.id })
+    .from(users)
+    .where(eq(users.email, email))
+    .get();
   if (existing) {
     return new Response(JSON.stringify({ error: 'Email already registered' }), { status: 409, headers: { 'Content-Type': 'application/json' } });
   }
@@ -54,18 +65,31 @@ export const POST: APIRoute = async ({ request, locals, clientAddress }) => {
 
   // New invite-code users require approval (approved = 0)
   // Founder can pre-approve via admin panel after signup
-  const userResult = await run(db, `INSERT INTO users (email, password_hash, invite_code, approved, created_at, updated_at) VALUES (?1, ?2, ?3, 0, datetime('now'), datetime('now'))`, email, passwordHash, invite_code);
-  const userId = userResult.meta.last_row_id;
+  const userResult = await db.insert(users).values({
+    email,
+    passwordHash,
+    inviteCode: invite_code,
+    approved: 0,
+    createdAt: sql`(datetime('now'))`,
+    updatedAt: sql`(datetime('now'))`,
+  });
+  const userId = userResult.meta.last_row_id as number;
 
-  await run(db, `UPDATE invite_codes SET used_by = ?1, used_at = datetime('now') WHERE id = ?2`, userId, invite.id);
+  await db.update(inviteCodes)
+    .set({ usedBy: userId, usedAt: sql`(datetime('now'))` })
+    .where(eq(inviteCodes.id, invite.id));
 
-  const pseudResult = await run(db, `INSERT INTO pseuds (user_id, name, created_at) VALUES (?1, ?2, datetime('now'))`, userId, display_name);
-  const pseudId = pseudResult.meta.last_row_id;
+  const pseudResult = await db.insert(pseuds).values({
+    userId,
+    name: display_name,
+    createdAt: sql`(datetime('now'))`,
+  });
+  const pseudId = pseudResult.meta.last_row_id as number;
 
   // Clear rate limit on successful signup
-  await clearRateLimit(db, rateLimitKey, 'signup');
+  await clearRateLimit(d1, rateLimitKey, 'signup');
 
-  const token = await createSession(db, userId);
+  const token = await createSession(d1, userId);
 
   return new Response(JSON.stringify({ id: userId, email, pseud_id: pseudId, approvalStatus: 'pending' }), {
     status: 201,

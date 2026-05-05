@@ -2,6 +2,9 @@
 export const prerender = false;
 import Base from '../../layouts/Base.astro';
 import { THEMES } from '../../styles/themes';
+import { getDrizzle } from '@/lib/db';
+import { sessions, users } from '@/lib/schema';
+import { eq, and, gt, sql } from 'drizzle-orm';
 
 // Auth check via cookie (server-side redirect guard)
 const cookie = Astro.request.headers.get('cookie') ?? '';
@@ -10,10 +13,10 @@ let currentTheme = 'obsidian';
 let authed = false;
 
 if (sessionMatch) {
-  const db = Astro.locals.runtime.env.DB as D1Database;
-  const session = await db.prepare('SELECT user_id FROM sessions WHERE token = ? AND expires_at > CURRENT_TIMESTAMP').bind(sessionMatch[1]).first();
+  const db = getDrizzle(Astro.locals.runtime.env.DB as D1Database);
+  const session = await db.select({ userId: sessions.userId }).from(sessions).where(and(eq(sessions.token, sessionMatch[1]), gt(sessions.expiresAt, sql`datetime('now')`))).get();
   if (session) {
-    const user = await db.prepare('SELECT theme FROM users WHERE id = ?').bind(session.user_id).first();
+    const user = await db.select({ theme: users.theme }).from(users).where(eq(users.id, session.userId)).get();
     if (user && user.theme) {
       currentTheme = user.theme as string;
     }

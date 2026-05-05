@@ -2,10 +2,12 @@
 export const prerender = false;
 import Base from '../../layouts/Base.astro';
 import { getAuth } from '../../lib/auth';
-import { queryAll } from '../../lib/db';
+import { getDrizzle } from '../../lib/db';
+import { sql } from 'drizzle-orm';
 
-const db = Astro.locals.runtime.env.DB as D1Database;
-const auth = await getAuth(db, Astro.request);
+const d1 = Astro.locals.runtime.env.DB as D1Database;
+const db = getDrizzle(d1);
+const auth = await getAuth(d1, Astro.request);
 
 const tab = Astro.url.searchParams.get('tab') || 'lore';
 const q = Astro.url.searchParams.get('q') || '';
@@ -41,11 +43,9 @@ if (tab === 'lore') {
     params.push(category);
   }
   try {
-    entries = await queryAll<any>(db,
-      `SELECT cl.*, (SELECT COUNT(*) FROM canon_refs cr WHERE cr.lore_id = cl.id) as work_count
-       FROM canon_lore cl WHERE ${where} ORDER BY cl.updated_at DESC LIMIT ?${params.length + 1} OFFSET ?${params.length + 2}`,
-      ...params, limit, offset
-    );
+    const result = await db.execute(sql`SELECT cl.*, (SELECT COUNT(*) FROM entity_references er WHERE er.entity_type = 'lore' AND er.entity_id = cl.id) as work_count
+       FROM lore_entries cl WHERE ${sql.raw(where)} ORDER BY cl.updated_at DESC LIMIT ${sql.raw(String(limit))} OFFSET ${sql.raw(String(offset))}`);
+    entries = result.rows as any[];
   } catch {
     // Table may not exist yet — gracefully show empty
     entries = [];
@@ -62,11 +62,9 @@ if (tab === 'lore') {
     params.push(fandom);
   }
   try {
-    entries = await queryAll<any>(db,
-      `SELECT cl.*, (SELECT COUNT(*) FROM canon_refs cr WHERE cr.location_id = cl.id) as work_count
-       FROM canon_locations cl WHERE ${where} ORDER BY cl.updated_at DESC LIMIT ?${params.length + 1} OFFSET ?${params.length + 2}`,
-      ...params, limit, offset
-    );
+    const result = await db.execute(sql`SELECT cl.*, (SELECT COUNT(*) FROM entity_references er WHERE er.entity_type = 'location' AND er.entity_id = cl.id) as work_count
+       FROM locations cl WHERE ${sql.raw(where)} ORDER BY cl.updated_at DESC LIMIT ${sql.raw(String(limit))} OFFSET ${sql.raw(String(offset))}`);
+    entries = result.rows as any[];
   } catch {
     entries = [];
   }

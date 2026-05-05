@@ -1,11 +1,13 @@
 export const prerender = false;
 
-import { queryAll, queryFirst, run } from '@/lib/db';
+import { getDrizzle } from '@/lib/db';
 import { requireAuth } from '@/lib/auth';
 import { corsHeaders, handleCors } from '@/lib/cors';
 import type { APIRoute } from 'astro';
 import type { EntityType } from '@/lib/types';
 import { UserRole, hasRoleLevel } from '@/lib/types';
+import { eq, and, sql } from 'drizzle-orm';
+import { entityReferences, works, loreEntries, locations as locationTable, characters } from '@/lib/schema';
 
 export const OPTIONS: APIRoute = async ({ request }) => {
   return handleCors(request) ?? new Response(null, { status: 405 });
@@ -13,16 +15,10 @@ export const OPTIONS: APIRoute = async ({ request }) => {
 
 const VALID_ENTITY_TYPES: EntityType[] = ['character', 'lore', 'location'];
 
-const ENTITY_TABLE_MAP: Record<EntityType, string> = {
-  character: 'characters',
-  lore: 'lore_entries',
-  location: 'locations',
-};
-
 // GET /api/canon/references — Browse entity references
 export const GET: APIRoute = async ({ url, locals, request }) => {
   const cors = corsHeaders(request);
-  const db = locals.runtime.env.DB as D1Database;
+  const d1 = locals.runtime.env.DB as D1Database;
 
   const entityType = url.searchParams.get('entity_type') || '';
   const entityId = url.searchParams.get('entity_id') || '';
@@ -31,39 +27,41 @@ export const GET: APIRoute = async ({ url, locals, request }) => {
   try {
     // If entity_type + entity_id given, return works referencing the entity
     if (entityType && entityId) {
-      const works = await queryAll<any>(
-        db,
-        `SELECT w.id, w.title, w.summary, w.word_count, w.published_at, er.entity_type, er.entity_id, er.created_at as reference_created_at
-         FROM entity_references er
-         JOIN works w ON er.work_id = w.id
-         WHERE er.entity_type = ?1 AND er.entity_id = ?2
-         ORDER BY w.updated_at DESC`,
-        entityType, Number(entityId),
-      );
+      const db = getDrizzle(d1);
+      const entityWorksResult = await db.execute(sql`
+        SELECT w.id, w.title, w.summary, w.word_count, w.published_at, er.entity_type, er.entity_id, er.created_at as reference_created_at
+        FROM entity_references er
+        JOIN works w ON er.work_id = w.id
+        WHERE er.entity_type = ${entityType} AND er.entity_id = ${Number(entityId)}
+        ORDER BY w.updated_at DESC
+      `);
+      const worksList = entityWorksResult.rows;
+
       return new Response(
-        JSON.stringify({ works }),
+        JSON.stringify({ works: worksList }),
         { headers: { 'Content-Type': 'application/json', ...cors } },
       );
     }
 
     // If work_id given, return entities referenced by the work
     if (workId) {
-      const entities = await queryAll<any>(
-        db,
-        `SELECT er.id, er.entity_type, er.entity_id, er.created_at,
-                CASE
-                  WHEN er.entity_type = 'character' THEN c.name
-                  WHEN er.entity_type = 'lore' THEN le.title
-                  WHEN er.entity_type = 'location' THEN loc.name
-                END as entity_name
-         FROM entity_references er
-         LEFT JOIN characters c ON er.entity_type = 'character' AND c.id = er.entity_id
-         LEFT JOIN lore_entries le ON er.entity_type = 'lore' AND le.id = er.entity_id
-         LEFT JOIN locations loc ON er.entity_type = 'location' AND loc.id = er.entity_id
-         WHERE er.work_id = ?1
-         ORDER BY er.entity_type, er.entity_id`,
-        Number(workId),
-      );
+      const db = getDrizzle(d1);
+      const entitiesResult = await db.execute(sql`
+        SELECT er.id, er.entity_type, er.entity_id, er.created_at,
+               CASE
+                 WHEN er.entity_type = 'character' THEN c.name
+                 WHEN er.entity_type = 'lore' THEN le.title
+                 WHEN er.entity_type = 'location' THEN loc.name
+               END as entity_name
+        FROM entity_references er
+        LEFT JOIN characters c ON er.entity_type = 'character' AND c.id = er.entity_id
+        LEFT JOIN lore_entries le ON er.entity_type = 'lore' AND le.id = er.entity_id
+        LEFT JOIN locations loc ON er.entity_type = 'location' AND loc.id = er.entity_id
+        WHERE er.work_id = ${Number(workId)}
+        ORDER BY er.entity_type, er.entity_id
+      `);
+      const entities = entitiesResult.rows;
+
       return new Response(
         JSON.stringify({ entities }),
         { headers: { 'Content-Type': 'application/json', ...cors } },
@@ -85,9 +83,10 @@ export const GET: APIRoute = async ({ url, locals, request }) => {
 
 // POST /api/canon/references — Create entity reference
 export const POST: APIRoute = async ({ request, locals }) => {
-  const db = locals.runtime.env.DB as D1Database;
+  const d1 = locals.runtime.env.DB as D1Database;
+  const db = getDrizzle(d1);
   const cors = corsHeaders(request);
-  const auth = await requireAuth(db, request);
+  const auth = await requireAuth(d1, request);
   if (!auth) {
     return new Response(
       JSON.stringify({ error: 'Unauthorized' }),
@@ -126,7 +125,7 @@ export const POST: APIRoute = async ({ request, locals }) => {
 
   try {
     // Validate work exists
-    const work = await queryFirst<any>(db, `SELECT id FROM works WHERE id = ?1`, workId);
+    const work = await db.select({ id: works.id }).from(works).where(eq(works.id, workId)).get();
     if (!work) {
       return new Response(
         JSON.stringify({ error: 'Work not found' }),
@@ -134,13 +133,9 @@ export const POST: APIRoute = async ({ request, locals }) => {
       );
     }
 
-    // Validate entity exists
-    const tableName = ENTITY_TABLE_MAP[entity_type];
-    const entity = await queryFirst<any>(
-      db,
-      `SELECT id FROM ${tableName} WHERE id = ?1`,
-      entityId,
-    );
+    // Validate entity exists — use raw SQL for dynamic table name
+    const tableName = entity_type === 'lore' ? 'lore_entries' : entity_type === 'location' ? 'locations' : 'characters';
+    const entity = await d1.prepare(`SELECT id FROM ${tableName} WHERE id = ?1`).bind(entityId).first<{ id: number }>();
     if (!entity) {
       return new Response(
         JSON.stringify({ error: `${entity_type} with id ${entityId} not found` }),
@@ -148,36 +143,37 @@ export const POST: APIRoute = async ({ request, locals }) => {
       );
     }
 
-    // Insert entity_reference (handle UNIQUE constraint)
-    const result = await run(
-      db,
-      `INSERT INTO entity_references (work_id, entity_type, entity_id) VALUES (?1, ?2, ?3)`,
-      workId, entity_type, entityId,
-    );
+    // Insert entity_reference
+    await db.insert(entityReferences).values({
+      workId,
+      entityType: entity_type,
+      entityId,
+    });
 
-    const reference = await queryFirst<any>(
-      db,
-      `SELECT * FROM entity_references WHERE id = ?1`,
-      result.meta.last_row_id,
-    );
+    // Get the last inserted reference by querying back
+    const ref = await db.select().from(entityReferences)
+      .where(and(
+        eq(entityReferences.workId, workId),
+        eq(entityReferences.entityType, entity_type),
+        eq(entityReferences.entityId, entityId),
+      ))
+      .get();
 
     // If entity_type is 'character', also upsert into character_appearances
     // for compatibility with the existing character system
     if (entity_type === 'character') {
       try {
-        await run(
-          db,
+        await d1.prepare(
           `INSERT OR IGNORE INTO character_appearances (character_id, work_id, role, notes, added_by)
-           VALUES (?1, ?2, 'side', NULL, ?3)`,
-          entityId, workId, pseudId,
-        );
+           VALUES (?1, ?2, 'side', NULL, ?3)`
+        ).bind(entityId, workId, pseudId).run();
       } catch {
         // Non-fatal — character_appearances upsert is best-effort
       }
     }
 
     return new Response(
-      JSON.stringify(reference),
+      JSON.stringify(ref),
       { status: 201, headers: { 'Content-Type': 'application/json', ...cors } },
     );
   } catch (e: any) {
@@ -196,9 +192,10 @@ export const POST: APIRoute = async ({ request, locals }) => {
 
 // DELETE /api/canon/references — Remove entity reference
 export const DELETE: APIRoute = async ({ request, locals }) => {
-  const db = locals.runtime.env.DB as D1Database;
+  const d1 = locals.runtime.env.DB as D1Database;
+  const db = getDrizzle(d1);
   const cors = corsHeaders(request);
-  const auth = await requireAuth(db, request);
+  const auth = await requireAuth(d1, request);
   if (!auth) {
     return new Response(
       JSON.stringify({ error: 'Unauthorized' }),
@@ -229,11 +226,14 @@ export const DELETE: APIRoute = async ({ request, locals }) => {
 
   try {
     // Find the reference
-    const ref = await queryFirst<any>(
-      db,
-      `SELECT * FROM entity_references WHERE work_id = ?1 AND entity_type = ?2 AND entity_id = ?3`,
-      workId, entity_type, entityId,
-    );
+    const ref = await db.select().from(entityReferences)
+      .where(and(
+        eq(entityReferences.workId, workId),
+        eq(entityReferences.entityType, entity_type),
+        eq(entityReferences.entityId, entityId),
+      ))
+      .get();
+
     if (!ref) {
       return new Response(
         JSON.stringify({ error: 'Reference not found' }),
@@ -241,13 +241,11 @@ export const DELETE: APIRoute = async ({ request, locals }) => {
       );
     }
 
-    // Permission: work creator (adder) or admin/mod
-    const isWorkCreator = await queryFirst<any>(
-      db,
+    // Permission: work creator or admin/mod
+    const isWorkCreator = await d1.prepare(
       `SELECT 1 FROM creatorships c JOIN pseuds p ON c.pseud_id = p.id
-       WHERE c.work_id = ?1 AND p.user_id = ?2 LIMIT 1`,
-      workId, auth.user.id,
-    );
+       WHERE c.work_id = ?1 AND p.user_id = ?2 LIMIT 1`
+    ).bind(workId, auth.user.id).first();
     const isPrivileged = hasRoleLevel(auth.user.role as UserRole, UserRole.Mod);
 
     if (!isWorkCreator && !isPrivileged) {
@@ -257,21 +255,19 @@ export const DELETE: APIRoute = async ({ request, locals }) => {
       );
     }
 
-    await run(
-      db,
-      `DELETE FROM entity_references WHERE work_id = ?1 AND entity_type = ?2 AND entity_id = ?3`,
-      workId, entity_type, entityId,
-    );
+    await db.delete(entityReferences)
+      .where(and(
+        eq(entityReferences.workId, workId),
+        eq(entityReferences.entityType, entity_type),
+        eq(entityReferences.entityId, entityId),
+      ));
 
     // If entity_type is 'character', also clean up character_appearances
     if (entity_type === 'character') {
       try {
-        await run(
-          db,
-          `DELETE FROM character_appearances WHERE character_id = ?1 AND work_id = ?2`,
-          entityId,
-          workId,
-        );
+        await d1.prepare(
+          `DELETE FROM character_appearances WHERE character_id = ?1 AND work_id = ?2`
+        ).bind(entityId, workId).run();
       } catch {
         // Non-fatal — character_appearances cleanup is best-effort
       }

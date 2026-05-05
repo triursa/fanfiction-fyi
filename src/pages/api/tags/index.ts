@@ -1,37 +1,43 @@
 export const prerender = false;
 
-import { queryAll, run } from '@/lib/db';
+import { getDrizzle } from '@/lib/db';
+import { tags } from '@/lib/schema';
 import { requireAuth } from '@/lib/auth';
+import { eq, like, and, asc, sql } from 'drizzle-orm';
 import type { APIRoute } from 'astro';
 
 export const GET: APIRoute = async ({ url, locals }) => {
-  const db = locals.runtime.env.DB as D1Database;
+  const drz = getDrizzle(locals.runtime.env.DB as D1Database);
   const params = url.searchParams;
   const type = params.get('type');
   const name = params.get('name');
   const limit = Math.min(Number(params.get('limit') || 25), 100);
 
-  let sql = 'SELECT * FROM tags WHERE 1=1';
-  const bindings: any[] = [];
+  const conditions = [];
+  if (type) conditions.push(eq(tags.type, type as any));
+  if (name) conditions.push(like(tags.name, `%${name}%`));
 
-  if (type) {
-    sql += ' AND type = ?';
-    bindings.push(type);
-  }
-  if (name) {
-    sql += ' AND name LIKE ?';
-    bindings.push(`%${name}%`);
-  }
-  sql += ' ORDER BY name LIMIT ?';
-  bindings.push(limit);
+  const result = await drz
+    .select()
+    .from(tags)
+    .where(conditions.length > 0 ? and(...conditions) : undefined)
+    .orderBy(asc(tags.name))
+    .limit(limit);
 
-  const tags = await queryAll<any>(db, sql, ...bindings);
-  return new Response(JSON.stringify(tags), { headers: { 'Content-Type': 'application/json' } });
+  // Convert camelCase to snake_case for API compatibility
+  const tagsResult = result.map(t => ({
+    id: t.id,
+    name: t.name,
+    type: t.type,
+  }));
+
+  return new Response(JSON.stringify(tagsResult), { headers: { 'Content-Type': 'application/json' } });
 };
 
 export const POST: APIRoute = async ({ request, locals }) => {
-  const db = locals.runtime.env.DB as D1Database;
-  const auth = await requireAuth(db, request);
+  const d1 = locals.runtime.env.DB as D1Database;
+  const drz = getDrizzle(d1);
+  const auth = await requireAuth(d1, request);
   if (!auth) return new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401, headers: { 'Content-Type': 'application/json' } });
 
   if (auth.user.role !== 'admin' && auth.user.role !== 'mod') {
@@ -54,9 +60,12 @@ export const POST: APIRoute = async ({ request, locals }) => {
   }
 
   try {
-    const result = await run(db, `INSERT INTO tags (name, type) VALUES (?1, ?2)`, name, type);
-    const tag = await queryAll<any>(db, `SELECT * FROM tags WHERE id = ?1`, result.meta.last_row_id);
-    return new Response(JSON.stringify(tag[0]), { status: 201, headers: { 'Content-Type': 'application/json' } });
+    const [inserted] = await drz.insert(tags).values({ name, type }).returning();
+    return new Response(JSON.stringify({
+      id: inserted.id,
+      name: inserted.name,
+      type: inserted.type,
+    }), { status: 201, headers: { 'Content-Type': 'application/json' } });
   } catch (e: any) {
     if (e.message?.includes('UNIQUE constraint failed')) {
       return new Response(JSON.stringify({ error: 'Tag already exists' }), { status: 409, headers: { 'Content-Type': 'application/json' } });

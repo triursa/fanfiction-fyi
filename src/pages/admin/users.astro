@@ -1,27 +1,36 @@
 ---
 export const prerender = false;
 import Base from '@/layouts/Base.astro';
-import { queryFirst, queryAll, run } from '@/lib/db';
+import { getDrizzle } from '@/lib/db';
 import { UserRole, ROLE_LEVEL } from '@/lib/types';
+import { users, sessions } from '@/lib/schema';
+import { eq, and, gt, sql } from 'drizzle-orm';
 
 // Auth gate: admin+ required
 const cookie = Astro.request.headers.get('cookie') ?? '';
 const sessionMatch = cookie.match(/session=([a-f0-9]+)/);
 if (!sessionMatch) return Astro.redirect('/login');
 
-const db = Astro.locals.runtime.env.DB as D1Database;
-const session = await queryFirst<{ user_id: number }>(db, `SELECT user_id FROM sessions WHERE token = ?1 AND expires_at > datetime('now')`, sessionMatch[1]);
+const d1 = Astro.locals.runtime.env.DB as D1Database;
+const db = getDrizzle(d1);
+const session = await db.select({ userId: sessions.userId }).from(sessions).where(and(eq(sessions.token, sessionMatch[1]), gt(sessions.expiresAt, sql`datetime('now')`))).get();
 if (!session) return Astro.redirect('/login');
 
-const currentUser = await queryFirst<{ id: number; email: string; role: string }>(db, `SELECT id, email, role FROM users WHERE id = ?1`, session.user_id);
+const currentUser = await db.select({ id: users.id, email: users.email, role: users.role }).from(users).where(eq(users.id, session.userId)).get();
 if (!currentUser) return Astro.redirect('/login');
 
 const userLevel = ROLE_LEVEL[currentUser.role as UserRole] ?? 0;
 if (userLevel < ROLE_LEVEL[UserRole.Admin]) return Astro.redirect('/');
 
-const users = await queryAll<{
-  id: number; email: string; role: string; created_at: string; google_id: string | null; banned: number; approved: number;
-}>(db, `SELECT id, email, role, created_at, google_id, banned, approved FROM users ORDER BY CASE WHEN approved = 0 THEN 0 ELSE 1 END, id`);
+const allUsers = await db.select({
+  id: users.id,
+  email: users.email,
+  role: users.role,
+  createdAt: users.createdAt,
+  googleId: users.googleId,
+  banned: users.banned,
+  approved: users.approved,
+}).from(users).orderBy(sql`CASE WHEN ${users.approved} = 0 THEN 0 ELSE 1 END, ${users.id}`);
 
 const allRoles: UserRole[] = [UserRole.Admin, UserRole.Mod, UserRole.User];
 ---
@@ -43,7 +52,7 @@ const allRoles: UserRole[] = [UserRole.Admin, UserRole.Mod, UserRole.User];
         </tr>
       </thead>
       <tbody>
-        {users.map(u => (
+        {allUsers.map(u => (
           <tr class:row-banned={u.banned === 1} class:row-pending={u.approved === 0 && u.banned === 0}>
             <td>{u.id}</td>
             <td>{u.email}</td>
@@ -58,7 +67,7 @@ const allRoles: UserRole[] = [UserRole.Admin, UserRole.Mod, UserRole.User];
                 </select>
               )}
             </td>
-            <td>{u.google_id ? '✓' : '—'}</td>
+            <td>{u.googleId ? '✓' : '—'}</td>
             <td>
               {u.banned ? (
                 <span class="badge badge-banned">Banned</span>
@@ -68,7 +77,7 @@ const allRoles: UserRole[] = [UserRole.Admin, UserRole.Mod, UserRole.User];
                 <span class="badge badge-pending">Pending</span>
               )}
             </td>
-            <td>{new Date(u.created_at).toLocaleDateString()}</td>
+            <td>{new Date(u.createdAt).toLocaleDateString()}</td>
             <td class="actions-cell">
               {u.role !== 'founder' && (
                 <>

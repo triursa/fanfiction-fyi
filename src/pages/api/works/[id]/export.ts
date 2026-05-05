@@ -1,10 +1,11 @@
 export const prerender = false;
 
-import { queryFirst, queryAll } from '@/lib/db';
+import { getDrizzle } from '@/lib/db';
+import { works, chapters, creatorships, pseuds } from '@/lib/schema';
+import { eq, and, isNotNull } from 'drizzle-orm';
 import { markdownToHtml } from '@/lib/markdown';
-import type { Work, Chapter } from '@/lib/types';
-import epub from 'epub-gen-memory';
 import type { APIRoute } from 'astro';
+import epub from 'epub-gen-memory';
 
 export const GET: APIRoute = async ({ params, locals, url }) => {
   const format = url.searchParams.get('format');
@@ -15,7 +16,8 @@ export const GET: APIRoute = async ({ params, locals, url }) => {
     });
   }
 
-  const db = locals.runtime.env.DB as D1Database;
+  const d1 = locals.runtime.env.DB as D1Database;
+  const db = getDrizzle(d1);
   const workId = Number(params.id);
   if (!workId) {
     return new Response(JSON.stringify({ error: 'Not found' }), {
@@ -24,7 +26,7 @@ export const GET: APIRoute = async ({ params, locals, url }) => {
     });
   }
 
-  const work = await queryFirst<Work>(db, `SELECT * FROM works WHERE id = ?1`, workId);
+  const work = await db.select().from(works).where(eq(works.id, workId)).get();
   if (!work) {
     return new Response(JSON.stringify({ error: 'Work not found' }), {
       status: 404,
@@ -33,28 +35,29 @@ export const GET: APIRoute = async ({ params, locals, url }) => {
   }
 
   // Only allow export for published works
-  if (!work.published_at) {
+  if (!work.publishedAt) {
     return new Response(JSON.stringify({ error: 'Work is not published' }), {
       status: 404,
       headers: { 'Content-Type': 'application/json' },
     });
   }
 
-  // Fetch author pseud names from creatorships
-  const pseuds = await queryAll<{ name: string }>(
-    db,
-    `SELECT p.name FROM pseuds p JOIN creatorships c ON p.id = c.pseud_id WHERE c.work_id = ?1`,
-    workId,
-  );
+  // Fetch author pseud names
+  const pseudRows = await db.select({ name: pseuds.name })
+    .from(pseuds)
+    .innerJoin(creatorships, eq(pseuds.id, creatorships.pseudId))
+    .where(eq(creatorships.workId, workId));
 
-  // Fetch all published chapters (draft=0) with title and content
-  const chapters = await queryAll<Chapter>(
-    db,
-    `SELECT title, content_html, content_md FROM chapters WHERE work_id = ?1 AND draft = 0 ORDER BY position`,
-    workId,
-  );
+  // Fetch all published chapters
+  const chapterRows = await db.select({
+    title: chapters.title,
+    contentHtml: chapters.contentHtml,
+    contentMd: chapters.contentMd,
+  }).from(chapters)
+    .where(and(eq(chapters.workId, workId), eq(chapters.draft, 0)))
+    .orderBy(chapters.position);
 
-  if (chapters.length === 0) {
+  if (chapterRows.length === 0) {
     return new Response(JSON.stringify({ error: 'No published chapters' }), {
       status: 404,
       headers: { 'Content-Type': 'application/json' },
@@ -63,7 +66,7 @@ export const GET: APIRoute = async ({ params, locals, url }) => {
 
   const epubOptions = {
     title: work.title || 'Untitled',
-    author: pseuds.map((p) => p.name),
+    author: pseudRows.map((p) => p.name),
     description: work.summary || undefined,
     lang: work.language || 'en',
     css: `
@@ -73,10 +76,9 @@ export const GET: APIRoute = async ({ params, locals, url }) => {
     `,
   };
 
-  const epubContent = chapters.map((ch) => ({
+  const epubContent = chapterRows.map((ch) => ({
     title: ch.title || 'Untitled Chapter',
-    // epub-gen-memory requires HTML — convert markdown fallback via markdownToHtml
-    data: ch.content_html || (ch.content_md ? markdownToHtml(ch.content_md) : '<p>Content not available.</p>'),
+    data: ch.contentHtml || (ch.contentMd ? markdownToHtml(ch.contentMd) : '<p>Content not available.</p>'),
   }));
 
   try {
@@ -86,7 +88,7 @@ export const GET: APIRoute = async ({ params, locals, url }) => {
       status: 200,
       headers: {
         'Content-Type': 'application/epub+zip',
-        'Content-Disposition': `attachment; filename="${(work.slug || work.title || 'work').replace(/[^a-zA-Z0-9-_]/g, '_')}.epub"`,
+        'Content-Disposition': `attachment; filename="${(work.title || 'work').replace(/[^a-zA-Z0-9-_]/g, '_')}.epub"`,
       },
     });
   } catch (err: any) {

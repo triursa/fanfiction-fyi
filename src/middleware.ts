@@ -1,5 +1,7 @@
 import { defineMiddleware } from 'astro:middleware';
-import { queryFirst } from '@/lib/db';
+import { getDrizzle } from '@/lib/db';
+import { sessions, users } from '@/lib/schema';
+import { and, eq, gt, sql } from 'drizzle-orm';
 import { cspHeaders } from '@/lib/csp';
 
 // Paths accessible without authentication or approval
@@ -52,9 +54,7 @@ export const onRequest = defineMiddleware(async (context, next) => {
   const { pathname } = context.url;
   const method = context.request.method;
 
-  // ── Publish flow debug logging ──
-  // Log every PUT/POST to /api/works/ paths so we can trace publish attempts
-  // even when they fail before reaching the API handler.
+  // Publish flow debug logging
   const isPublishRelated = pathname.startsWith('/api/works') && (method === 'PUT' || method === 'POST');
   if (isPublishRelated) {
     const hasCookie = !!(context.request.headers.get('cookie') ?? '').match(/session=([a-f0-9]+)/);
@@ -79,7 +79,6 @@ export const onRequest = defineMiddleware(async (context, next) => {
   const cookie = context.request.headers.get('cookie') ?? '';
   const sessionMatch = cookie.match(/session=([a-f0-9]+)/);
   if (!sessionMatch) {
-    // Not authenticated — return 401 JSON for API routes, redirect for pages
     if (isPublishRelated) {
       console.log(JSON.stringify({ t: 'mw_publish', note: 'NO_SESSION_COOKIE — returning 401', pathname }));
     }
@@ -92,17 +91,16 @@ export const onRequest = defineMiddleware(async (context, next) => {
     return context.redirect('/login');
   }
 
-  const db = context.locals.runtime.env.DB as D1Database;
+  const d1 = context.locals.runtime.env.DB as D1Database;
+  const db = getDrizzle(d1);
 
   // Look up session and user
-  const session = await queryFirst<{ user_id: number }>(
-    db,
-    `SELECT user_id FROM sessions WHERE token = ?1 AND expires_at > datetime('now')`,
-    sessionMatch[1]
-  );
+  const session = await db.select({ userId: sessions.userId })
+    .from(sessions)
+    .where(and(eq(sessions.token, sessionMatch[1]), gt(sessions.expiresAt, sql`datetime('now')`)))
+    .get();
 
   if (!session) {
-    // Invalid/expired session
     if (isPublishRelated) {
       console.log(JSON.stringify({ t: 'mw_publish', note: 'SESSION_EXPIRED_OR_INVALID — returning 401', pathname }));
     }
@@ -121,14 +119,14 @@ export const onRequest = defineMiddleware(async (context, next) => {
     });
   }
 
-  const user = await queryFirst<{ id: number; role: string; approved: number; banned: number }>(
-    db,
-    `SELECT id, role, approved, banned FROM users WHERE id = ?1`,
-    session.user_id
-  );
+  const user = await db.select({
+    id: users.id,
+    role: users.role,
+    approved: users.approved,
+    banned: users.banned,
+  }).from(users).where(eq(users.id, session.userId)).get();
 
   if (!user) {
-    // User deleted but session exists
     if (pathname.startsWith('/api/')) {
       return new Response(JSON.stringify({ error: 'Unauthorized' }), {
         status: 401,
@@ -144,9 +142,9 @@ export const onRequest = defineMiddleware(async (context, next) => {
     });
   }
 
-  // Banned users — destroy session and redirect to login with error
+  // Banned users — destroy session and redirect
   if (user.banned) {
-    await db.prepare(`DELETE FROM sessions WHERE token = ?1`).bind(sessionMatch[1]).run();
+    await db.delete(sessions).where(eq(sessions.token, sessionMatch[1]));
     return new Response(null, {
       status: 302,
       headers: {
@@ -156,7 +154,7 @@ export const onRequest = defineMiddleware(async (context, next) => {
     });
   }
 
-  // Unapproved users — allow /pending-approval, /api/auth/me, and /api/auth/logout
+  // Unapproved users
   if (!user.approved) {
     if (pathname === '/pending-approval' || pathname === '/api/auth/me' || pathname === '/api/auth/logout') {
       context.locals.user = user;
@@ -168,7 +166,7 @@ export const onRequest = defineMiddleware(async (context, next) => {
   // Approved user — set user info in locals and continue
   context.locals.user = user;
 
-  // Continue to the page/API handler, then add CSP headers to the response
+  // Continue to the page/API handler, then add CSP headers
   const response = await next();
   const csp = cspHeaders();
   response.headers.set(Object.keys(csp)[0], Object.values(csp)[0]);

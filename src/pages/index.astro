@@ -1,9 +1,11 @@
 ---
 export const prerender = false;
 import Base from '../layouts/Base.astro';
-import { queryFirst, queryAll } from '../lib/db';
+import { getDrizzle } from '../lib/db';
+import { users, sessions, pseuds, works, readings, creatorships } from '../lib/schema';
+import { eq, and, isNotNull, desc, sql } from 'drizzle-orm';
 
-const db = Astro.locals.runtime.env.DB as D1Database;
+const db = getDrizzle(Astro.locals.runtime.env.DB);
 
 // Check auth status
 let authUser = null;
@@ -11,11 +13,17 @@ let userPseudId: number | null = null;
 const cookie = Astro.request.headers.get('cookie') ?? '';
 const sessionMatch = cookie.match(/session=([a-f0-9]+)/);
 if (sessionMatch) {
-  const session = await queryFirst<any>(db, `SELECT user_id FROM sessions WHERE token = ?1 AND expires_at > datetime('now')`, sessionMatch[1]);
+  const session = await db.select({ userId: sessions.userId }).from(sessions)
+    .where(and(eq(sessions.token, sessionMatch[1]), sql`${sessions.expiresAt} > datetime('now')`))
+    .get();
   if (session) {
-    authUser = await queryFirst<any>(db, `SELECT * FROM users WHERE id = ?1`, session.user_id);
+    authUser = await db.select().from(users).where(eq(users.id, session.userId)).get();
     if (authUser) {
-      const userPseud = await queryFirst<any>(db, `SELECT id FROM pseuds WHERE user_id = ?1 ORDER BY id LIMIT 1`, authUser.id);
+      const userPseud = await db.select({ id: pseuds.id }).from(pseuds)
+        .where(eq(pseuds.userId, authUser.id))
+        .orderBy(pseuds.id)
+        .limit(1)
+        .get();
       userPseudId = userPseud?.id ?? null;
     }
   }
@@ -25,36 +33,89 @@ if (sessionMatch) {
 let continueReading: any[] = [];
 let markedForLater: any[] = [];
 if (userPseudId) {
-  continueReading = await queryAll<any>(
-    db,
-    `SELECT r.last_chapter, r.updated_at as reading_updated, w.id, w.title, w.summary, w.word_count, w.complete, w.updated_at
-     FROM readings r JOIN works w ON r.work_id = w.id
-     WHERE r.pseud_id = ?1 AND r.for_later = 0 AND r.last_chapter IS NOT NULL
-     ORDER BY r.updated_at DESC LIMIT 10`,
-    userPseudId
-  );
+  continueReading = (await db
+    .select({
+      lastChapter: readings.lastChapter,
+      readingUpdated: readings.updatedAt,
+      id: works.id,
+      title: works.title,
+      summary: works.summary,
+      wordCount: works.wordCount,
+      complete: works.complete,
+      updatedAt: works.updatedAt,
+    })
+    .from(readings)
+    .innerJoin(works, eq(readings.workId, works.id))
+    .where(and(eq(readings.pseudId, userPseudId), eq(readings.forLater, 0), sql`${readings.lastChapter} IS NOT NULL`))
+    .orderBy(desc(readings.updatedAt))
+    .limit(10))
+    .map(r => ({
+      last_chapter: r.lastChapter,
+      reading_updated: r.readingUpdated,
+      id: r.id,
+      title: r.title,
+      summary: r.summary,
+      word_count: r.wordCount,
+      complete: r.complete,
+      updated_at: r.updatedAt,
+    }));
 
-  markedForLater = await queryAll<any>(
-    db,
-    `SELECT r.work_id as id, w.title, w.summary, w.word_count, w.complete, w.updated_at
-     FROM readings r JOIN works w ON r.work_id = w.id
-     WHERE r.pseud_id = ?1 AND r.for_later = 1
-     ORDER BY r.updated_at DESC LIMIT 10`,
-    userPseudId
-  );
+  markedForLater = (await db
+    .select({
+      id: works.id,
+      title: works.title,
+      summary: works.summary,
+      wordCount: works.wordCount,
+      complete: works.complete,
+      updatedAt: readings.updatedAt,
+    })
+    .from(readings)
+    .innerJoin(works, eq(readings.workId, works.id))
+    .where(and(eq(readings.pseudId, userPseudId), eq(readings.forLater, 1)))
+    .orderBy(desc(readings.updatedAt))
+    .limit(10))
+    .map(r => ({
+      work_id: r.id,
+      id: r.id,
+      title: r.title,
+      summary: r.summary,
+      word_count: r.wordCount,
+      complete: r.complete,
+      updated_at: r.updatedAt,
+    }));
 }
 
 // Recently updated works (always shown)
-const recentlyUpdated = await queryAll<any>(
-  db,
-  `SELECT id, title, summary, word_count, complete, updated_at, published_at FROM works
-   WHERE published_at IS NOT NULL
-   ORDER BY updated_at DESC LIMIT 10`
-);
+const recentlyUpdatedRows = await db
+  .select({
+    id: works.id,
+    title: works.title,
+    summary: works.summary,
+    wordCount: works.wordCount,
+    complete: works.complete,
+    updatedAt: works.updatedAt,
+    publishedAt: works.publishedAt,
+  })
+  .from(works)
+  .where(isNotNull(works.publishedAt))
+  .orderBy(desc(works.updatedAt))
+  .limit(10);
+
+// Map to snake_case for template compatibility
+const recentlyUpdated: any[] = recentlyUpdatedRows.map(w => ({
+  ...w,
+  word_count: w.wordCount,
+  updated_at: w.updatedAt,
+  published_at: w.publishedAt,
+}));
 
 // Attach author info to recently updated
 for (const w of recentlyUpdated) {
-  w.authors = await queryAll<any>(db, `SELECT p.name FROM pseuds p JOIN creatorships c ON p.id = c.pseud_id WHERE c.work_id = ?1`, w.id);
+  w.authors = await db
+    .select({ name: pseuds.name })
+    .from(creatorships)
+    .innerJoin(pseuds, eq(creatorships.pseudId, pseuds.id))
+    .where(eq(creatorships.workId, w.id));
 }
 ---
 

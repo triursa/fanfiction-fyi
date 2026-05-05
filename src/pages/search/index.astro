@@ -1,9 +1,12 @@
 ---
 export const prerender = false;
 import Base from '../../layouts/Base.astro';
-import { queryAll } from '../../lib/db';
+import { getDrizzle } from '../../lib/db';
+import { tags, taggings, pseuds, creatorships } from '../../lib/schema';
+import { eq, sql, inArray } from 'drizzle-orm';
 
-const db = Astro.locals.runtime.env.DB as D1Database;
+const d1 = Astro.locals.runtime.env.DB as D1Database;
+const db = getDrizzle(d1);
 
 const query = Astro.url.searchParams.get('q')?.trim() || '';
 const type = Astro.url.searchParams.get('type')?.trim() || '';
@@ -14,11 +17,10 @@ const page = Math.max(Number(Astro.url.searchParams.get('page')) || 1, 1);
 const limit = 20;
 const offset = (page - 1) * limit;
 
-// Build SSR query
+// Build SSR query — FTS5 and dynamic SQL require raw D1
 let results: any[] = [];
 let total = 0;
 
-// FTS search conditions
 const hasQuery = query.length > 0;
 const words = query.split(/\s+/).filter(w => /^[\w\u4e00-\u9fff\u3040-\u309f\u30a0-\u30ff\uac00-\ud7af]+$/.test(w));
 const sanitizedQ = words.join(' ').trim();
@@ -42,50 +44,57 @@ const whereClause = 'WHERE ' + conditions.join(' AND ');
 
 if (hasQuery && sanitizedQ) {
   const ftsJoin = `JOIN works_fts f ON f.rowid = w.id`;
-  // Include ALL conditions (including published_at) after the MATCH predicate
   const allConditions = ' AND ' + conditions.join(' AND ');
 
   const dataSql = `SELECT w.id, w.title, w.summary, w.word_count, w.complete, w.published_at, w.updated_at FROM works w ${ftsJoin} WHERE works_fts MATCH ?${allConditions} ORDER BY rank LIMIT ? OFFSET ?`;
   const countSql = `SELECT COUNT(*) as total FROM works w ${ftsJoin} WHERE works_fts MATCH ?${allConditions}`;
 
-  results = await queryAll<any>(db, dataSql, sanitizedQ, ...bindings, limit, offset);
-  const totalRow = await db.prepare(countSql).bind(sanitizedQ, ...countBindings).first<{ total: number }>();
+  const dataResult = await d1.prepare(dataSql).bind(sanitizedQ, ...bindings, limit, offset).all<any>();
+  results = dataResult.results;
+  const totalRow = await d1.prepare(countSql).bind(sanitizedQ, ...countBindings).first<{ total: number }>();
   total = totalRow?.total ?? 0;
 } else if (conditions.length > 1 || !hasQuery) {
-  // Browse without text search — just filters
   const dataSql = `SELECT w.id, w.title, w.summary, w.word_count, w.complete, w.published_at, w.updated_at FROM works w ${whereClause} ORDER BY w.updated_at DESC LIMIT ? OFFSET ?`;
   const countSql = `SELECT COUNT(*) as total FROM works w ${whereClause}`;
 
-  results = await queryAll<any>(db, dataSql, ...bindings, limit, offset);
-  const totalRow = await db.prepare(countSql).bind(...countBindings).first<{ total: number }>();
+  const dataResult = await d1.prepare(dataSql).bind(...bindings, limit, offset).all<any>();
+  results = dataResult.results;
+  const totalRow = await d1.prepare(countSql).bind(...countBindings).first<{ total: number }>();
   total = totalRow?.total ?? 0;
 }
 
-// Enrich with pseuds and tags using batched queries
+// Enrich with pseuds and tags using Drizzle batched queries
 const workIds = results.map((w: any) => w.id);
 
 if (workIds.length > 0) {
-  const placeholders = workIds.map(() => '?').join(', ');
+  const pseudRows = await db.select({
+    workId: creatorships.workId,
+    pseudName: pseuds.name,
+  }).from(creatorships)
+    .innerJoin(pseuds, eq(pseuds.id, creatorships.pseudId))
+    .where(inArray(creatorships.workId, workIds));
 
-  const pseudRows = await queryAll<any>(
-    db,
-    `SELECT w.id AS work_id, (SELECT p.name FROM pseuds p JOIN creatorships c ON p.id = c.pseud_id WHERE c.work_id = w.id LIMIT 1) AS pseud_name FROM works w WHERE w.id IN (${placeholders})`,
-    ...workIds
-  );
-  const pseudByWorkId = new Map<number, string | null>(
-    pseudRows.map((row: any) => [row.work_id, row.pseud_name ?? null])
-  );
+  const pseudByWorkId = new Map<number, string | null>();
+  for (const row of pseudRows) {
+    if (!pseudByWorkId.has(row.workId)) {
+      pseudByWorkId.set(row.workId, row.pseudName);
+    }
+  }
 
-  const tagRows = await queryAll<any>(
-    db,
-    `SELECT tg.work_id, t.id, t.name, t.type FROM tags t JOIN taggings tg ON t.id = tg.tag_id WHERE tg.work_id IN (${placeholders}) ORDER BY tg.work_id, t.type, t.name`,
-    ...workIds
-  );
+  const tagRows = await db.select({
+    workId: taggings.workId,
+    id: tags.id,
+    name: tags.name,
+    type: tags.type,
+  }).from(taggings)
+    .innerJoin(tags, eq(tags.id, taggings.tagId))
+    .where(inArray(taggings.workId, workIds));
+
   const tagsByWorkId = new Map<number, any[]>();
   for (const row of tagRows) {
-    const tagList = tagsByWorkId.get(row.work_id) ?? [];
+    const tagList = tagsByWorkId.get(row.workId) ?? [];
     tagList.push({ id: row.id, name: row.name, type: row.type });
-    tagsByWorkId.set(row.work_id, tagList);
+    tagsByWorkId.set(row.workId, tagList);
   }
 
   for (const w of results) {

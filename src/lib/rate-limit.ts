@@ -7,6 +7,10 @@
  * (migration 008 not applied), all requests are allowed.
  */
 
+import { getDrizzle } from './db';
+import { rateLimits } from './schema';
+import { eq, and, gt, lt, sql, count, asc } from 'drizzle-orm';
+
 export interface RateLimitResult {
   allowed: boolean;
   retryAfterSeconds: number;
@@ -21,32 +25,36 @@ const WINDOW_SECONDS = 300; // 5 minutes
  * Returns { allowed, retryAfterSeconds, remaining }.
  */
 export async function checkRateLimit(
-  db: D1Database,
+  d1: D1Database,
   key: string,
   action = 'login'
 ): Promise<RateLimitResult> {
   try {
-    // Clean up expired entries first
+    const db = getDrizzle(d1);
     const cutoff = new Date(Date.now() - WINDOW_SECONDS * 1000).toISOString();
-    await db.prepare(`DELETE FROM rate_limits WHERE created_at < ?1`).bind(cutoff).run();
+
+    // Clean up expired entries first
+    await db.delete(rateLimits).where(lt(rateLimits.createdAt, cutoff));
 
     // Count recent attempts
-    const row = await db.prepare(
-      `SELECT COUNT(*) as cnt FROM rate_limits WHERE key = ?1 AND action = ?2 AND created_at > ?3`
-    ).bind(key, action, cutoff).first<{ cnt: number }>();
+    const rows = await db.select({ cnt: count() })
+      .from(rateLimits)
+      .where(and(eq(rateLimits.key, key), eq(rateLimits.action, action), gt(rateLimits.createdAt, cutoff)));
 
-    const count = row?.cnt ?? 0;
-    const remaining = Math.max(0, MAX_ATTEMPTS - count);
+    const countVal = rows[0]?.cnt ?? 0;
+    const remaining = Math.max(0, MAX_ATTEMPTS - countVal);
 
-    if (count >= MAX_ATTEMPTS) {
+    if (countVal >= MAX_ATTEMPTS) {
       // Find the oldest attempt in the window to calculate retry-after
-      const oldest = await db.prepare(
-        `SELECT created_at FROM rate_limits WHERE key = ?1 AND action = ?2 AND created_at > ?3 ORDER BY created_at ASC LIMIT 1`
-      ).bind(key, action, cutoff).first<{ created_at: string }>();
+      const oldest = await db.select({ createdAt: rateLimits.createdAt })
+        .from(rateLimits)
+        .where(and(eq(rateLimits.key, key), eq(rateLimits.action, action), gt(rateLimits.createdAt, cutoff)))
+        .orderBy(asc(rateLimits.createdAt))
+        .limit(1);
 
       let retryAfter = WINDOW_SECONDS;
-      if (oldest?.created_at) {
-        const oldestTime = new Date(oldest.created_at).getTime();
+      if (oldest[0]?.createdAt) {
+        const oldestTime = new Date(oldest[0].createdAt).getTime();
         retryAfter = Math.max(0, Math.ceil((oldestTime + WINDOW_SECONDS * 1000 - Date.now()) / 1000));
       }
 
@@ -64,14 +72,17 @@ export async function checkRateLimit(
  * Record a failed attempt for rate limiting.
  */
 export async function recordFailedAttempt(
-  db: D1Database,
+  d1: D1Database,
   key: string,
   action = 'login'
 ): Promise<void> {
   try {
-    await db.prepare(
-      `INSERT INTO rate_limits (key, action, created_at) VALUES (?1, ?2, ?3)`
-    ).bind(key, action, new Date().toISOString()).run();
+    const db = getDrizzle(d1);
+    await db.insert(rateLimits).values({
+      key,
+      action,
+      createdAt: new Date().toISOString(),
+    });
   } catch {
     // Silently ignore if table doesn't exist
   }
@@ -81,14 +92,13 @@ export async function recordFailedAttempt(
  * Clear rate limit entries for a key after a successful action.
  */
 export async function clearRateLimit(
-  db: D1Database,
+  d1: D1Database,
   key: string,
   action = 'login'
 ): Promise<void> {
   try {
-    await db.prepare(
-      `DELETE FROM rate_limits WHERE key = ?1 AND action = ?2`
-    ).bind(key, action).run();
+    const db = getDrizzle(d1);
+    await db.delete(rateLimits).where(and(eq(rateLimits.key, key), eq(rateLimits.action, action)));
   } catch {
     // Silently ignore if table doesn't exist
   }

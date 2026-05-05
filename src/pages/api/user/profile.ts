@@ -2,7 +2,9 @@ export const prerender = false;
 
 import type { APIRoute } from 'astro';
 import { requireAuth } from '@/lib/auth';
-import { queryFirst, run } from '@/lib/db';
+import { getDrizzle } from '@/lib/db';
+import { users } from '@/lib/schema';
+import { eq, sql } from 'drizzle-orm';
 
 const VALID_EMAIL_VISIBILITY = ['public', 'mutual', 'private'] as const;
 const VALID_READING_FONT_SIZE = ['small', 'default', 'large', 'xlarge'] as const;
@@ -13,8 +15,8 @@ const VALID_READING_FONT_SIZE = ['small', 'default', 'large', 'xlarge'] as const
  * D1 eventual consistency: changes may take 500-800ms to be visible in subsequent reads
  */
 export const PUT: APIRoute = async ({ locals, request }) => {
-  const db = locals.runtime.env.DB as D1Database;
-  const auth = await requireAuth(db, request);
+  const d1 = locals.runtime.env.DB as D1Database;
+  const auth = await requireAuth(d1, request);
   if (!auth) {
     return new Response(JSON.stringify({ error: 'Auth required' }), {
       status: 401,
@@ -32,19 +34,16 @@ export const PUT: APIRoute = async ({ locals, request }) => {
     });
   }
 
-  // Build SET clauses dynamically — only update provided fields
-  const sets: string[] = [];
-  const values: unknown[] = [];
+  // Build update values dynamically — only update provided fields
+  const updateValues: Record<string, any> = {};
 
   if ('display_name' in body) {
-    sets.push('display_name = ?');
-    values.push(typeof body.display_name === 'string' ? body.display_name : null);
+    updateValues.displayName = typeof body.display_name === 'string' ? body.display_name : null;
   }
 
   if ('bio' in body) {
     const bio = typeof body.bio === 'string' ? body.bio : '';
-    sets.push('bio = ?');
-    values.push(bio.slice(0, 500)); // Trim bio to 500 chars max
+    updateValues.bio = bio.slice(0, 500);
   }
 
   if ('email_visibility' in body) {
@@ -55,8 +54,7 @@ export const PUT: APIRoute = async ({ locals, request }) => {
         headers: { 'Content-Type': 'application/json' },
       });
     }
-    sets.push('email_visibility = ?');
-    values.push(vis);
+    updateValues.emailVisibility = vis;
   }
 
   if ('reading_font_size' in body) {
@@ -67,55 +65,50 @@ export const PUT: APIRoute = async ({ locals, request }) => {
         headers: { 'Content-Type': 'application/json' },
       });
     }
-    sets.push('reading_font_size = ?');
-    values.push(fs);
+    updateValues.readingFontSize = fs;
   }
 
   if ('mood_disabled' in body) {
     const md = body.mood_disabled;
-    const val = (md === true || md === 1) ? 1 : 0;
-    sets.push('mood_disabled = ?');
-    values.push(val);
+    updateValues.moodDisabled = (md === true || md === 1) ? 1 : 0;
   }
 
   if ('avatar_url' in body) {
-    sets.push('avatar_url = ?');
-    values.push(typeof body.avatar_url === 'string' ? body.avatar_url : null);
+    updateValues.avatarUrl = typeof body.avatar_url === 'string' ? body.avatar_url : null;
   }
 
   if ('avatar_key' in body) {
-    sets.push('avatar_key = ?');
-    values.push(typeof body.avatar_key === 'string' ? body.avatar_key : null);
+    updateValues.avatarKey = typeof body.avatar_key === 'string' ? body.avatar_key : null;
   }
 
-  if (sets.length === 0) {
+  if (Object.keys(updateValues).length === 0) {
     return new Response(JSON.stringify({ error: 'No fields to update' }), {
       status: 400,
       headers: { 'Content-Type': 'application/json' },
     });
   }
 
-  sets.push("updated_at = datetime('now')");
-  values.push(auth.user.id);
+  updateValues.updatedAt = sql`datetime('now')`;
 
-  await run(db, `UPDATE users SET ${sets.join(', ')} WHERE id = ?`, ...values);
+  const db = getDrizzle(d1);
+  await db.update(users).set(updateValues).where(eq(users.id, auth.user.id));
 
   // Fetch updated user to return
-  const updated = await queryFirst<any>(db, `SELECT * FROM users WHERE id = ?`, auth.user.id);
+  const updated = await db.select().from(users).where(eq(users.id, auth.user.id)).get();
 
   return new Response(
     JSON.stringify({
       user: {
-        id: updated.id,
-        email: updated.email,
-        role: updated.role,
-        display_name: updated.display_name,
-        avatar_url: updated.avatar_url,
-        avatar_key: updated.avatar_key,
-        bio: updated.bio,
-        email_visibility: updated.email_visibility,
-        reading_font_size: updated.reading_font_size,
-        mood_disabled: updated.mood_disabled ?? 0,
+        id: updated!.id,
+        email: updated!.email,
+        role: updated!.role,
+        display_name: updated!.displayName,
+        avatar_url: updated!.avatarUrl,
+        avatar_key: updated!.avatarKey,
+        bio: updated!.bio,
+        email_visibility: updated!.emailVisibility,
+        reading_font_size: updated!.readingFontSize,
+        mood_disabled: updated!.moodDisabled ?? 0,
       },
     }),
     {

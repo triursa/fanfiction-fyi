@@ -1,11 +1,13 @@
 export const prerender = false;
 
-import { queryAll, queryFirst, run } from '@/lib/db';
+import { getDrizzle } from '@/lib/db';
 import { requireAuth } from '@/lib/auth';
 import { corsHeaders, handleCors } from '@/lib/cors';
 import { markdownToHtml } from '@/lib/markdown';
 import type { APIRoute } from 'astro';
 import type { LoreCategory } from '@/lib/types';
+import { eq, and, sql } from 'drizzle-orm';
+import { loreEntries, tags } from '@/lib/schema';
 
 export const OPTIONS: APIRoute = async ({ request }) => {
   return handleCors(request) ?? new Response(null, { status: 405 });
@@ -33,20 +35,21 @@ function slugify(title: string): string {
 }
 
 async function ensureUniqueSlug(
-  db: D1Database,
+  db: ReturnType<typeof getDrizzle>,
   baseSlug: string,
   excludeId?: number,
 ): Promise<string> {
   let slug = baseSlug;
   let suffix = 2;
   while (true) {
-    let sql = `SELECT id FROM lore_entries WHERE slug = ?1`;
-    const params: unknown[] = [slug];
+    const conditions = [eq(loreEntries.slug, slug)];
     if (excludeId) {
-      sql += ` AND id != ?2`;
-      params.push(excludeId);
+      conditions.push(sql`${loreEntries.id} != ${excludeId}`);
     }
-    const existing = await queryFirst<{ id: number }>(db, sql, ...params);
+    const existing = await db.select({ id: loreEntries.id })
+      .from(loreEntries)
+      .where(and(...conditions))
+      .get();
     if (!existing) return slug;
     slug = `${baseSlug}-${suffix++}`;
   }
@@ -55,7 +58,8 @@ async function ensureUniqueSlug(
 // GET /api/canon/lore — Browse/search lore entries
 export const GET: APIRoute = async ({ url, locals, request }) => {
   const cors = corsHeaders(request);
-  const db = locals.runtime.env.DB as D1Database;
+  const d1 = locals.runtime.env.DB as D1Database;
+  const db = getDrizzle(d1);
 
   const rawQ = url.searchParams.get('q')?.trim() || '';
   const fandomTagId = url.searchParams.get('fandom_tag_id') || '';
@@ -66,6 +70,8 @@ export const GET: APIRoute = async ({ url, locals, request }) => {
 
   try {
     const sanitizedQ = rawQ ? sanitizeFts(rawQ) : '';
+
+    // Build the query using raw SQL for FTS5 + JOINs
     let fromClause: string;
     const conditions: string[] = [];
     const bindings: unknown[] = [];
@@ -91,9 +97,8 @@ export const GET: APIRoute = async ({ url, locals, request }) => {
 
     const whereClause = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
 
-    // Count
-    const countSql = `SELECT COUNT(*) as total FROM ${fromClause} ${whereClause}`;
-    const countRow = await queryFirst<{ total: number }>(db, countSql, ...bindings);
+    // Count — use raw D1 for FTS5 queries
+    const countRow = await d1.prepare(`SELECT COUNT(*) as total FROM ${fromClause} ${whereClause}`).bind(...bindings).first<{ total: number }>();
     const total = countRow?.total ?? 0;
 
     // Data
@@ -107,7 +112,7 @@ export const GET: APIRoute = async ({ url, locals, request }) => {
     `;
     const dataBindings = [...bindings, limit, offset];
 
-    const entries = await queryAll<any>(db, dataSql, ...dataBindings);
+    const { results: entries } = await d1.prepare(dataSql).bind(...dataBindings).all<any>();
 
     return new Response(
       JSON.stringify({ entries, total, page, limit }),
@@ -123,9 +128,10 @@ export const GET: APIRoute = async ({ url, locals, request }) => {
 
 // POST /api/canon/lore — Create lore entry
 export const POST: APIRoute = async ({ request, locals }) => {
-  const db = locals.runtime.env.DB as D1Database;
+  const d1 = locals.runtime.env.DB as D1Database;
+  const db = getDrizzle(d1);
   const cors = corsHeaders(request);
-  const auth = await requireAuth(db, request);
+  const auth = await requireAuth(d1, request);
   if (!auth) {
     return new Response(
       JSON.stringify({ error: 'Unauthorized' }),
@@ -166,26 +172,39 @@ export const POST: APIRoute = async ({ request, locals }) => {
   try {
     const slug = await ensureUniqueSlug(db, baseSlug);
 
-    const result = await run(
-      db,
-      `INSERT INTO lore_entries (title, slug, body_md, body_html, category, fandom_tag_id, created_by, updated_by)
-       VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)`,
-      title, slug, body_md, bodyHtml, entryCategory,
-      fandom_tag_id ? Number(fandom_tag_id) : null,
-      pseudId, pseudId,
-    );
+    await db.insert(loreEntries).values({
+      title,
+      slug,
+      bodyMd: body_md,
+      bodyHtml,
+      category: entryCategory,
+      fandomTagId: fandom_tag_id ? Number(fandom_tag_id) : null,
+      createdBy: pseudId,
+      updatedBy: pseudId,
+    });
 
-    const entry = await queryFirst<any>(
-      db,
-      `SELECT le.*, t.name as fandom_name
-       FROM lore_entries le
-       LEFT JOIN tags t ON le.fandom_tag_id = t.id
-       WHERE le.id = ?1`,
-      result.meta.last_row_id,
-    );
+    // Get the last inserted ID
+    const entry = await db.select()
+      .from(loreEntries)
+      .leftJoin(tags, eq(loreEntries.fandomTagId, tags.id))
+      .where(eq(loreEntries.slug, slug))
+      .get();
+
+    if (!entry) {
+      return new Response(
+        JSON.stringify({ error: 'Failed to retrieve created entry' }),
+        { status: 500, headers: { 'Content-Type': 'application/json', ...cors } },
+      );
+    }
+
+    // Format to match old API shape (snake_case + fandom_name)
+    const result = {
+      ...entry.lore_entries,
+      fandom_name: entry.tags?.name ?? null,
+    };
 
     return new Response(
-      JSON.stringify(entry),
+      JSON.stringify(result),
       { status: 201, headers: { 'Content-Type': 'application/json', ...cors } },
     );
   } catch (e: any) {

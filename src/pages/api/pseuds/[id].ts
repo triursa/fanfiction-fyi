@@ -1,35 +1,57 @@
 export const prerender = false;
 
-import { queryAll, queryFirst, run } from '@/lib/db';
+import { getDrizzle } from '@/lib/db';
+import { pseuds, creatorships, comments, kudos, bookmarks, readings } from '@/lib/schema';
 import { requireAuth } from '@/lib/auth';
+import { eq, and, ne, inArray, sql, count } from 'drizzle-orm';
 import type { APIRoute } from 'astro';
 
 /** GET /api/pseuds/[id] — single pseud (owner only) */
 export const GET: APIRoute = async ({ request, locals, params }) => {
-  const db = locals.runtime.env.DB as D1Database;
-  const auth = await requireAuth(db, request);
+  const d1 = locals.runtime.env.DB as D1Database;
+  const drz = getDrizzle(d1);
+  const auth = await requireAuth(d1, request);
   if (!auth) return new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401, headers: { 'Content-Type': 'application/json' } });
 
   const pseudId = parseInt(params.id ?? '', 10);
   if (isNaN(pseudId)) return new Response(JSON.stringify({ error: 'Invalid pseud ID' }), { status: 400, headers: { 'Content-Type': 'application/json' } });
 
-  const pseud = await queryFirst<any>(db, `SELECT * FROM pseuds WHERE id = ?1 AND user_id = ?2`, pseudId, auth.user.id);
+  const pseud = await drz.select().from(pseuds)
+    .where(and(eq(pseuds.id, pseudId), eq(pseuds.userId, auth.user.id)))
+    .get();
   if (!pseud) return new Response(JSON.stringify({ error: 'Pseud not found' }), { status: 404, headers: { 'Content-Type': 'application/json' } });
 
-  return new Response(JSON.stringify(pseud), { headers: { 'Content-Type': 'application/json' } });
+  // Convert camelCase to snake_case for API compatibility
+  const pseudResult = {
+    id: pseud.id,
+    user_id: pseud.userId,
+    name: pseud.name,
+    description: pseud.description,
+    icon_key: pseud.iconKey,
+    theme_color: pseud.themeColor,
+    is_default: pseud.isDefault,
+    created_at: pseud.createdAt,
+    pinned_work_ids: pseud.pinnedWorkIds,
+    banner_key: pseud.bannerKey,
+  };
+
+  return new Response(JSON.stringify(pseudResult), { headers: { 'Content-Type': 'application/json' } });
 };
 
 /** PUT /api/pseuds/[id] — update pseud (owner only) */
 export const PUT: APIRoute = async ({ request, locals, params }) => {
-  const db = locals.runtime.env.DB as D1Database;
-  const auth = await requireAuth(db, request);
+  const d1 = locals.runtime.env.DB as D1Database;
+  const drz = getDrizzle(d1);
+  const auth = await requireAuth(d1, request);
   if (!auth) return new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401, headers: { 'Content-Type': 'application/json' } });
 
   const pseudId = parseInt(params.id ?? '', 10);
   if (isNaN(pseudId)) return new Response(JSON.stringify({ error: 'Invalid pseud ID' }), { status: 400, headers: { 'Content-Type': 'application/json' } });
 
   // Verify ownership
-  const existing = await queryFirst<any>(db, `SELECT * FROM pseuds WHERE id = ?1 AND user_id = ?2`, pseudId, auth.user.id);
+  const existing = await drz.select().from(pseuds)
+    .where(and(eq(pseuds.id, pseudId), eq(pseuds.userId, auth.user.id)))
+    .get();
   if (!existing) return new Response(JSON.stringify({ error: 'Pseud not found' }), { status: 404, headers: { 'Content-Type': 'application/json' } });
 
   let body: any;
@@ -40,10 +62,10 @@ export const PUT: APIRoute = async ({ request, locals, params }) => {
   const { name, description, icon_key, pinned_work_ids, banner_key, theme_color, is_default } = body || {};
   const newName = (typeof name === 'string' ? name.trim() : existing.name);
   const newDesc = (description !== undefined ? (typeof description === 'string' ? description : null) : existing.description);
-  const newIconKey = (icon_key !== undefined ? (typeof icon_key === 'string' ? icon_key : null) : existing.icon_key);
+  const newIconKey = (icon_key !== undefined ? (typeof icon_key === 'string' ? icon_key : null) : existing.iconKey);
 
   // Pinned work IDs validation: must be array of max 6 integers
-  let newPinnedWorkIds = existing.pinned_work_ids || '[]';
+  let newPinnedWorkIds = existing.pinnedWorkIds || '[]';
   if (pinned_work_ids !== undefined) {
     if (!Array.isArray(pinned_work_ids)) {
       return new Response(JSON.stringify({ error: 'pinned_work_ids must be an array' }), { status: 400, headers: { 'Content-Type': 'application/json' } });
@@ -55,9 +77,10 @@ export const PUT: APIRoute = async ({ request, locals, params }) => {
     const validIds = pinned_work_ids.filter((id: any) => Number.isInteger(id) && id > 0);
     // Validate the pseud owns these works
     if (validIds.length > 0) {
-      const placeholders = validIds.map(() => '?').join(',');
-      const ownedWorks = await queryAll<any>(db, `SELECT work_id FROM creatorships WHERE pseud_id = ?1 AND work_id IN (${placeholders})`, pseudId, ...validIds);
-      const ownedSet = new Set(ownedWorks.map((w: any) => w.work_id));
+      const ownedWorks = await drz.select({ workId: creatorships.workId })
+        .from(creatorships)
+        .where(and(eq(creatorships.pseudId, pseudId), inArray(creatorships.workId, validIds)));
+      const ownedSet = new Set(ownedWorks.map((w: any) => w.workId));
       const filtered = validIds.filter((id: number) => ownedSet.has(id));
       newPinnedWorkIds = JSON.stringify(filtered);
     } else {
@@ -66,10 +89,10 @@ export const PUT: APIRoute = async ({ request, locals, params }) => {
   }
 
   // Banner key validation
-  const newBannerKey = (banner_key !== undefined ? (typeof banner_key === 'string' ? banner_key : null) : existing.banner_key);
+  const newBannerKey = (banner_key !== undefined ? (typeof banner_key === 'string' ? banner_key : null) : existing.bannerKey);
 
   // Theme color validation (hex color)
-  let newThemeColor = existing.theme_color;
+  let newThemeColor = existing.themeColor;
   if (theme_color !== undefined) {
     if (theme_color !== null && !/^(?:#[0-9a-fA-F]{3}|#[0-9a-fA-F]{4}|#[0-9a-fA-F]{6}|#[0-9a-fA-F]{8})$/.test(String(theme_color))) {
       return new Response(JSON.stringify({ error: 'Invalid theme color format' }), { status: 400, headers: { 'Content-Type': 'application/json' } });
@@ -87,64 +110,86 @@ export const PUT: APIRoute = async ({ request, locals, params }) => {
 
   // Check for duplicate name (excluding current pseud)
   if (newName !== existing.name) {
-    const dup = await queryAll<any>(db, `SELECT id FROM pseuds WHERE user_id = ?1 AND name = ?2 AND id != ?3`, auth.user.id, newName, pseudId);
+    const dup = await drz.select({ id: pseuds.id })
+      .from(pseuds)
+      .where(and(eq(pseuds.userId, auth.user.id), eq(pseuds.name, newName), ne(pseuds.id, pseudId)));
     if (dup.length > 0) {
       return new Response(JSON.stringify({ error: 'You already have a pseud with that name' }), { status: 409, headers: { 'Content-Type': 'application/json' } });
     }
   }
 
-  // Handle is_default atomically: if promoting this pseud to default, clear all others in the same statement
-  await run(db,
-    `UPDATE pseuds SET
-       name         = CASE WHEN id = ?8 THEN ?1 ELSE name END,
-       description  = CASE WHEN id = ?8 THEN ?2 ELSE description END,
-       icon_key     = CASE WHEN id = ?8 THEN ?3 ELSE icon_key END,
-       pinned_work_ids = CASE WHEN id = ?8 THEN ?4 ELSE pinned_work_ids END,
-       banner_key   = CASE WHEN id = ?8 THEN ?5 ELSE banner_key END,
-       theme_color  = CASE WHEN id = ?8 THEN ?6 ELSE theme_color END,
-       is_default   = CASE
-                        WHEN ?7 = 1 AND id = ?8 THEN 1
-                        WHEN ?7 = 1             THEN 0
-                        WHEN id = ?8            THEN ?10
-                        ELSE is_default
-                      END
-     WHERE user_id = ?9 AND (?7 = 1 OR id = ?8)`,
-    newName, newDesc, newIconKey, newPinnedWorkIds, newBannerKey, newThemeColor,
-    is_default === 1 ? 1 : 0,
-    pseudId,
-    auth.user.id,
-    existing.is_default
-  );
+  // Handle is_default atomically: if promoting this pseud to default, clear all others too
+  if (is_default === 1) {
+    // Clear default on all other pseuds for this user
+    await drz.update(pseuds)
+      .set({ isDefault: 0 })
+      .where(and(eq(pseuds.userId, auth.user.id), ne(pseuds.id, pseudId)));
+  }
 
-  const updated = await queryFirst<any>(db, `SELECT * FROM pseuds WHERE id = ?1`, pseudId);
-  return new Response(JSON.stringify(updated), { headers: { 'Content-Type': 'application/json' } });
+  // Update the pseud itself
+  await drz.update(pseuds)
+    .set({
+      name: newName,
+      description: newDesc,
+      iconKey: newIconKey,
+      pinnedWorkIds: newPinnedWorkIds,
+      bannerKey: newBannerKey,
+      themeColor: newThemeColor,
+      isDefault: is_default === 1 ? 1 : existing.isDefault,
+    })
+    .where(eq(pseuds.id, pseudId));
+
+  const updated = await drz.select().from(pseuds).where(eq(pseuds.id, pseudId)).get();
+
+  // Convert camelCase to snake_case for API compatibility
+  const pseudResult = updated ? {
+    id: updated.id,
+    user_id: updated.userId,
+    name: updated.name,
+    description: updated.description,
+    icon_key: updated.iconKey,
+    theme_color: updated.themeColor,
+    is_default: updated.isDefault,
+    created_at: updated.createdAt,
+    pinned_work_ids: updated.pinnedWorkIds,
+    banner_key: updated.bannerKey,
+  } : null;
+
+  return new Response(JSON.stringify(pseudResult), { headers: { 'Content-Type': 'application/json' } });
 };
 
 /** DELETE /api/pseuds/[id] — delete a pseud (owner only, with safety checks) */
 export const DELETE: APIRoute = async ({ request, locals, params }) => {
-  const db = locals.runtime.env.DB as D1Database;
-  const auth = await requireAuth(db, request);
+  const d1 = locals.runtime.env.DB as D1Database;
+  const drz = getDrizzle(d1);
+  const auth = await requireAuth(d1, request);
   if (!auth) return new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401, headers: { 'Content-Type': 'application/json' } });
 
   const pseudId = parseInt(params.id ?? '', 10);
   if (isNaN(pseudId)) return new Response(JSON.stringify({ error: 'Invalid pseud ID' }), { status: 400, headers: { 'Content-Type': 'application/json' } });
 
   // Verify ownership
-  const existing = await queryFirst<any>(db, `SELECT * FROM pseuds WHERE id = ?1 AND user_id = ?2`, pseudId, auth.user.id);
+  const existing = await drz.select().from(pseuds)
+    .where(and(eq(pseuds.id, pseudId), eq(pseuds.userId, auth.user.id)))
+    .get();
   if (!existing) return new Response(JSON.stringify({ error: 'Pseud not found' }), { status: 404, headers: { 'Content-Type': 'application/json' } });
 
   // Safety check: can't delete if pseud has creatorships (linked to works)
-  const creatorships = await queryAll<any>(db, `SELECT id FROM creatorships WHERE pseud_id = ?1`, pseudId);
-  if (creatorships.length > 0) {
+  const creatorshipRows = await drz.select({ id: creatorships.id })
+    .from(creatorships)
+    .where(eq(creatorships.pseudId, pseudId));
+  if (creatorshipRows.length > 0) {
     return new Response(
-      JSON.stringify({ error: `Cannot delete pseud "${existing.name}" — it is credited on ${creatorships.length} work(s). Transfer or remove those credits first.` }),
+      JSON.stringify({ error: `Cannot delete pseud "${existing.name}" — it is credited on ${creatorshipRows.length} work(s). Transfer or remove those credits first.` }),
       { status: 409, headers: { 'Content-Type': 'application/json' } }
     );
   }
 
   // Safety check: can't delete last pseud
-  const allPseuds = await queryAll<any>(db, `SELECT id FROM pseuds WHERE user_id = ?1`, auth.user.id);
-  if (allPseuds.length <= 1) {
+  const allPseudsRows = await drz.select({ id: pseuds.id })
+    .from(pseuds)
+    .where(eq(pseuds.userId, auth.user.id));
+  if (allPseudsRows.length <= 1) {
     return new Response(
       JSON.stringify({ error: 'You must have at least one pseud. Create a new one before deleting this one.' }),
       { status: 409, headers: { 'Content-Type': 'application/json' } }
@@ -152,31 +197,31 @@ export const DELETE: APIRoute = async ({ request, locals, params }) => {
   }
 
   // If deleting the default pseud, first clear its flag then promote the next one
-  if (existing.is_default === 1) {
-    await run(db, `UPDATE pseuds SET is_default = 0 WHERE id = ?1`, pseudId);
-    const remaining = allPseuds.filter((p: any) => p.id !== pseudId);
+  if (existing.isDefault === 1) {
+    await drz.update(pseuds).set({ isDefault: 0 }).where(eq(pseuds.id, pseudId));
+    const remaining = allPseudsRows.filter((p: any) => p.id !== pseudId);
     if (remaining.length > 0) {
-      await run(db, `UPDATE pseuds SET is_default = 1 WHERE id = ?1`, remaining[0].id);
+      await drz.update(pseuds).set({ isDefault: 1 }).where(eq(pseuds.id, remaining[0].id));
     }
   }
 
   // Delete related records first (comments, kudos, bookmarks, readings)
-  await run(db, `DELETE FROM comments WHERE pseud_id = ?1`, pseudId);
-  await run(db, `DELETE FROM kudos WHERE pseud_id = ?1`, pseudId);
-  await run(db, `DELETE FROM bookmarks WHERE pseud_id = ?1`, pseudId);
-  await run(db, `DELETE FROM readings WHERE pseud_id = ?1`, pseudId);
+  await drz.delete(comments).where(eq(comments.pseudId, pseudId));
+  await drz.delete(kudos).where(eq(kudos.pseudId, pseudId));
+  await drz.delete(bookmarks).where(eq(bookmarks.pseudId, pseudId));
+  await drz.delete(readings).where(eq(readings.pseudId, pseudId));
 
   // Clean up R2 icon + banner if present
   try {
     const bucket = locals.runtime.env.MEDIA as R2Bucket | undefined;
     if (bucket) {
-      if (existing.icon_key) await bucket.delete(existing.icon_key);
-      if (existing.banner_key) await bucket.delete(existing.banner_key);
+      if (existing.iconKey) await bucket.delete(existing.iconKey);
+      if (existing.bannerKey) await bucket.delete(existing.bannerKey);
     }
   } catch { /* non-critical */ }
 
   // Delete the pseud itself
-  await run(db, `DELETE FROM pseuds WHERE id = ?1 AND user_id = ?2`, pseudId, auth.user.id);
+  await drz.delete(pseuds).where(and(eq(pseuds.id, pseudId), eq(pseuds.userId, auth.user.id)));
 
   return new Response(JSON.stringify({ success: true, deleted: pseudId }), { headers: { 'Content-Type': 'application/json' } });
 };

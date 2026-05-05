@@ -1,16 +1,21 @@
 ---
 export const prerender = false;
 import Base from '../../layouts/Base.astro';
-import { queryFirst } from '../../lib/db';
+import { getDrizzle } from '../../lib/db';
+import { pseuds as pseudsTable } from '../../lib/schema';
+import { eq } from 'drizzle-orm';
 import PseudPortfolio from '../../components/PseudPortfolio';
 
 const pseudId = Number(Astro.params.id);
 if (!pseudId) return Astro.redirect('/');
 
-const db = Astro.locals.runtime.env.DB as D1Database;
+const db = getDrizzle(Astro.locals.runtime.env.DB as D1Database);
 
 // Verify pseud exists
-const pseud = await queryFirst<any>(db, `SELECT id, name FROM pseuds WHERE id = ?1`, pseudId);
+const pseud = await db.select({ id: pseudsTable.id, name: pseudsTable.name })
+  .from(pseudsTable)
+  .where(eq(pseudsTable.id, pseudId))
+  .get();
 if (!pseud) return Astro.redirect('/');
 ---
 

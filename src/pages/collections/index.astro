@@ -1,19 +1,32 @@
 ---
 export const prerender = false;
 import Base from '../../layouts/Base.astro';
-import { queryAll } from '../../lib/db';
+import { getDrizzle } from '../../lib/db';
+import { collections as collectionsTable, collectionItems } from '../../lib/schema';
+import { sql, desc, inArray } from 'drizzle-orm';
 
-const db = Astro.locals.runtime.env.DB as D1Database;
+const db = getDrizzle(Astro.locals.runtime.env.DB as D1Database);
 
-const collections = await queryAll<any>(db,
-  `SELECT c.id, c.name, c.description, c.privacy, COUNT(ci.id) as item_count, c.created_at
-   FROM collections c
-   LEFT JOIN collection_items ci ON c.id = ci.collection_id
-   WHERE c.privacy IN ('public', 'unrevealed')
-   GROUP BY c.id
-   ORDER BY c.created_at DESC
-   LIMIT 50`
-);
+const collectionRows = await db.select({
+  id: collectionsTable.id,
+  name: collectionsTable.name,
+  description: collectionsTable.description,
+  privacy: collectionsTable.privacy,
+  createdAt: collectionsTable.createdAt,
+  itemCount: sql<number>`(SELECT COUNT(*) FROM collection_items WHERE collection_id = ${collectionsTable.id})`.as('item_count'),
+})
+  .from(collectionsTable)
+  .where(sql`${collectionsTable.privacy} IN ('public', 'unrevealed')`)
+  .groupBy(collectionsTable.id)
+  .orderBy(desc(collectionsTable.createdAt))
+  .limit(50)
+  .all();
+
+const collections = collectionRows.map(c => ({
+  ...c,
+  // Keep snake_case aliases for template compatibility
+  created_at: c.createdAt,
+}));
 ---
 
 <Base title="Collections — fanfiction.fyi">

@@ -9,12 +9,16 @@
  * 
  * Usage in API handlers:
  *   import { logPublishAttempt, logPublishResult } from '@/lib/publish-logger';
- *   const logId = await logPublishAttempt(db, { workId, chapterId, step, userId, requestSummary });
+ *   const logId = await logPublishAttempt(d1, { workId, chapterId, step, userId, requestSummary });
  *   // ... do the work ...
- *   await logPublishResult(db, logId, { status: 'success', httpStatus: 200 });
+ *   await logPublishResult(d1, logId, { status: 'success', httpStatus: 200 });
  *   // or on error:
- *   await logPublishResult(db, logId, { status: 'fail', httpStatus: 500, error: err.message });
+ *   await logPublishResult(d1, logId, { status: 'fail', httpStatus: 500, error: err.message });
  */
+
+import { getDrizzle } from '@/lib/db';
+import { publishLog } from '@/lib/schema/publish-log';
+import { eq } from 'drizzle-orm';
 
 export interface PublishLogEntry {
   id?: number;
@@ -45,20 +49,17 @@ export async function logPublishAttempt(
   }
 ): Promise<number> {
   try {
-    const result = await db.prepare(
-      `INSERT INTO publish_log (work_id, chapter_id, step, status, user_id, request_summary, created_at)
-       VALUES (?1, ?2, ?3, 'attempt', ?4, ?5, CURRENT_TIMESTAMP)`
-    )
-      .bind(
-        entry.workId,
-        entry.chapterId ?? null,
-        entry.step,
-        entry.userId ?? null,
-        truncate(entry.requestSummary, 500)
-      )
-      .run();
+    const drizzle = getDrizzle(db);
+    const [inserted] = await drizzle.insert(publishLog).values({
+      workId: entry.workId,
+      chapterId: entry.chapterId ?? null,
+      step: entry.step,
+      status: 'attempt',
+      userId: entry.userId ?? null,
+      requestSummary: truncate(entry.requestSummary, 500),
+    }).returning({ id: publishLog.id });
 
-    return result.meta.last_row_id ?? 0;
+    return inserted?.id ?? 0;
   } catch {
     // Logger must never break the publish flow — swallow errors
     console.error('[publish-logger] Failed to log attempt');
@@ -81,18 +82,13 @@ export async function logPublishResult(
 ): Promise<void> {
   if (!logId) return; // Entry was never created
   try {
-    await db.prepare(
-      `UPDATE publish_log SET status = ?1, http_status = ?2, error = ?3, response_summary = ?4
-       WHERE id = ?5`
-    )
-      .bind(
-        result.status,
-        result.httpStatus ?? null,
-        truncate(result.error, 500) ?? null,
-        truncate(result.responseSummary, 500) ?? null,
-        logId
-      )
-      .run();
+    const drizzle = getDrizzle(db);
+    await drizzle.update(publishLog).set({
+      status: result.status,
+      httpStatus: result.httpStatus ?? null,
+      error: truncate(result.error, 500) ?? null,
+      responseSummary: truncate(result.responseSummary, 500) ?? null,
+    }).where(eq(publishLog.id, logId));
   } catch {
     console.error('[publish-logger] Failed to log result');
   }

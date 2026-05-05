@@ -1,39 +1,45 @@
 ---
 export const prerender = false;
 import Base from '../../../layouts/Base.astro';
-import { queryFirst, queryAll } from '../../../lib/db';
+import { getDrizzle } from '../../../lib/db';
+import { sessions, pseuds as pseudsTable, series as seriesTable, serialWorks, works, tags, taggings, creatorships, kudos } from '../../../lib/schema';
+import { eq, and, gt, sql, count } from 'drizzle-orm';
 import { markdownToHtml } from '../../../lib/markdown';
 
 const seriesId = Number(Astro.params.id);
 if (!seriesId) return Astro.redirect('/series');
 
-const db = Astro.locals.runtime.env.DB as D1Database;
+const d1 = Astro.locals.runtime.env.DB as D1Database;
+const db = getDrizzle(d1);
 
-const series = await queryFirst<any>(
-  db,
+// Series detail with creator name — raw D1 for JOIN + alias
+const series = await d1.prepare(
   `SELECT s.*, p.name as creator_name, p.id as creator_pseud_id
    FROM series s JOIN pseuds p ON s.creator_pseud_id = p.id
-   WHERE s.id = ?1`,
-  seriesId
-);
+   WHERE s.id = ?1`
+).bind(seriesId).first<any>();
 if (!series) return Astro.redirect('/series');
 
-// Get works in series order
-const works = await queryAll<any>(
-  db,
+// Get works in series order — raw D1 for JOIN + position
+const worksResult = await d1.prepare(
   `SELECT w.*, sw.position as series_position
    FROM serial_works sw
    JOIN works w ON w.id = sw.work_id
    WHERE sw.series_id = ?1
-   ORDER BY sw.position`,
-  seriesId
-);
+   ORDER BY sw.position`
+).bind(seriesId).all<any>();
+const worksList = worksResult.results;
 
 // Enrich each work with tags, pseuds, and kudos
-for (const w of works) {
-  w.tags = await queryAll<any>(db, `SELECT t.name, t.type FROM tags t JOIN taggings tg ON t.id = tg.tag_id WHERE tg.work_id = ?1`, w.id);
-  w.pseuds = await queryAll<any>(db, `SELECT p.name, c.role FROM pseuds p JOIN creatorships c ON p.id = c.pseud_id WHERE c.work_id = ?1`, w.id);
-  w.kudos_count = (await queryFirst<any>(db, `SELECT COUNT(*) as cnt FROM kudos WHERE work_id = ?1`, w.id))?.cnt ?? 0;
+for (const w of worksList) {
+  w.tags = await db.select({ name: tags.name, type: tags.type })
+    .from(taggings).innerJoin(tags, eq(tags.id, taggings.tagId))
+    .where(eq(taggings.workId, w.id));
+  w.pseuds = await db.select({ name: pseudsTable.name, role: creatorships.role })
+    .from(creatorships).innerJoin(pseudsTable, eq(pseudsTable.id, creatorships.pseudId))
+    .where(eq(creatorships.workId, w.id));
+  const [kudoRow] = await db.select({ cnt: count() }).from(kudos).where(eq(kudos.workId, w.id));
+  w.kudos_count = kudoRow?.cnt ?? 0;
 }
 
 // Check auth for edit button
@@ -41,15 +47,16 @@ let isOwner = false;
 const cookie = Astro.request.headers.get('cookie') ?? '';
 const sessionMatch = cookie.match(/session=([a-f0-9]+)/);
 if (sessionMatch) {
-  const session = await queryFirst<any>(db, `SELECT user_id FROM sessions WHERE token = ?1 AND expires_at > datetime('now')`, sessionMatch[1]);
+  const session = await db.select({ userId: sessions.userId }).from(sessions)
+    .where(and(eq(sessions.token, sessionMatch[1]), gt(sessions.expiresAt, sql`datetime('now')`))).get();
   if (session) {
-    const pseuds = await queryAll<any>(db, `SELECT id FROM pseuds WHERE user_id = ?1`, session.user_id);
-    isOwner = pseuds.some(p => p.id === series.creator_pseud_id);
+    const userPseuds = await db.select({ id: pseudsTable.id }).from(pseudsTable).where(eq(pseudsTable.userId, session.userId));
+    isOwner = userPseuds.some(p => p.id === series.creator_pseud_id);
   }
 }
 
-const totalWords = works.reduce((sum: number, w: any) => sum + (w.word_count ?? 0), 0);
-const publishedWorks = works.filter((w: any) => w.published_at !== null);
+const totalWords = worksList.reduce((sum: number, w: any) => sum + (w.word_count ?? 0), 0);
+const publishedWorks = worksList.filter((w: any) => w.published_at !== null);
 ---
 
 <Base title={`${series.title} — fanfiction.fyi`}>
@@ -61,7 +68,7 @@ const publishedWorks = works.filter((w: any) => w.published_at !== null);
         <span>·</span>
         <span>{series.complete ? 'Complete' : 'Work in Progress'}</span>
         <span>·</span>
-        <span>{works.length} work{works.length !== 1 ? 's' : ''}</span>
+        <span>{worksList.length} work{worksList.length !== 1 ? 's' : ''}</span>
         {totalWords > 0 && <><span>·</span><span>{totalWords.toLocaleString()} words</span></>}
         <span>·</span>
         <span>Updated {new Date(series.updated_at).toLocaleDateString()}</span>
@@ -79,14 +86,14 @@ const publishedWorks = works.filter((w: any) => w.published_at !== null);
       )}
     </header>
 
-    {works.length === 0 ? (
+    {worksList.length === 0 ? (
       <div class="empty-state" role="status">
         <p>No works in this series yet.</p>
         {isOwner && <a href={`/series/${series.id}/edit`} class="btn-primary">Add Works</a>}
       </div>
     ) : (
       <ol class="series-works-list">
-        {works.map((w: any) => (
+        {worksList.map((w: any) => (
           <li class="series-work-item">
             <span class="series-position">Part {w.series_position}</span>
             <div class="series-work-info">

@@ -1,34 +1,59 @@
 ---
 export const prerender = false;
 import Base from '../../../layouts/Base.astro';
-import { queryFirst, queryAll } from '../../../lib/db';
+import { getDrizzle } from '../../../lib/db';
+import { collections, pseuds as pseudsTable, works as worksTable, collectionItems } from '../../../lib/schema';
+import { eq, and, isNotNull, sql } from 'drizzle-orm';
 
 const collectionId = Number(Astro.params.id);
 if (!collectionId) return Astro.redirect('/collections');
 
-const db = Astro.locals.runtime.env.DB as D1Database;
+const db = getDrizzle(Astro.locals.runtime.env.DB as D1Database);
 
-const collection = await queryFirst<any>(db,
-  `SELECT c.*, p.name as owner_name
-   FROM collections c
-   JOIN pseuds p ON c.owner_pseud_id = p.id
-   WHERE c.id = ?1`,
-  collectionId
-);
+const collectionRows = await db.select({
+  id: collections.id,
+  name: collections.name,
+  title: collections.title,
+  description: collections.description,
+  privacy: collections.privacy,
+  createdAt: collections.createdAt,
+  updatedAt: collections.updatedAt,
+  ownerPseudId: collections.ownerPseudId,
+  ownerName: pseudsTable.name,
+})
+  .from(collections)
+  .innerJoin(pseudsTable, eq(collections.ownerPseudId, pseudsTable.id))
+  .where(eq(collections.id, collectionId))
+  .get();
+
+const collection = collectionRows ? {
+  ...collectionRows,
+  owner_name: collectionRows.ownerName,
+  created_at: collectionRows.createdAt,
+} : null;
 
 if (!collection) return Astro.redirect('/collections');
 
 // Only show public/unrevealed
 if (!['public', 'unrevealed'].includes(collection.privacy)) return Astro.redirect('/collections');
 
-const works = await queryAll<any>(db,
-  `SELECT w.id, w.title, w.summary, w.word_count, w.published_at
-   FROM works w
-   JOIN collection_items ci ON w.id = ci.work_id
-   WHERE ci.collection_id = ?1
-     AND w.published_at IS NOT NULL`,
-  collectionId
-);
+const workRows = await db.select({
+  id: worksTable.id,
+  title: worksTable.title,
+  summary: worksTable.summary,
+  wordCount: worksTable.wordCount,
+  publishedAt: worksTable.publishedAt,
+})
+  .from(worksTable)
+  .innerJoin(collectionItems, eq(worksTable.id, collectionItems.workId))
+  .where(and(eq(collectionItems.collectionId, collectionId), isNotNull(worksTable.publishedAt)))
+  .all();
+
+const works = workRows.map(w => ({
+  ...w,
+  word_count: w.wordCount,
+  published_at: w.publishedAt,
+}));
 ---
 
 <Base title={`${collection.name} — fanfiction.fyi`}>

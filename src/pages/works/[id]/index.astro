@@ -2,37 +2,102 @@
 export const prerender = false;
 import Base from '../../../layouts/Base.astro';
 import TagCluster from '../../../components/TagCluster.tsx';
-import { queryFirst, queryAll } from '../../../lib/db';
+import { getDrizzle } from '../../../lib/db';
+import { works, chapters, creatorships, readings, sessions, users, pseuds as pseudsTable, tags, taggings, chapterReactions, comments, bookmarks, kudos, workRelations, serialWorks, series } from '../../../lib/schema';
+import { eq, and, isNull, isNotNull, desc, sql } from 'drizzle-orm';
 import { markdownToHtml } from '../../../lib/markdown';
 
 const workId = Number(Astro.params.id);
 if (!workId) return Astro.redirect('/works');
 
-const db = Astro.locals.runtime.env.DB as D1Database;
+const d1 = Astro.locals.runtime.env.DB as D1Database;
+const db = getDrizzle(d1);
 
-const work = await queryFirst<any>(db, `SELECT * FROM works WHERE id = ?1`, workId);
-if (!work) return Astro.redirect('/works');
+const workRow = await db.select().from(works).where(eq(works.id, workId)).get();
+if (!workRow) return Astro.redirect('/works');
 
-const chapters = await queryAll<any>(db, `SELECT id, position, title, draft, word_count, updated_at FROM chapters WHERE work_id = ?1 ORDER BY position`, workId);
+// Map to snake_case for template compatibility
+const work: any = {
+  ...workRow,
+  published_at: workRow.publishedAt,
+  updated_at: workRow.updatedAt,
+  created_at: workRow.createdAt,
+  end_notes: workRow.endNotes,
+  word_count: workRow.wordCount,
+};
+
+const chaptersRows = await db
+  .select({
+    id: chapters.id,
+    position: chapters.position,
+    title: chapters.title,
+    draft: chapters.draft,
+    wordCount: chapters.wordCount,
+    updatedAt: chapters.updatedAt,
+  })
+  .from(chapters)
+  .where(eq(chapters.workId, workId))
+  .orderBy(chapters.position);
+
+// Map to snake_case for template compatibility
+const chapters: any[] = chaptersRows.map(c => ({
+  ...c,
+  word_count: c.wordCount,
+  updated_at: c.updatedAt,
+}));
+
 const publishedChapters = chapters.filter(c => c.draft === 0);
-const tags = await queryAll<any>(db, `SELECT t.* FROM tags t JOIN taggings tg ON t.id = tg.tag_id WHERE tg.work_id = ?1`, workId);
-const pseuds = await queryAll<any>(db, `SELECT p.*, c.role FROM pseuds p JOIN creatorships c ON p.id = c.pseud_id WHERE c.work_id = ?1`, workId);
+
+const tagsRows = await db
+  .select({ id: tags.id, name: tags.name, type: tags.type })
+  .from(taggings)
+  .innerJoin(tags, eq(taggings.tagId, tags.id))
+  .where(eq(taggings.workId, workId));
+
+const pseudsRows = await db
+  .select({
+    id: pseudsTable.id,
+    userId: pseudsTable.userId,
+    name: pseudsTable.name,
+    iconKey: pseudsTable.iconKey,
+    role: creatorships.role,
+  })
+  .from(creatorships)
+  .innerJoin(pseudsTable, eq(creatorships.pseudId, pseudsTable.id))
+  .where(eq(creatorships.workId, workId));
+
+// Map to snake_case for template compatibility
+const tags: any[] = tagsRows;
+const pseuds: any[] = pseudsRows.map(p => ({ ...p, user_id: p.userId, icon_key: p.iconKey }));
 
 // Default chapter to display
 const chapterId = Number(Astro.url.searchParams.get('chapter')) || (publishedChapters[0]?.id ?? chapters[0]?.id);
-const chapter = chapterId ? await queryFirst<any>(db, `SELECT * FROM chapters WHERE id = ?1`, chapterId) : null;
+const chapterRow = chapterId ? await db.select().from(chapters).where(eq(chapters.id, chapterId)).get() : null;
+// Map to snake_case for template compatibility
+const chapter: any = chapterRow ? {
+  ...chapterRow,
+  content_html: chapterRow.contentHtml,
+  content_md: chapterRow.contentMd,
+  word_count: chapterRow.wordCount,
+} : null;
 
 // Check auth status
-let authUser = null;
+let authUser: any = null;
 let userPseudId: number | null = null;
 const cookie = Astro.request.headers.get('cookie') ?? '';
 const sessionMatch = cookie.match(/session=([a-f0-9]+)/);
 if (sessionMatch) {
-  const session = await queryFirst<any>(db, `SELECT user_id FROM sessions WHERE token = ?1 AND expires_at > datetime('now')`, sessionMatch[1]);
+  const session = await db.select({ userId: sessions.userId }).from(sessions)
+    .where(and(eq(sessions.token, sessionMatch[1]), sql`${sessions.expiresAt} > datetime('now')`))
+    .get();
   if (session) {
-    authUser = await queryFirst<any>(db, `SELECT * FROM users WHERE id = ?1`, session.user_id);
+    authUser = await db.select().from(users).where(eq(users.id, session.userId)).get();
     if (authUser) {
-      const userPseud = await queryFirst<any>(db, `SELECT id FROM pseuds WHERE user_id = ?1 ORDER BY id LIMIT 1`, authUser.id);
+      const userPseud = await db.select({ id: pseudsTable.id }).from(pseudsTable)
+        .where(eq(pseudsTable.userId, authUser.id))
+        .orderBy(pseudsTable.id)
+        .limit(1)
+        .get();
       userPseudId = userPseud?.id ?? null;
     }
   }
@@ -41,11 +106,19 @@ if (sessionMatch) {
 const isOwner = authUser && pseuds.some(p => p.user_id === authUser.id);
 
 // Series membership
-const seriesLinks = await queryAll<any>(
-  db,
-  `SELECT s.id, s.title, sw.position FROM serial_works sw JOIN series s ON s.id = sw.series_id WHERE sw.work_id = ?1 ORDER BY s.title`,
-  workId
-);
+const seriesLinksRows = await db
+  .select({
+    id: series.id,
+    title: series.title,
+    position: serialWorks.position,
+  })
+  .from(serialWorks)
+  .innerJoin(series, eq(serialWorks.seriesId, series.id))
+  .where(eq(serialWorks.workId, workId))
+  .orderBy(series.title);
+
+// Map to snake_case for template compatibility
+const seriesLinks: any[] = seriesLinksRows;
 
 // Work relations (lineage)
 const RELATION_LABELS: Record<string, string> = {
@@ -65,20 +138,47 @@ const INVERSE_LABELS: Record<string, string> = {
   fix_it_for: 'Fix-it for',
 };
 
-const outgoingRelations = await queryAll<any>(
-  db,
-  `SELECT wr.id, wr.related_work_id, wr.relation_type, w.title as related_title, w.published_at as related_published
-   FROM work_relations wr JOIN works w ON w.id = wr.related_work_id
-   WHERE wr.work_id = ?1 ORDER BY wr.created_at DESC`,
-  workId
-);
-const incomingRelations = await queryAll<any>(
-  db,
-  `SELECT wr.id, wr.work_id, wr.relation_type, w.title as source_title, w.published_at as source_published
-   FROM work_relations wr JOIN works w ON w.id = wr.work_id
-   WHERE wr.related_work_id = ?1 ORDER BY wr.created_at DESC`,
-  workId
-);
+const outgoingRelationsRows = await db
+  .select({
+    id: workRelations.id,
+    relatedWorkId: workRelations.relatedWorkId,
+    relationType: workRelations.relationType,
+    relatedTitle: works.title,
+    relatedPublished: works.publishedAt,
+  })
+  .from(workRelations)
+  .innerJoin(works, eq(workRelations.relatedWorkId, works.id))
+  .where(eq(workRelations.workId, workId))
+  .orderBy(desc(workRelations.createdAt));
+
+const outgoingRelations: any[] = outgoingRelationsRows.map(r => ({
+  ...r,
+  related_work_id: r.relatedWorkId,
+  relation_type: r.relationType,
+  related_title: r.relatedTitle,
+  related_published: r.relatedPublished,
+}));
+
+const incomingRelationsRows = await db
+  .select({
+    id: workRelations.id,
+    workId: workRelations.workId,
+    relationType: workRelations.relationType,
+    sourceTitle: works.title,
+    sourcePublished: works.publishedAt,
+  })
+  .from(workRelations)
+  .innerJoin(works, eq(workRelations.workId, works.id))
+  .where(eq(workRelations.relatedWorkId, workId))
+  .orderBy(desc(workRelations.createdAt));
+
+const incomingRelations: any[] = incomingRelationsRows.map(r => ({
+  ...r,
+  relation_type: r.relationType,
+  source_title: r.sourceTitle,
+  source_published: r.sourcePublished,
+}));
+
 const hasRelations = outgoingRelations.length > 0 || incomingRelations.length > 0;
 
 // Tag grouping now handled by TagCluster Preact component on the client
@@ -92,12 +192,25 @@ const totalChapterCount = chapters.length;
 const readingTimeMinutes = Math.max(1, Math.ceil((isOwner ? totalWordCount : (work.word_count || 0)) / 230));
 
 // Kudos count
-const kudosCount = (await queryFirst<any>(db, `SELECT COUNT(*) as cnt FROM kudos WHERE work_id = ?1`, workId))?.cnt ?? 0;
+const kudosResult = await db
+  .select({ cnt: sql<number>`count(${kudos.id})` })
+  .from(kudos)
+  .where(eq(kudos.workId, workId))
+  .get();
+const kudosCount = kudosResult?.cnt ?? 0;
 
 // Chapter reactions — counts for current chapter
-const reactionRows = chapterId
-  ? await queryAll<{ reaction: string; cnt: number }>(db, `SELECT reaction, COUNT(*) as cnt FROM chapter_reactions WHERE chapter_id = ?1 GROUP BY reaction`, chapterId)
-  : [];
+let reactionRows: { reaction: string; cnt: number }[] = [];
+if (chapterId) {
+  reactionRows = await db
+    .select({
+      reaction: chapterReactions.reaction,
+      cnt: sql<number>`count(${chapterReactions.id})`,
+    })
+    .from(chapterReactions)
+    .where(eq(chapterReactions.chapterId, chapterId))
+    .groupBy(chapterReactions.reaction);
+}
 const reactionCounts: Record<string, number> = {};
 for (const row of reactionRows) {
   reactionCounts[row.reaction] = row.cnt;
@@ -106,27 +219,74 @@ for (const row of reactionRows) {
 // User's own reactions for current chapter
 let myReactions: string[] = [];
 if (userPseudId && chapterId) {
-  const myRows = await queryAll<{ reaction: string }>(db, `SELECT reaction FROM chapter_reactions WHERE chapter_id = ?1 AND pseud_id = ?2`, chapterId, userPseudId);
+  const myRows = await db
+    .select({ reaction: chapterReactions.reaction })
+    .from(chapterReactions)
+    .where(and(eq(chapterReactions.chapterId, chapterId), eq(chapterReactions.pseudId, userPseudId)));
   myReactions = myRows.map(r => r.reaction);
 }
 
 // Work-level aggregate reaction summary (all chapters)
-const workReactionSummary = await queryAll<{ reaction: string; cnt: number }>(
-  db,
-  `SELECT cr.reaction, COUNT(*) as cnt FROM chapter_reactions cr JOIN chapters c ON c.id = cr.chapter_id WHERE c.work_id = ?1 GROUP BY cr.reaction ORDER BY cnt DESC`,
-  workId
-);
+const workReactionSummary = await db
+  .select({
+    reaction: chapterReactions.reaction,
+    cnt: sql<number>`count(${chapterReactions.id})`,
+  })
+  .from(chapterReactions)
+  .innerJoin(chapters, eq(chapterReactions.chapterId, chapters.id))
+  .where(eq(chapters.workId, workId))
+  .groupBy(chapterReactions.reaction)
+  .orderBy(desc(sql`count(${chapterReactions.id})`));
 
 // Bookmark & reading state for logged-in users
 let existingBookmark: any = null;
 let readingProgress: any = null;
 if (userPseudId) {
-  existingBookmark = await queryFirst<any>(db, `SELECT id, notes, private FROM bookmarks WHERE pseud_id = ?1 AND work_id = ?2`, userPseudId, workId);
-  readingProgress = await queryFirst<any>(db, `SELECT * FROM readings WHERE pseud_id = ?1 AND work_id = ?2`, userPseudId, workId);
+  const bm = await db.select({
+    id: bookmarks.id,
+    notes: bookmarks.notes,
+    private: bookmarks.private,
+  }).from(bookmarks)
+    .where(and(eq(bookmarks.pseudId, userPseudId), eq(bookmarks.workId, workId)))
+    .get();
+  existingBookmark = bm;
+
+  const rp = await db.select().from(readings)
+    .where(and(eq(readings.pseudId, userPseudId), eq(readings.workId, workId)))
+    .get();
+  if (rp) {
+    readingProgress = { ...rp, for_later: rp.forLater, last_chapter: rp.lastChapter };
+  }
 }
 
 // Comments — fetch all top-level + replies in one query, build tree client-side
-const allComments = await queryAll<any>(db, `SELECT c.*, p.name as pseud_name FROM comments c JOIN pseuds p ON c.pseud_id = p.id WHERE c.work_id = ?1 ORDER BY c.created_at ASC`, workId);
+const allCommentsRows = await db
+  .select({
+    id: comments.id,
+    workId: comments.workId,
+    chapterId: comments.chapterId,
+    pseudId: comments.pseudId,
+    parentId: comments.parentId,
+    content: comments.content,
+    createdAt: comments.createdAt,
+    pseudName: pseudsTable.name,
+  })
+  .from(comments)
+  .innerJoin(pseudsTable, eq(comments.pseudId, pseudsTable.id))
+  .where(eq(comments.workId, workId))
+  .orderBy(comments.createdAt);
+
+// Map to snake_case for template compatibility
+const allComments: any[] = allCommentsRows.map(c => ({
+  ...c,
+  parent_id: c.parentId,
+  pseud_name: c.pseudName,
+  created_at: c.createdAt,
+  chapter_id: c.chapterId,
+  work_id: c.workId,
+  pseud_id: c.pseudId,
+}));
+
 for (const c of allComments) {
   if (c.content) {
     c.content_html = markdownToHtml(c.content);
