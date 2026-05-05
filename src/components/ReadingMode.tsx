@@ -1,5 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'preact/hooks';
 import { useScrollDirection } from '../hooks/useScrollDirection';
+import { useKeyboardShortcuts, type ShortcutEntry } from '../hooks/useKeyboardShortcuts';
+import ShortcutsOverlay from './ShortcutsOverlay';
 import CanonSheet from './CanonSheet';
 
 interface Chapter {
@@ -317,41 +319,46 @@ export default function ReadingMode({
     });
   }, []);
 
-  // ── Keyboard shortcuts ──
-  useEffect(() => {
-    const prevHref = prevChapter ? `/works/${workId}/read?chapter=${prevChapter.id}` : null;
-    const nextHref = nextChapter ? `/works/${workId}/read?chapter=${nextChapter.id}` : null;
+  // ── Keyboard shortcuts (via hook) ──
+  const [shortcutsOverlayOpen, setShortcutsOverlayOpen] = useState(false);
 
-    function onKeyDown(e: KeyboardEvent) {
-      if (
-        (e.target as HTMLElement).tagName === 'INPUT' ||
-        (e.target as HTMLElement).tagName === 'TEXTAREA'
-      )
-        return;
-
-      // If sheet is open, only Escape is handled (by the sheet's own handler)
-      if (sheetOpen) {
-        if (e.key === 'c' || e.key === 'C') {
-          setSheetOpen(false);
-          return;
+  const handleBookmark = useCallback(async () => {
+    try {
+      const res = await fetch('/api/bookmarks', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ work_id: workId }),
+      });
+      if (res.ok) {
+        // Brief visual feedback — toggle FAB icon
+        const fab = document.querySelector('.focus-fab');
+        if (fab) {
+          fab.textContent = '✓';
+          setTimeout(() => { fab.textContent = '☰'; }, 1200);
         }
-        return;
       }
+    } catch { /* silently fail */ }
+  }, [workId]);
 
-      if (e.key === 'ArrowLeft' && prevHref) {
-        window.location.href = prevHref;
-      } else if (e.key === 'ArrowRight' && nextHref) {
-        window.location.href = nextHref;
-      } else if (e.key === 'Escape') {
-        window.location.href = `/works/${workId}`;
-      } else if (e.key === 'c' || e.key === 'C') {
-        setSheetOpen((prev) => !prev);
-      }
-    }
+  const readingShortcuts = [
+    { key: 'ArrowLeft', label: 'Previous chapter', group: 'Reading', callback: () => { if (prevChapter) window.location.href = `/works/${workId}/read?chapter=${prevChapter.id}`; } },
+    { key: 'ArrowRight', label: 'Next chapter', group: 'Reading', callback: () => { if (nextChapter) window.location.href = `/works/${workId}/read?chapter=${nextChapter.id}`; } },
+    { key: 'Escape', label: 'Exit reading', group: 'Reading', callback: () => { window.location.href = `/works/${workId}`; } },
+    { key: 'c', label: 'Toggle reading options', description: 'Focus sheet', group: 'Reading', callback: () => setSheetOpen((prev) => !prev) },
+    { key: 'b', label: 'Bookmark this work', group: 'Reading', callback: handleBookmark },
+    { key: '?', label: 'Show keyboard shortcuts', group: 'General', callback: () => setShortcutsOverlayOpen(true) },
+    { key: '/', label: 'Go to search', group: 'General', callback: () => { window.location.href = '/search'; } },
+  ];
 
-    document.addEventListener('keydown', onKeyDown);
-    return () => document.removeEventListener('keydown', onKeyDown);
-  }, [prevChapter, nextChapter, workId, sheetOpen]);
+  // Sheet-open overrides: Escape closes sheet, C closes sheet
+  const sheetShortcuts = [
+    { key: 'Escape', label: 'Close options', group: 'General', callback: () => setSheetOpen(false) },
+    { key: 'c', label: 'Close options', group: 'General', callback: () => setSheetOpen(false) },
+    { key: '?', label: 'Show keyboard shortcuts', group: 'General', callback: () => { setSheetOpen(false); setShortcutsOverlayOpen(true); } },
+  ];
+
+  const allShortcuts = sheetOpen ? sheetShortcuts : readingShortcuts;
+  const shortcutEntries: ShortcutEntry[] = useKeyboardShortcuts(allShortcuts);
 
   // ── Canon term delegated click listener on reading-container ──
   useEffect(() => {
@@ -554,8 +561,15 @@ export default function ReadingMode({
 
       {/* Keyboard Shortcuts Hint */}
       <div class={`reading-shortcuts${shortcutsVisible ? ' visible' : ''}`}>
-        <kbd>←</kbd> <kbd>→</kbd> chapters · <kbd>Esc</kbd> exit reading · <kbd>C</kbd> options
+        <kbd>←</kbd> <kbd>→</kbd> chapters · <kbd>B</kbd> bookmark · <kbd>C</kbd> options · <kbd>?</kbd> all shortcuts
       </div>
+
+      {/* Shortcuts Overlay */}
+      <ShortcutsOverlay
+        open={shortcutsOverlayOpen}
+        onClose={() => setShortcutsOverlayOpen(false)}
+        shortcuts={shortcutEntries}
+      />
 
       {/* Canon Deep-Dive Sheet */}
       <CanonSheet

@@ -1,6 +1,7 @@
 ---
 export const prerender = false;
 import Base from '../../layouts/Base.astro';
+import BrowseKeyboardNav from '../../components/BrowseKeyboardNav';
 import { getDrizzle } from '../../lib/db';
 import { tags, taggings, pseuds, creatorships } from '../../lib/schema';
 import { eq, sql, inArray } from 'drizzle-orm';
@@ -118,6 +119,8 @@ const initialFilters = { type, complete, word_min, word_max };
     initialResults={results}
     initialTotal={total}
   />
+
+  <BrowseKeyboardNav client:load />
 </Base>
 
 <style is:global>
