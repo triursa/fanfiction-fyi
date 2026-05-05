@@ -24,7 +24,8 @@ export default function ShortcutsModal() {
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       // Only trigger on Shift + ? (which is Shift + / on most keyboards)
-      if (e.shiftKey && e.key === '?' && !isEditableElement(e.target as HTMLElement)) {
+      // Allow from editable elements too so writers can open help while typing
+      if (e.shiftKey && e.key === '?') {
         e.preventDefault();
         setIsOpen((prev) => !prev);
       }
@@ -54,7 +55,7 @@ export default function ShortcutsModal() {
       class="shortcuts-overlay"
       onClick={handleOverlayClick}
     >
-      <div class="shortcuts-modal" role="dialog" aria-label="Keyboard shortcuts">
+      <div class="shortcuts-modal" role="dialog" aria-modal="true" aria-label="Keyboard shortcuts">
         <h3 class="shortcuts-title">Keyboard Shortcuts</h3>
         <div class="shortcuts-grid">
           {shortcuts.map((s) => (
@@ -70,12 +71,4 @@ export default function ShortcutsModal() {
       </div>
     </div>
   );
-}
-
-function isEditableElement(el: HTMLElement | null): boolean {
-  if (!el) return false;
-  const tag = el.tagName;
-  if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return true;
-  if (el.isContentEditable) return true;
-  return false;
 }

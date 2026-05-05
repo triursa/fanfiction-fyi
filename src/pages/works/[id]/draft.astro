@@ -908,10 +908,11 @@ const initialChapterData = JSON.stringify({
     const readTime = Math.max(1, Math.ceil(words / 200));
     wordCountEl.textContent = `${words.toLocaleString()} words · ${readTime} min read`;
     scheduleAutosave();
-    // localStorage autosave (2s debounce)
+    // localStorage autosave (2s debounce) — capture chapterId now, not when timer fires
     clearTimeout(localStorageSaveTimeout);
+    const chapterIdAtEdit = currentChapterId;
     localStorageSaveTimeout = setTimeout(() => {
-      saveDraftToLocal(workId, currentChapterId, md);
+      saveDraftToLocal(workId, chapterIdAtEdit, md);
     }, 2000);
     if (originalOnContentChange) originalOnContentChange(md);
   };
