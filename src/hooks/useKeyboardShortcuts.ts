@@ -31,7 +31,7 @@ function isEditable(el: EventTarget | null): boolean {
   const tag = el.tagName;
   if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return true;
   if (el.isContentEditable) return true;
-  if (el.closest('[data-testid="composer-editor"], .Prosemirror, .tiptap')) return true;
+  if (el.closest('[data-testid="composer-editor"], .ProseMirror, .tiptap')) return true;
   return false;
 }
 
@@ -74,7 +74,7 @@ export function useKeyboardShortcuts(
 }
 
 /**
- * Get unique shortcuts grouped for display
+ * Get shortcuts grouped for display
  */
 export function groupShortcuts(entries: ShortcutEntry[]): Record<string, ShortcutEntry[]> {
   const groups: Record<string, ShortcutEntry[]> = {};

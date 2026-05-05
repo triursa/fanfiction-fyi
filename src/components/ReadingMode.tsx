@@ -347,7 +347,6 @@ export default function ReadingMode({
     { key: 'c', label: 'Toggle reading options', description: 'Focus sheet', group: 'Reading', callback: () => setSheetOpen((prev) => !prev) },
     { key: 'b', label: 'Bookmark this work', group: 'Reading', callback: handleBookmark },
     { key: '?', label: 'Show keyboard shortcuts', group: 'General', callback: () => setShortcutsOverlayOpen(true) },
-    { key: '/', label: 'Go to search', group: 'General', callback: () => { window.location.href = '/search'; } },
   ];
 
   // Sheet-open overrides: Escape closes sheet, C closes sheet

@@ -11,7 +11,7 @@ interface BrowseKeyboardNavProps {
  * BrowseKeyboardNav — Adds J/K work-card navigation + ? overlay to browse/list pages.
  * Renders as nothing visible except the shortcuts overlay.
  */
-export default function BrowseKeyboardNav({ cardSelector = 'a.work-card, .work-card a' }: BrowseKeyboardNavProps) {
+export default function BrowseKeyboardNav({ cardSelector = '.work-card' }: BrowseKeyboardNavProps) {
   const [focusedIndex, setFocusedIndex] = useState(-1);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const cardsRef = useRef<HTMLElement[]>([]);
@@ -59,10 +59,14 @@ export default function BrowseKeyboardNav({ cardSelector = 'a.work-card, .work-c
   const openWork = useCallback(() => {
     const cards = cardsRef.current;
     if (focusedIndex >= 0 && focusedIndex < cards.length) {
-      // Find the closest link — the card itself might be an <a> or contain one
       const card = cards[focusedIndex];
-      const link = card.tagName === 'A' ? card : card.querySelector('a');
-      if (link && link.href) {
+      // Prefer the primary title link; fall back to first anchor in the card
+      const link =
+        card instanceof HTMLAnchorElement
+          ? card
+          : (card.querySelector<HTMLAnchorElement>('.work-card__title') ??
+             card.querySelector<HTMLAnchorElement>('a'));
+      if (link) {
         window.location.href = link.href;
       }
     }

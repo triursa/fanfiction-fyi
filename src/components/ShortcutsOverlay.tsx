@@ -7,31 +7,74 @@ interface ShortcutsOverlayProps {
   shortcuts: ShortcutEntry[];
 }
 
+const FOCUSABLE_SELECTOR = 'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])';
+
 export default function ShortcutsOverlay({ open, onClose, shortcuts }: ShortcutsOverlayProps) {
   const overlayRef = useRef<HTMLDivElement>(null);
+  const previousFocus = useRef<HTMLElement | null>(null);
 
+  // Save and restore focus around open/close transitions
+  useEffect(() => {
+    if (open) {
+      previousFocus.current = document.activeElement as HTMLElement;
+    } else {
+      if (previousFocus.current) {
+        previousFocus.current.focus();
+        previousFocus.current = null;
+      }
+    }
+  }, [open]);
+
+  // Focus trap and Escape/? to close
   useEffect(() => {
     if (!open) return;
 
+    // Focus first focusable element inside the dialog
+    requestAnimationFrame(() => {
+      if (overlayRef.current) {
+        const focusable = overlayRef.current.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR);
+        if (focusable.length) {
+          focusable[0].focus();
+        } else {
+          overlayRef.current.focus();
+        }
+      }
+    });
+
     function onKeyDown(e: KeyboardEvent) {
-      if (e.key === 'Escape') {
+      if (!overlayRef.current) return;
+
+      if (e.key === 'Escape' || e.key === '?') {
         e.preventDefault();
         e.stopPropagation();
         onClose();
+        return;
+      }
+
+      if (e.key === 'Tab') {
+        const focusable = overlayRef.current.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR);
+        if (focusable.length === 0) return;
+
+        const first = focusable[0];
+        const last = focusable[focusable.length - 1];
+
+        if (e.shiftKey) {
+          if (document.activeElement === first) {
+            e.preventDefault();
+            last.focus();
+          }
+        } else {
+          if (document.activeElement === last) {
+            e.preventDefault();
+            first.focus();
+          }
+        }
       }
     }
 
     document.addEventListener('keydown', onKeyDown, true);
     return () => document.removeEventListener('keydown', onKeyDown, true);
   }, [open, onClose]);
-
-  // Trap focus
-  useEffect(() => {
-    if (!open) return;
-    requestAnimationFrame(() => {
-      overlayRef.current?.focus();
-    });
-  }, [open]);
 
   if (!open) return null;
 
@@ -41,13 +84,14 @@ export default function ShortcutsOverlay({ open, onClose, shortcuts }: Shortcuts
     <div
       class="shortcuts-overlay-backdrop"
       onClick={onClose}
-      role="dialog"
-      aria-modal="true"
-      aria-label="Keyboard shortcuts"
+      aria-hidden="true"
     >
       <div
         ref={overlayRef}
         class="shortcuts-overlay"
+        role="dialog"
+        aria-modal="true"
+        aria-label="Keyboard shortcuts"
         onClick={(e) => e.stopPropagation()}
         tabIndex={-1}
       >
