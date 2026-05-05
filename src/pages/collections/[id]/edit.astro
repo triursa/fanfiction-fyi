@@ -8,10 +8,12 @@ import { eq } from 'drizzle-orm';
 
 const d1 = Astro.locals.runtime.env.DB as D1Database;
 const db = getDrizzle(d1);
-const auth = await getAuth(db, Astro.request);
+const auth = await getAuth(d1, Astro.request);
 if (!auth) return Astro.redirect('/login');
 const approval = checkApproved(auth);
-if ('forbidden' in approval) return Astro.redirect('/login');
+if ('forbidden' in approval) {
+  return Astro.redirect(approval.forbidden === 'unapproved' ? '/pending-approval' : '/login?error=banned');
+}
 
 const collectionId = Number(Astro.params.id);
 if (!collectionId) return Astro.redirect('/collections');
@@ -49,9 +51,6 @@ if (!pseudIds.includes(collection.ownerPseudId)) return Astro.redirect('/collect
         <div class="form-field">
           <label for="coll-privacy">Privacy</label>
           <select id="coll-privacy" name="privacy">
-            <option value="open" selected={collection.privacy === 'open'}>Open — Anyone can add works</option>
-            <option value="moderated" selected={collection.privacy === 'moderated'}>Moderated — Submissions need approval</option>
-            <option value="closed" selected={collection.privacy === 'closed'}>Closed — Only you can add works</option>
             <option value="public" selected={collection.privacy === 'public'}>Public — Visible to everyone</option>
             <option value="unrevealed" selected={collection.privacy === 'unrevealed'}>Unrevealed — Hidden until reveal</option>
             <option value="private" selected={collection.privacy === 'private'}>Private — Only visible to you</option>

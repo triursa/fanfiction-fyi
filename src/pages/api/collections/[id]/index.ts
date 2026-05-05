@@ -107,6 +107,11 @@ export const PUT: APIRoute = async ({ params, request, locals }) => {
   const auth = await requireAuth(d1, request);
   if (!auth) return new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401, headers: { 'Content-Type': 'application/json' } });
 
+  const approval = checkApproved(auth);
+  if ('forbidden' in approval) {
+    return new Response(JSON.stringify({ error: approval.forbidden === 'banned' ? 'Account suspended' : 'Account not yet approved' }), { status: 403, headers: { 'Content-Type': 'application/json' } });
+  }
+
   const collectionId = Number(params.id);
   if (!collectionId || isNaN(collectionId)) {
     return new Response(JSON.stringify({ error: 'Not found' }), { status: 404, headers: { 'Content-Type': 'application/json' } });
@@ -133,7 +138,7 @@ export const PUT: APIRoute = async ({ params, request, locals }) => {
   if (title !== undefined) updates.title = title;
   if (description !== undefined) updates.description = description;
   if (privacy !== undefined) {
-    const validPrivacy = ['open', 'moderated', 'closed', 'private', 'public', 'unrevealed'];
+    const validPrivacy = ['public', 'unrevealed', 'private'];
     if (validPrivacy.includes(privacy)) updates.privacy = privacy;
   }
 
@@ -155,6 +160,11 @@ export const DELETE: APIRoute = async ({ params, request, locals }) => {
   const db = getDrizzle(d1);
   const auth = await requireAuth(d1, request);
   if (!auth) return new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401, headers: { 'Content-Type': 'application/json' } });
+
+  const approval = checkApproved(auth);
+  if ('forbidden' in approval) {
+    return new Response(JSON.stringify({ error: approval.forbidden === 'banned' ? 'Account suspended' : 'Account not yet approved' }), { status: 403, headers: { 'Content-Type': 'application/json' } });
+  }
 
   const collectionId = Number(params.id);
   if (!collectionId || isNaN(collectionId)) {

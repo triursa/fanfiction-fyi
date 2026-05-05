@@ -6,10 +6,12 @@ import { getDrizzle } from '../../lib/db';
 
 const d1 = Astro.locals.runtime.env.DB as D1Database;
 const db = getDrizzle(d1);
-const auth = await getAuth(db, Astro.request);
+const auth = await getAuth(d1, Astro.request);
 if (!auth) return Astro.redirect('/login');
 const approval = checkApproved(auth);
-if ('forbidden' in approval) return Astro.redirect('/login');
+if ('forbidden' in approval) {
+  return Astro.redirect(approval.forbidden === 'unapproved' ? '/pending-approval' : '/login?error=banned');
+}
 ---
 
 <Base title="New Collection — fanfiction.fyi">
@@ -38,14 +40,25 @@ if ('forbidden' in approval) return Astro.redirect('/login');
         <div class="form-field">
           <label for="coll-privacy">Privacy</label>
           <select id="coll-privacy" name="privacy">
-            <option value="open">Open — Anyone can add works</option>
-            <option value="moderated">Moderated — Submissions need approval</option>
-            <option value="closed">Closed — Only you can add works</option>
             <option value="public">Public — Visible to everyone</option>
             <option value="unrevealed">Unrevealed — Hidden until reveal</option>
             <option value="private">Private — Only visible to you</option>
           </select>
         </div>
+
+        {auth.pseuds.length > 1 && (
+          <div class="form-field">
+            <label for="coll-pseud">Post as Pseud</label>
+            <select id="coll-pseud" name="pseud_id">
+              {auth.pseuds.map(p => (
+                <option value={p.id} selected={p.isDefault === 1}>{p.name}</option>
+              ))}
+            </select>
+          </div>
+        )}
+        {auth.pseuds.length === 1 && (
+          <input type="hidden" name="pseud_id" value={auth.pseuds[0].id} />
+        )}
 
         <div id="coll-error" class="form-error" role="alert"></div>
 
@@ -237,6 +250,7 @@ if ('forbidden' in approval) return Astro.redirect('/login');
           title,
           description: (document.getElementById('coll-description') as HTMLTextAreaElement).value.trim() || undefined,
           privacy: (document.getElementById('coll-privacy') as HTMLSelectElement).value,
+          pseud_id: Number((form.querySelector('[name="pseud_id"]') as HTMLInputElement | HTMLSelectElement).value),
         }),
       });
 

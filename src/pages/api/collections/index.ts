@@ -48,44 +48,45 @@ export const GET: APIRoute = async ({ locals, request }) => {
 };
 
 export const POST: APIRoute = async ({ request, locals }) => {
+  const cors = corsHeaders(request);
   const d1 = locals.runtime.env.DB as D1Database;
   const db = getDrizzle(d1);
   const auth = await requireAuth(d1, request);
-  if (!auth) return new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401, headers: { 'Content-Type': 'application/json' } });
+  if (!auth) return new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401, headers: { 'Content-Type': 'application/json', ...cors } });
 
   const approval = checkApproved(auth);
   if ('forbidden' in approval) {
-    return new Response(JSON.stringify({ error: approval.forbidden === 'banned' ? 'Account suspended' : 'Account not yet approved' }), { status: 403, headers: { 'Content-Type': 'application/json' } });
+    return new Response(JSON.stringify({ error: approval.forbidden === 'banned' ? 'Account suspended' : 'Account not yet approved' }), { status: 403, headers: { 'Content-Type': 'application/json', ...cors } });
   }
 
   let body: any;
   try { body = await request.json(); } catch {
-    return new Response(JSON.stringify({ error: 'Invalid JSON' }), { status: 400, headers: { 'Content-Type': 'application/json' } });
+    return new Response(JSON.stringify({ error: 'Invalid JSON' }), { status: 400, headers: { 'Content-Type': 'application/json', ...cors } });
   }
 
   const { name, title, description, privacy } = body || {};
   if (!name || !title) {
-    return new Response(JSON.stringify({ error: 'Name and title are required' }), { status: 400, headers: { 'Content-Type': 'application/json' } });
+    return new Response(JSON.stringify({ error: 'Name and title are required' }), { status: 400, headers: { 'Content-Type': 'application/json', ...cors } });
   }
 
   if (!/^[a-z0-9_-]{2,64}$/.test(name)) {
-    return new Response(JSON.stringify({ error: 'Name must be 2-64 characters: lowercase letters, numbers, hyphens, underscores' }), { status: 400, headers: { 'Content-Type': 'application/json' } });
+    return new Response(JSON.stringify({ error: 'Name must be 2-64 characters: lowercase letters, numbers, hyphens, underscores' }), { status: 400, headers: { 'Content-Type': 'application/json', ...cors } });
   }
 
   const pseudId = body?.pseud_id && auth.pseuds.some((p: any) => p.id === Number(body.pseud_id))
     ? Number(body.pseud_id)
     : auth.pseuds[0]?.id;
   if (!pseudId) {
-    return new Response(JSON.stringify({ error: 'No pseud found' }), { status: 400, headers: { 'Content-Type': 'application/json' } });
+    return new Response(JSON.stringify({ error: 'No pseud found' }), { status: 400, headers: { 'Content-Type': 'application/json', ...cors } });
   }
 
   const existing = await db.select({ id: collections.id }).from(collections).where(eq(collections.name, name)).get();
   if (existing) {
-    return new Response(JSON.stringify({ error: 'Collection URL name already taken' }), { status: 409, headers: { 'Content-Type': 'application/json' } });
+    return new Response(JSON.stringify({ error: 'Collection URL name already taken' }), { status: 409, headers: { 'Content-Type': 'application/json', ...cors } });
   }
 
-  const validPrivacy = ['open', 'moderated', 'closed', 'private', 'public', 'unrevealed'];
-  const privacyValue = validPrivacy.includes(privacy) ? privacy : 'open';
+  const validPrivacy = ['public', 'unrevealed', 'private'];
+  const privacyValue = validPrivacy.includes(privacy) ? privacy : 'public';
 
   try {
     const [inserted] = await db.insert(collections).values({
@@ -103,11 +104,11 @@ export const POST: APIRoute = async ({ request, locals }) => {
       description: inserted.description,
       privacy: inserted.privacy,
       created_at: inserted.createdAt,
-    }), { status: 201, headers: { 'Content-Type': 'application/json' } });
+    }), { status: 201, headers: { 'Content-Type': 'application/json', ...cors } });
   } catch (e: any) {
     if (e.message?.includes('UNIQUE constraint failed')) {
-      return new Response(JSON.stringify({ error: 'Collection URL name already taken' }), { status: 409, headers: { 'Content-Type': 'application/json' } });
+      return new Response(JSON.stringify({ error: 'Collection URL name already taken' }), { status: 409, headers: { 'Content-Type': 'application/json', ...cors } });
     }
-    return new Response(JSON.stringify({ error: 'Failed to create collection' }), { status: 500, headers: { 'Content-Type': 'application/json' } });
+    return new Response(JSON.stringify({ error: 'Failed to create collection' }), { status: 500, headers: { 'Content-Type': 'application/json', ...cors } });
   }
 };
