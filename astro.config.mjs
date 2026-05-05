@@ -3,6 +3,7 @@ import preact from '@astrojs/preact';
 import cloudflare from '@astrojs/cloudflare';
 
 export default defineConfig({
+  telemetry: false,
   site: 'https://fanfiction.fyi',
   output: 'server',
   adapter: cloudflare({
