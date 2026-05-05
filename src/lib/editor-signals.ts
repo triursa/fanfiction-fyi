@@ -5,6 +5,14 @@ export const editorContent = signal('');
 export const editorImageKeys = signal<string[]>([]);
 
 /**
+ * Canonical word count signal, derived from the editor's text content.
+ * Updated by the Editor component on every content change. Using this
+ * instead of counting words from markdown prevents 0-word bugs when
+ * htmlToMarkdown produces empty or degraded output on large paste events.
+ */
+export const editorWordCount = signal(0);
+
+/**
  * Set content in the editor from outside the Preact component tree.
  * The Editor component registers a handler on mount that actually updates the TipTap editor.
  * Callers invoke it as `editorSetContent.value?.(md)`.

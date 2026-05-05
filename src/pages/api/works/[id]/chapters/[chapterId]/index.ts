@@ -68,7 +68,16 @@ export const PUT: APIRoute = async ({ params, request, locals }) => {
     if (body.content_md !== undefined) {
       updateValues.contentMd = body.content_md;
       updateValues.contentHtml = markdownToHtml(body.content_md);
-      updateValues.wordCount = body.content_md.split(/\s+/).filter(Boolean).length;
+      // Calculate word count from markdown content. If markdown appears empty
+      // (e.g. htmlToMarkdown failed on a large paste), fall back to counting
+      // words from the rendered HTML instead.
+      let wordCount = body.content_md.split(/\s+/).filter(Boolean).length;
+      if (wordCount === 0 && updateValues.contentHtml) {
+        // Strip HTML tags and count words from the plain text
+        const plainText = updateValues.contentHtml.replace(/<[^>]*>/g, ' ').replace(/&\w+;/g, ' ').replace(/\s+/g, ' ').trim();
+        wordCount = plainText ? plainText.split(/\s+/).length : 0;
+      }
+      updateValues.wordCount = wordCount;
     }
     if (body.position !== undefined) updateValues.position = body.position;
     if (body.draft !== undefined) updateValues.draft = body.draft ? 1 : 0;
