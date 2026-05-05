@@ -157,15 +157,16 @@ const initialChapterData = JSON.stringify({
           <button type="button" id="add-chapter-btn" class="m3-btn-text" title="Add new chapter">+ Add</button>
         </div>
         <nav class="draft-chapter-list" id="chapter-list" role="list">
-          {chapters.map((c, i) => (
+          {chapterList.map((c, i) => (
             <div
               class={`draft-chapter-item ${i === 0 ? 'draft-chapter-item--active' : ''} ${c.draft ? 'draft-chapter-item--draft' : ''}`}
               data-chapter-id={c.id}
               data-position={c.position}
               role="listitem"
+              tabindex="0"
             >
-              <button type="button" class="draft-chapter-reorder-btn" data-dir="up" title="Move chapter up" disabled={i === 0}>↑</button>
-              <button type="button" class="draft-chapter-reorder-btn" data-dir="down" title="Move chapter down" disabled={i === chapters.length - 1}>↓</button>
+              <button type="button" class="draft-chapter-reorder-btn" data-dir="up" aria-label="Move chapter up" disabled={i === 0} aria-disabled={i === 0 ? "true" : "false"}>↑</button>
+              <button type="button" class="draft-chapter-reorder-btn" data-dir="down" aria-label="Move chapter down" disabled={i === chapterList.length - 1} aria-disabled={i === chapterList.length - 1 ? "true" : "false"}>↓</button>
               <span class="draft-chapter-item-title">Ch. {c.position}: {c.title}</span>
               <span class={`m3-badge ${c.draft ? 'm3-badge-draft' : 'm3-badge-published'}`}>
                 {c.draft ? 'Draft' : 'Published'}
@@ -328,6 +329,11 @@ const initialChapterData = JSON.stringify({
 
   .draft-chapter-item:hover {
     background: var(--md-sys-color-surface-container);
+  }
+
+  .draft-chapter-item:focus-visible {
+    outline: 2px solid var(--md-sys-color-primary);
+    outline-offset: -2px;
   }
 
   .draft-chapter-item--active {
@@ -701,13 +707,10 @@ const initialChapterData = JSON.stringify({
     checkLocalStorageDraft();
   }
 
-  // Bind chapter click handlers
-  document.querySelectorAll('.draft-chapter-item').forEach(btn => {
-    btn.addEventListener('click', () => {
-      const id = Number(btn.dataset.chapterId);
-      selectChapter(id);
-    });
-  });
+  // Render chapter list on init to wire up all event listeners
+  // (reorder buttons and chapter row clicks). This replaces the SSR-rendered
+  // list so both sets of handlers are always present from first interaction.
+  renderChapterList();
 
   // ── Add Chapter ──
   addChapterBtn.addEventListener('click', async () => {
@@ -746,28 +749,37 @@ const initialChapterData = JSON.stringify({
     chapterList.innerHTML = sorted
       .map((c, i) => `
         <div class="draft-chapter-item ${c.id === currentChapterId ? 'draft-chapter-item--active' : ''} ${c.draft ? 'draft-chapter-item--draft' : ''}"
-          data-chapter-id="${escapeHtml(String(c.id))}" data-position="${escapeHtml(String(c.position))}" role="listitem">
-          <button type="button" class="draft-chapter-reorder-btn" data-dir="up" title="Move chapter up" ${i === 0 ? 'disabled' : ''}>↑</button>
-          <button type="button" class="draft-chapter-reorder-btn" data-dir="down" title="Move chapter down" ${i === sorted.length - 1 ? 'disabled' : ''}>↓</button>
+          data-chapter-id="${escapeHtml(String(c.id))}" data-position="${escapeHtml(String(c.position))}" role="listitem" tabindex="0">
+          <button type="button" class="draft-chapter-reorder-btn" data-dir="up" aria-label="Move chapter up" ${i === 0 ? 'disabled aria-disabled="true"' : 'aria-disabled="false"'}>↑</button>
+          <button type="button" class="draft-chapter-reorder-btn" data-dir="down" aria-label="Move chapter down" ${i === sorted.length - 1 ? 'disabled aria-disabled="true"' : 'aria-disabled="false"'}>↓</button>
           <span class="draft-chapter-item-title">Ch. ${escapeHtml(String(i + 1))}: ${escapeHtml(c.title)}</span>
           <span class="m3-badge ${c.draft ? 'm3-badge-draft' : 'm3-badge-published'}">${c.draft ? 'Draft' : 'Published'}</span>
         </div>
       `).join('');
-    // Re-bind click handlers (clicking the row, not the reorder buttons)
+    // Bind click and keyboard handlers on chapter rows
     document.querySelectorAll('.draft-chapter-item').forEach(el => {
       el.addEventListener('click', (e) => {
         // Ignore clicks on reorder buttons
-        if (e.target.closest('.draft-chapter-reorder-btn')) return;
-        const id = Number(el.dataset.chapterId);
+        if ((e.target as Element).closest('.draft-chapter-reorder-btn')) return;
+        const id = Number((el as HTMLElement).dataset.chapterId);
         selectChapter(id);
+      });
+      el.addEventListener('keydown', (e) => {
+        const ke = e as KeyboardEvent;
+        if (ke.key === 'Enter' || ke.key === ' ') {
+          if ((ke.target as Element).closest('.draft-chapter-reorder-btn')) return;
+          ke.preventDefault();
+          const id = Number((el as HTMLElement).dataset.chapterId);
+          selectChapter(id);
+        }
       });
     });
     // Bind reorder buttons
     document.querySelectorAll('.draft-chapter-reorder-btn').forEach(btn => {
       btn.addEventListener('click', (e) => {
         e.stopPropagation();
-        const dir = btn.dataset.dir;
-        const chapterId = Number(btn.closest('.draft-chapter-item')?.dataset.chapterId);
+        const dir = (btn as HTMLElement).dataset.dir;
+        const chapterId = Number((btn as HTMLElement).closest('.draft-chapter-item')?.dataset.chapterId);
         if (chapterId) reorderChapter(chapterId, dir);
       });
     });
@@ -800,9 +812,15 @@ const initialChapterData = JSON.stringify({
         return;
       }
       const data = await res.json();
-      // Update local model from server response
+      // Update local model from server response (API returns snake_case word_count)
       if (data.chapters) {
-        work.chapters = data.chapters;
+        work.chapters = data.chapters.map(c => ({
+          id: c.id,
+          position: c.position,
+          title: c.title,
+          draft: c.draft,
+          word_count: c.word_count ?? 0,
+        }));
       } else {
         // Fallback: update positions locally
         sorted.forEach((c, i) => { c.position = i + 1; });
