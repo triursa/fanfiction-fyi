@@ -1,0 +1,94 @@
+---
+export const prerender = false;
+import Base from '../layouts/Base.astro';
+---
+
+<Base title="Awaiting Approval — fanfiction.fyi">
+  <div class="pending-page">
+    <div class="pending-card">
+      <div class="pending-icon">
+        <svg width="48" height="48" viewBox="0 0 24 24" fill="none">
+          <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z" fill="currentColor" opacity="0.2"/>
+          <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z" fill="currentColor" opacity="0.6"/>
+        </svg>
+      </div>
+      <h1 class="pending-title">You're Almost There</h1>
+      <p class="pending-message">
+        Your account has been created and is awaiting administrator approval.
+        You'll receive access once your account has been reviewed.
+      </p>
+      <p class="pending-sub">
+        This usually happens within 24 hours. You'll be able to sign in as soon as you're approved.
+      </p>
+      <div class="pending-actions">
+        <a href="/" class="m3-btn-tonal">Return Home</a>
+      </div>
+    </div>
+  </div>
+</Base>
+
+<style is:global>
+  .pending-page {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 60vh;
+    padding: var(--space-8) var(--space-4);
+  }
+
+  .pending-card {
+    text-align: center;
+    max-width: 480px;
+    padding: var(--space-12) var(--space-8);
+    border-radius: 28px;
+    background: var(--md-sys-color-surface-container);
+    border: 1px solid var(--md-sys-color-outline-variant);
+  }
+
+  .pending-icon {
+    color: var(--md-sys-color-primary);
+    margin-bottom: var(--space-4);
+  }
+
+  .pending-title {
+    font: var(--md-sys-typescale-headline-medium);
+    color: var(--md-sys-color-on-surface);
+    margin: 0 0 var(--space-3) 0;
+  }
+
+  .pending-message {
+    font: var(--md-sys-typescale-body-large);
+    color: var(--md-sys-color-on-surface-variant);
+    margin: 0 0 var(--space-3) 0;
+    line-height: 1.5;
+  }
+
+  .pending-sub {
+    font: var(--md-sys-typescale-body-medium);
+    color: var(--md-sys-color-on-surface-variant);
+    margin: 0 0 var(--space-6) 0;
+    opacity: 0.8;
+  }
+
+  .pending-actions {
+    display: flex;
+    justify-content: center;
+  }
+
+  .pending-actions .m3-btn-tonal {
+    display: inline-flex;
+    align-items: center;
+    padding: var(--space-2) var(--space-5);
+    border-radius: 20px;
+    text-decoration: none;
+    font: var(--md-sys-typescale-label-large);
+    background: var(--md-sys-color-secondary-container);
+    color: var(--md-sys-color-on-secondary-container);
+    transition: background var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard);
+  }
+
+  .pending-actions .m3-btn-tonal:hover {
+    background: var(--md-sys-color-secondary);
+    color: var(--md-sys-color-on-secondary);
+  }
+</style>
