@@ -37,19 +37,19 @@
 
 ---
 
-## Phase 2: Editor QOL (TipTap)
+## Phase 2: Editor QOL (TipTap) ✅ COMPLETE
 **Goal:** Make the drafting experience premium — this is the core product differentiator.
-**Effort:** ~2-3 days
+**Effort:** ~2-3 days → Completed
 
-| # | Item | Why |
-|---|------|-----|
-| 2.1 | Slash commands menu | Install `@tiptap/slash-commands` (or `tiptap-markdown` + custom extension). Keyboard-driven formatting — `/h1`, `/bold`, `/italic`, `/quote`, `/code`, `/image`. Matches the "hands stay on keyboard" writer flow. |
-| 2.2 | Autosave to localStorage | On every TipTap `onUpdate`, debounce 2s, write `editorMarkdown` + `currentChapterId` to `localStorage`. On mount, check localStorage before fetching from D1. Add "Restore draft?" banner if stale content found. Clear localStorage on successful server save. |
-| 2.3 | Word count + reading time bubble | `@tiptap/character-count` is already installed. Wire `editor.storage.characterCount.words` → floating indicator. Reading time = `words ÷ 200`. Display in editor footer bar. |
-| 2.4 | Keyboard shortcuts cheat sheet | `?` key toggles a floating shortcut modal (Ctrl+B, Ctrl+I, Ctrl+K, etc.). Standard AO3/Google Docs pattern. |
-| 2.5 | Improved image upload feedback | R2 uploads already work, but add: drag-over highlight state, upload progress bar, inline thumbnail preview before save. |
+||| # | Item | Status |||
+|||---|------|--------|||
+||| 2.1 | Slash commands menu | ✅ Done — custom TipTap extension + `SlashCommandMenu.tsx`. `/h1`–`/h3`, `/bold`, `/italic`, `/quote`, `/code`, `/image`, `/link`, `/hr`, `/ordered-list`, `/bullet-list`. Keyboard nav (↑↓, Enter, Esc), filters by query. ||
+||| 2.2 | Autosave to localStorage | ✅ Done — `localstorage-draft.ts`. 2s debounce on `onUpdate`, `ffy-draft-{workId}-{chapterId}` key. "Restore draft?" banner with discard option. Cleared on server save + chapter switch. ||
+||| 2.3 | Word count + reading time | ✅ Done — `"1,234 words · 6 min read"` format in draft bottom bar + editor footer. Uses `editor.storage.characterCount.words()`. ||
+||| 2.4 | Keyboard shortcuts cheat sheet | ✅ Done — `ShortcutsModal.tsx`. `Shift+?` triggers floating modal. M3-styled. Closes on Esc/click-outside. ||
+||| 2.5 | Improved image upload feedback | ✅ Done — XHR upload with progress bar + percentage. Drag-over highlight (`tiptap-wrapper--dragover`). Image insert animation (`tiptap-image-insert` keyframe). ||
 
-**Verification:** Type `/bold` → text boldens. Close tab mid-edit → reopen → draft restored. Word count updates live. Shortcuts modal appears on `?`.
+**Verification:** ✅ Build passes. Type `/bold` → text boldens. Close tab mid-edit → reopen → draft restored. Word count + reading time updates live. `Shift+?` shows shortcuts. Drag-over + progress bar on image upload.
 
 ---
 
