@@ -501,7 +501,7 @@ const initialChapterData = JSON.stringify({
 </style>
 
 <script define:vars={{ workId, workData, initialChapterData }}>
-  import { editorMarkdown, editorSetContent, editorOnContentChange } from '../../../lib/editor-signals';
+  import { editorMarkdown, editorHtml, editorWordCount, editorSetContent, editorOnContentChange } from '../../../lib/editor-signals';
   import { saveDraftToLocal, loadDraftFromLocal, clearDraftFromLocal } from '../../../lib/localstorage-draft';
 
   const work = JSON.parse(workData);
@@ -527,6 +527,16 @@ const initialChapterData = JSON.stringify({
   const initialReadTime = Math.max(1, Math.ceil(initialWords / 200));
   wordCountEl.textContent = `${initialWords.toLocaleString()} words · ${initialReadTime} min read`;
 
+  // Helper: update the word count display from the editor's canonical word count signal.
+  // Uses editorWordCount (derived from TipTap getText()) instead of counting
+  // from markdown, which can return 0 when htmlToMarkdown degrades content
+  // on large paste events (fixes #45).
+  function updateWordCountDisplay() {
+    const words = editorWordCount.value;
+    const readTime = Math.max(1, Math.ceil(words / 200));
+    wordCountEl.textContent = `${words.toLocaleString()} words · ${readTime} min read`;
+  }
+
   // ── localStorage Draft Restore ──
   // Check if localStorage has a newer draft for the current chapter
   function checkLocalStorageDraft() {
@@ -546,10 +556,8 @@ const initialChapterData = JSON.stringify({
       if (setFn) {
         setFn(localDraft.markdown);
       }
-      // Update word count
-      const words = localDraft.markdown.split(/\s+/).filter(Boolean).length;
-      const readTime = Math.max(1, Math.ceil(words / 200));
-      wordCountEl.textContent = `${words.toLocaleString()} words · ${readTime} min read`;
+      // editorSetContent synchronously updates editorWordCount; update the display immediately.
+      updateWordCountDisplay();
       showToast('Draft restored from local backup', 'success');
     }
     clearDraftFromLocal(workId, currentChapterId);
@@ -647,9 +655,8 @@ const initialChapterData = JSON.stringify({
         if (setFn) {
           setFn(contentMd);
         }
-        const words = contentMd.split(/\s+/).filter(Boolean).length;
-        const readTime = Math.max(1, Math.ceil(words / 200));
-        wordCountEl.textContent = `${words.toLocaleString()} words · ${readTime} min read`;
+        // editorSetContent synchronously updates editorWordCount; update the display immediately.
+        updateWordCountDisplay();
       }
     } catch {
       // Content loaded from cache, editor already populated
@@ -763,10 +770,11 @@ const initialChapterData = JSON.stringify({
       const res = await fetch(`/api/works/${workId}/chapters/${currentChapterId}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ title, content_md: contentMd, draft: draft ? 1 : 0 }),
+        body: JSON.stringify({ title, content_md: contentMd, content_html: editorHtml.value, draft: draft ? 1 : 0 }),
       });
       clientLog('saveChapter_response', `status=${res.status} ok=${res.ok}`);
       if (res.ok) {
+        const savedChapter = await res.json().catch(() => ({}));
         // Only clear dirty flag if no new edits happened while we were saving
         const contentNow = editorMarkdown.value || '';
         if (contentNow === contentAtSaveStart) {
@@ -780,17 +788,16 @@ const initialChapterData = JSON.stringify({
           autosaveStatus.textContent = 'Auto-saved';
           autosaveStatus.style.color = 'var(--md-sys-color-outline)';
         }
-        // Update local chapter data
+        // Update local chapter data using the server's persisted word_count so the
+        // UI stays in sync with what was actually stored (not a client-side estimate).
         const ch = work.chapters.find((c) => c.id === currentChapterId);
         if (ch) {
           ch.title = title;
           ch.draft = draft;
-          ch.word_count = contentMd.split(/\s+/).filter(Boolean).length;
+          ch.word_count = savedChapter.wordCount ?? savedChapter.word_count ?? editorWordCount.value;
         }
         renderChapterList();
-        const words = contentMd.split(/\s+/).filter(Boolean).length;
-        const readTime = Math.max(1, Math.ceil(words / 200));
-        wordCountEl.textContent = `${words.toLocaleString()} words · ${readTime} min read`;
+        updateWordCountDisplay();
         // Clear localStorage backup on successful server save
         clearDraftFromLocal(workId, currentChapterId);
         return true;
@@ -904,9 +911,7 @@ const initialChapterData = JSON.stringify({
   let localStorageSaveTimeout;
   const originalOnContentChange = editorOnContentChange.value;
   editorOnContentChange.value = (md) => {
-    const words = md.split(/\s+/).filter(Boolean).length;
-    const readTime = Math.max(1, Math.ceil(words / 200));
-    wordCountEl.textContent = `${words.toLocaleString()} words · ${readTime} min read`;
+    updateWordCountDisplay();
     scheduleAutosave();
     // localStorage autosave (2s debounce) — capture chapterId now, not when timer fires
     clearTimeout(localStorageSaveTimeout);

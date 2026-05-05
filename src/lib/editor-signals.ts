@@ -2,7 +2,22 @@ import { signal } from '@preact/signals';
 
 export const editorMarkdown = signal('');
 export const editorContent = signal('');
+
+/**
+ * Raw HTML signal from the TipTap editor, updated on every content change.
+ * Used by the draft page to send the editor's actual HTML to the server so
+ * word count can be derived from text content rather than from markdown.
+ */
+export const editorHtml = signal('');
 export const editorImageKeys = signal<string[]>([]);
+
+/**
+ * Canonical word count signal, derived from the editor's text content.
+ * Updated by the Editor component on every content change. Using this
+ * instead of counting words from markdown prevents 0-word bugs when
+ * htmlToMarkdown produces empty or degraded output on large paste events.
+ */
+export const editorWordCount = signal(0);
 
 /**
  * Set content in the editor from outside the Preact component tree.

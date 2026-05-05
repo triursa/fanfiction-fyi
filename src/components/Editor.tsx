@@ -9,7 +9,7 @@ import Image from '@tiptap/extension-image';
 import CharacterCount from '@tiptap/extension-character-count';
 import { common, createLowlight } from 'lowlight';
 import { markdownToHtml, htmlToMarkdown } from '@/lib/markdown';
-import { editorMarkdown, editorContent, editorImageKeys, editorSetContent, editorOnContentChange, editorTriggerImageUpload, editorTriggerLinkDialog } from '@/lib/editor-signals';
+import { editorMarkdown, editorContent, editorHtml, editorImageKeys, editorWordCount, editorSetContent, editorOnContentChange, editorTriggerImageUpload, editorTriggerLinkDialog } from '@/lib/editor-signals';
 import LinkDialog from './LinkDialog';
 import SlashCommandMenu, { createSlashCommandExtension } from './SlashCommandMenu';
 import ShortcutsModal from './ShortcutsModal';
@@ -125,6 +125,8 @@ export default function TipTapEditor({
       const md = htmlToMarkdown(editorRef.current.getHTML());
       editorMarkdown.value = md;
       editorContent.value = md;
+      editorHtml.value = editorRef.current.getHTML();
+      editorWordCount.value = countWords(editorRef.current.getText());
     };
     editorSetContent.value = handler;
     return () => { editorSetContent.value = undefined; };
@@ -162,9 +164,13 @@ export default function TipTapEditor({
       onUpdate: ({ editor: e }) => {
         const html = e.getHTML();
         const md = htmlToMarkdown(html);
-        // Expose markdown via signals for form submission
+        // Expose markdown and HTML via signals for form submission
         editorMarkdown.value = md;
         editorContent.value = md;
+        editorHtml.value = html;
+        // Update canonical word count from editor text (not markdown)
+        // to avoid 0-word bugs when htmlToMarkdown degrades content
+        editorWordCount.value = countWords(e.getText());
         onContentChangeRef.current?.(md);
         // Call autosave hook if set (used by draft workspace)
         if (editorOnContentChange.value) {
@@ -186,6 +192,8 @@ export default function TipTapEditor({
     const initialMd = content ? htmlToMarkdown(editor.getHTML()) : '';
     editorMarkdown.value = initialMd;
     editorContent.value = initialMd;
+    editorHtml.value = content ? editor.getHTML() : '';
+    editorWordCount.value = content ? countWords(editor.getText()) : 0;
 
     return () => {
       editor.destroy();
@@ -469,7 +477,9 @@ export default function TipTapEditor({
   const editor = editorRef.current;
 
   // ── Word count + reading time ──
-  const words = editor ? (editor.storage.characterCount?.words?.() ?? countWords(editor.getText())) : 0;
+  // Always count from getText() — CharacterCount.words() can return 0 after
+  // programmatic setContent or large paste events before the extension recalculates.
+  const words = editor ? countWords(editor.getText()) : 0;
   const readingTime = Math.max(1, Math.ceil(words / 200));
   const formattedWords = words.toLocaleString();
 

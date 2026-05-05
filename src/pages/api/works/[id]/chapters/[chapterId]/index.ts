@@ -67,8 +67,19 @@ export const PUT: APIRoute = async ({ params, request, locals }) => {
     if (body.title !== undefined) updateValues.title = body.title;
     if (body.content_md !== undefined) {
       updateValues.contentMd = body.content_md;
-      updateValues.contentHtml = markdownToHtml(body.content_md);
-      updateValues.wordCount = body.content_md.split(/\s+/).filter(Boolean).length;
+      // Prefer the HTML sent directly from the client (TipTap's actual output),
+      // which is accurate even when htmlToMarkdown degrades large paste content.
+      // Fall back to rendering the markdown when no client HTML is provided.
+      const htmlForStorage = body.content_html || markdownToHtml(body.content_md);
+      updateValues.contentHtml = htmlForStorage;
+      // Always derive word count from the HTML's plain text so the persisted value
+      // matches what the editor shows (avoids counting markdown syntax like *, #, etc.).
+      const plainText = htmlForStorage
+        .replace(/<[^>]*>/g, ' ')
+        .replace(/&\w+;/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+      updateValues.wordCount = plainText ? plainText.split(/\s+/).length : 0;
     }
     if (body.position !== undefined) updateValues.position = body.position;
     if (body.draft !== undefined) updateValues.draft = body.draft ? 1 : 0;
