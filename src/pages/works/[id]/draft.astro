@@ -157,19 +157,21 @@ const initialChapterData = JSON.stringify({
           <button type="button" id="add-chapter-btn" class="m3-btn-text" title="Add new chapter">+ Add</button>
         </div>
         <nav class="draft-chapter-list" id="chapter-list" role="list">
-          {chapters.map((c, i) => (
-            <button
-              type="button"
+          {chapterList.map((c, i) => (
+            <div
               class={`draft-chapter-item ${i === 0 ? 'draft-chapter-item--active' : ''} ${c.draft ? 'draft-chapter-item--draft' : ''}`}
               data-chapter-id={c.id}
               data-position={c.position}
               role="listitem"
+              tabindex="0"
             >
+              <button type="button" class="draft-chapter-reorder-btn" data-dir="up" aria-label="Move chapter up" disabled={i === 0} aria-disabled={i === 0 ? "true" : "false"}>↑</button>
+              <button type="button" class="draft-chapter-reorder-btn" data-dir="down" aria-label="Move chapter down" disabled={i === chapterList.length - 1} aria-disabled={i === chapterList.length - 1 ? "true" : "false"}>↓</button>
               <span class="draft-chapter-item-title">Ch. {c.position}: {c.title}</span>
               <span class={`m3-badge ${c.draft ? 'm3-badge-draft' : 'm3-badge-published'}`}>
                 {c.draft ? 'Draft' : 'Published'}
               </span>
-            </button>
+            </div>
           ))}
         </nav>
       </aside>
@@ -329,6 +331,11 @@ const initialChapterData = JSON.stringify({
     background: var(--md-sys-color-surface-container);
   }
 
+  .draft-chapter-item:focus-visible {
+    outline: 2px solid var(--md-sys-color-primary);
+    outline-offset: -2px;
+  }
+
   .draft-chapter-item--active {
     background: var(--md-sys-color-primary-container);
     color: var(--md-sys-color-on-primary-container);
@@ -340,6 +347,40 @@ const initialChapterData = JSON.stringify({
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+  }
+
+  .draft-chapter-reorder-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 24px;
+    height: 24px;
+    padding: 0;
+    border: none;
+    border-radius: 4px;
+    background: none;
+    color: var(--md-sys-color-on-surface-variant);
+    cursor: pointer;
+    font-size: 14px;
+    line-height: 1;
+    transition: background var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard);
+  }
+
+  .draft-chapter-reorder-btn:hover:not(:disabled) {
+    background: var(--md-sys-color-surface-container-highest);
+  }
+
+  .draft-chapter-reorder-btn:disabled {
+    opacity: 0.25;
+    cursor: default;
+  }
+
+  .draft-chapter-item--active .draft-chapter-reorder-btn {
+    color: var(--md-sys-color-on-primary-container);
+  }
+
+  .draft-chapter-item--active .draft-chapter-reorder-btn:hover:not(:disabled) {
+    background: rgba(0,0,0,0.08);
   }
 
   /* ── Canvas ── */
@@ -666,13 +707,10 @@ const initialChapterData = JSON.stringify({
     checkLocalStorageDraft();
   }
 
-  // Bind chapter click handlers
-  document.querySelectorAll('.draft-chapter-item').forEach(btn => {
-    btn.addEventListener('click', () => {
-      const id = Number(btn.dataset.chapterId);
-      selectChapter(id);
-    });
-  });
+  // Render chapter list on init to wire up all event listeners
+  // (reorder buttons and chapter row clicks). This replaces the SSR-rendered
+  // list so both sets of handlers are always present from first interaction.
+  renderChapterList();
 
   // ── Add Chapter ──
   addChapterBtn.addEventListener('click', async () => {
@@ -707,22 +745,92 @@ const initialChapterData = JSON.stringify({
   }
 
   function renderChapterList() {
-    chapterList.innerHTML = work.chapters
-      .sort((a, b) => a.position - b.position)
-      .map((c) => `
-        <button type="button" class="draft-chapter-item ${c.id === currentChapterId ? 'draft-chapter-item--active' : ''} ${c.draft ? 'draft-chapter-item--draft' : ''}"
-          data-chapter-id="${escapeHtml(String(c.id))}" data-position="${escapeHtml(String(c.position))}" role="listitem">
-          <span class="draft-chapter-item-title">Ch. ${escapeHtml(String(c.position))}: ${escapeHtml(c.title)}</span>
+    const sorted = [...work.chapters].sort((a, b) => a.position - b.position);
+    chapterList.innerHTML = sorted
+      .map((c, i) => `
+        <div class="draft-chapter-item ${c.id === currentChapterId ? 'draft-chapter-item--active' : ''} ${c.draft ? 'draft-chapter-item--draft' : ''}"
+          data-chapter-id="${escapeHtml(String(c.id))}" data-position="${escapeHtml(String(c.position))}" role="listitem" tabindex="0">
+          <button type="button" class="draft-chapter-reorder-btn" data-dir="up" aria-label="Move chapter up" ${i === 0 ? 'disabled aria-disabled="true"' : 'aria-disabled="false"'}>↑</button>
+          <button type="button" class="draft-chapter-reorder-btn" data-dir="down" aria-label="Move chapter down" ${i === sorted.length - 1 ? 'disabled aria-disabled="true"' : 'aria-disabled="false"'}>↓</button>
+          <span class="draft-chapter-item-title">Ch. ${escapeHtml(String(i + 1))}: ${escapeHtml(c.title)}</span>
           <span class="m3-badge ${c.draft ? 'm3-badge-draft' : 'm3-badge-published'}">${c.draft ? 'Draft' : 'Published'}</span>
-        </button>
+        </div>
       `).join('');
-    // Re-bind click handlers
-    document.querySelectorAll('.draft-chapter-item').forEach(btn => {
-      btn.addEventListener('click', () => {
-        const id = Number(btn.dataset.chapterId);
+    // Bind click and keyboard handlers on chapter rows
+    document.querySelectorAll('.draft-chapter-item').forEach(el => {
+      el.addEventListener('click', (e) => {
+        // Ignore clicks on reorder buttons
+        if ((e.target as Element).closest('.draft-chapter-reorder-btn')) return;
+        const id = Number((el as HTMLElement).dataset.chapterId);
         selectChapter(id);
       });
+      el.addEventListener('keydown', (e) => {
+        const ke = e as KeyboardEvent;
+        if (ke.key === 'Enter' || ke.key === ' ') {
+          if ((ke.target as Element).closest('.draft-chapter-reorder-btn')) return;
+          ke.preventDefault();
+          const id = Number((el as HTMLElement).dataset.chapterId);
+          selectChapter(id);
+        }
+      });
     });
+    // Bind reorder buttons
+    document.querySelectorAll('.draft-chapter-reorder-btn').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const dir = (btn as HTMLElement).dataset.dir;
+        const chapterId = Number((btn as HTMLElement).closest('.draft-chapter-item')?.dataset.chapterId);
+        if (chapterId) reorderChapter(chapterId, dir);
+      });
+    });
+  }
+
+  // ── Chapter Reorder ──
+  async function reorderChapter(chapterId, direction) {
+    const sorted = [...work.chapters].sort((a, b) => a.position - b.position);
+    const idx = sorted.findIndex(c => c.id === chapterId);
+    if (idx === -1) return;
+    if (direction === 'up' && idx === 0) return;
+    if (direction === 'down' && idx === sorted.length - 1) return;
+
+    // Swap with adjacent
+    const swapIdx = direction === 'up' ? idx - 1 : idx + 1;
+    [sorted[idx], sorted[swapIdx]] = [sorted[swapIdx], sorted[idx]];
+
+    // Build positions array for API (re-indexed 1,2,3...)
+    const positions = sorted.map((c, i) => ({ id: c.id, position: i + 1 }));
+
+    try {
+      const res = await fetch(`/api/works/${workId}/chapters/reorder`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ positions }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        showToast(err.error || 'Reorder failed', 'error');
+        return;
+      }
+      const data = await res.json();
+      // Update local model from server response (API returns snake_case word_count)
+      if (data.chapters) {
+        work.chapters = data.chapters.map(c => ({
+          id: c.id,
+          position: c.position,
+          title: c.title,
+          draft: c.draft,
+          word_count: c.word_count ?? 0,
+        }));
+      } else {
+        // Fallback: update positions locally
+        sorted.forEach((c, i) => { c.position = i + 1; });
+        work.chapters = sorted;
+      }
+      renderChapterList();
+      showToast('Chapter order updated', 'success');
+    } catch (e) {
+      showToast('Network error during reorder', 'error');
+    }
   }
 
   // ── Save / Publish ──

@@ -98,6 +98,21 @@ import Base from '../../layouts/Base.astro';
     border-color: var(--md-sys-color-primary);
   }
 
+  .form-field input.field-error {
+    border-color: var(--md-sys-color-error);
+  }
+
+  .field-helper {
+    font: var(--md-sys-typescale-body-small);
+    color: var(--md-sys-color-on-surface-variant);
+    min-height: 0;
+    margin-top: 2px;
+  }
+
+  .field-helper--error {
+    color: var(--md-sys-color-error);
+  }
+
   .form-error {
     font: var(--md-sys-typescale-body-small);
     color: var(--md-sys-color-error);
@@ -182,22 +197,65 @@ import Base from '../../layouts/Base.astro';
 <script>
   const form = document.getElementById('signup-form') as HTMLFormElement;
   const errorEl = document.getElementById('signup-error')!;
+  const btn = form.querySelector('button[type="submit"]') as HTMLButtonElement;
+  const btnText = btn.textContent;
+  const inviteInput = document.getElementById('invite_code') as HTMLInputElement;
+  const emailInput = document.getElementById('email') as HTMLInputElement;
+  const passwordInput = document.getElementById('password') as HTMLInputElement;
+  const nameInput = document.getElementById('display_name') as HTMLInputElement;
+
+  function clearFieldErrors() {
+    inviteInput.classList.remove('field-error');
+    emailInput.classList.remove('field-error');
+    passwordInput.classList.remove('field-error');
+    nameInput.classList.remove('field-error');
+  }
+
+  function setFieldError(input: HTMLInputElement, msg: string) {
+    input.classList.add('field-error');
+    input.focus();
+    errorEl.textContent = msg;
+  }
 
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
     errorEl.textContent = '';
-    const btn = form.querySelector('button[type="submit"]') as HTMLButtonElement;
+    clearFieldErrors();
+
+    // Client-side validation
+    if (!inviteInput.value.trim()) {
+      setFieldError(inviteInput, 'Invite code is required');
+      return;
+    }
+    if (!emailInput.value.trim()) {
+      setFieldError(emailInput, 'Email is required');
+      return;
+    }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailInput.value.trim())) {
+      setFieldError(emailInput, 'Enter a valid email address');
+      return;
+    }
+    if (passwordInput.value.length < 8) {
+      setFieldError(passwordInput, 'Password must be at least 8 characters');
+      return;
+    }
+    if (!nameInput.value.trim()) {
+      setFieldError(nameInput, 'Display name is required');
+      return;
+    }
+
     btn.disabled = true;
+    btn.textContent = 'Creating account…';
 
     try {
       const res = await fetch('/api/auth/signup', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          invite_code: (document.getElementById('invite_code') as HTMLInputElement).value,
-          email: (document.getElementById('email') as HTMLInputElement).value,
-          password: (document.getElementById('password') as HTMLInputElement).value,
-          display_name: (document.getElementById('display_name') as HTMLInputElement).value,
+          invite_code: inviteInput.value.trim(),
+          email: emailInput.value.trim(),
+          password: passwordInput.value,
+          display_name: nameInput.value.trim(),
         }),
       });
       if (res.ok) {
@@ -208,13 +266,21 @@ import Base from '../../layouts/Base.astro';
           window.location.href = '/';
         }
       } else {
-        const data = await res.json();
+        let data: any;
+        try { data = await res.json(); } catch { data = {}; }
         errorEl.textContent = data.error || 'Sign up failed';
       }
     } catch {
-      errorEl.textContent = 'Network error';
+      errorEl.textContent = 'Network error — please check your connection and try again';
     } finally {
       btn.disabled = false;
+      btn.textContent = btnText;
     }
   });
+
+  // Clear field errors on input
+  inviteInput.addEventListener('input', () => { inviteInput.classList.remove('field-error'); errorEl.textContent = ''; });
+  emailInput.addEventListener('input', () => { emailInput.classList.remove('field-error'); errorEl.textContent = ''; });
+  passwordInput.addEventListener('input', () => { passwordInput.classList.remove('field-error'); errorEl.textContent = ''; });
+  nameInput.addEventListener('input', () => { nameInput.classList.remove('field-error'); errorEl.textContent = ''; });
 </script>

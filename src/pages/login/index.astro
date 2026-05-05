@@ -129,6 +129,22 @@ import Base from '../../layouts/Base.astro';
     border-color: var(--md-sys-color-primary);
   }
 
+  .form-field input.field-error,
+  .form-field textarea.field-error {
+    border-color: var(--md-sys-color-error);
+  }
+
+  .field-helper {
+    font: var(--md-sys-typescale-body-small);
+    color: var(--md-sys-color-on-surface-variant);
+    min-height: 0;
+    margin-top: 2px;
+  }
+
+  .field-helper--error {
+    color: var(--md-sys-color-error);
+  }
+
   .form-error {
     font: var(--md-sys-typescale-body-small);
     color: var(--md-sys-color-error);
@@ -170,6 +186,21 @@ import Base from '../../layouts/Base.astro';
 <script>
   const form = document.getElementById('login-form') as HTMLFormElement;
   const errorEl = document.getElementById('login-error')!;
+  const btn = form.querySelector('button[type="submit"]') as HTMLButtonElement;
+  const btnText = btn.textContent;
+  const emailInput = document.getElementById('email') as HTMLInputElement;
+  const passwordInput = document.getElementById('password') as HTMLInputElement;
+
+  function clearFieldErrors() {
+    emailInput.classList.remove('field-error');
+    passwordInput.classList.remove('field-error');
+  }
+
+  function setFieldError(input: HTMLInputElement, msg: string) {
+    input.classList.add('field-error');
+    input.focus();
+    errorEl.textContent = msg;
+  }
 
   // Check for OAuth error in URL params
   const urlParams = new URLSearchParams(window.location.search);
@@ -188,16 +219,32 @@ import Base from '../../layouts/Base.astro';
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
     errorEl.textContent = '';
-    const btn = form.querySelector('button[type="submit"]') as HTMLButtonElement;
+    clearFieldErrors();
+
+    // Client-side validation
+    if (!emailInput.value.trim()) {
+      setFieldError(emailInput, 'Email is required');
+      return;
+    }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailInput.value.trim())) {
+      setFieldError(emailInput, 'Enter a valid email address');
+      return;
+    }
+    if (!passwordInput.value) {
+      setFieldError(passwordInput, 'Password is required');
+      return;
+    }
+
     btn.disabled = true;
+    btn.textContent = 'Signing in…';
 
     try {
       const res = await fetch('/api/auth/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          email: (document.getElementById('email') as HTMLInputElement).value,
-          password: (document.getElementById('password') as HTMLInputElement).value,
+          email: emailInput.value.trim(),
+          password: passwordInput.value,
         }),
       });
       if (res.ok) {
@@ -225,9 +272,14 @@ import Base from '../../layouts/Base.astro';
         }
       }
     } catch {
-      errorEl.textContent = 'Network error';
+      errorEl.textContent = 'Network error — please check your connection and try again';
     } finally {
       btn.disabled = false;
+      btn.textContent = btnText;
     }
   });
+
+  // Clear field errors on input
+  emailInput.addEventListener('input', () => { emailInput.classList.remove('field-error'); errorEl.textContent = ''; });
+  passwordInput.addEventListener('input', () => { passwordInput.classList.remove('field-error'); errorEl.textContent = ''; });
 </script>
