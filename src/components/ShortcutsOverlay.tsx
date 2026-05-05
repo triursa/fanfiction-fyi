@@ -25,7 +25,7 @@ export default function ShortcutsOverlay({ open, onClose, shortcuts }: Shortcuts
     }
   }, [open]);
 
-  // Focus trap and Escape/? to close
+  // Focus trap and Escape/? to close (? is also the global shortcut to open the overlay)
   useEffect(() => {
     if (!open) return;
 
