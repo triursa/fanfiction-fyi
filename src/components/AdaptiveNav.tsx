@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'preact/hooks';
+import { signal } from '@preact/signals';
 
 // ── Navigation item definitions ──
 
@@ -17,22 +18,19 @@ export interface NavGroup {
 // Shared nav items — the same set used across all breakpoints
 const PRIMARY_NAV: NavItem[] = [
   { label: 'Home', href: '/', icon: 'home' },
-  { label: 'Works', href: '/works', icon: 'search' },
-  { label: 'Authors', href: '/pseuds', icon: 'person' },
+  { label: 'Search', href: '/search', icon: 'manage_search' },
   { label: 'Bookmarks', href: '/bookmarks', icon: 'bookmark' },
+  { label: 'Profile', href: '/studio', icon: 'studio' },
 ];
 
 const SECONDARY_NAV: NavItem[] = [
+  { label: 'Works', href: '/works', icon: 'search' },
+  { label: 'Authors', href: '/pseuds', icon: 'person' },
   { label: 'Characters', href: '/characters', icon: 'groups' },
   { label: 'Tags', href: '/tags', icon: 'label' },
   { label: 'Series', href: '/series', icon: 'library_books' },
   { label: 'Collections', href: '/collections', icon: 'folder' },
   { label: 'Canon', href: '/canon', icon: 'auto_stories' },
-  { label: 'Search', href: '/search', icon: 'manage_search' },
-];
-
-const STUDIO_NAV: NavItem[] = [
-  { label: 'Studio', href: '/studio', icon: 'studio' },
 ];
 
 const ADMIN_NAV: NavItem[] = [
@@ -121,8 +119,8 @@ function NavigationRail({ items, currentPath, onMenuClick }: { items: NavItem[];
         ))}
       </div>
       <div class="navigation-rail__spacer" />
-      <a href="/studio" class="navigation-rail__create" aria-label="Creator Studio" title="Studio">
-        <SvgIcon name="studio" size={24} />
+      <a href="/works/create" class="navigation-rail__create" aria-label="New Work" title="New Work">
+        <SvgIcon name="create" size={24} />
       </a>
     </nav>
   );
@@ -169,10 +167,6 @@ function NavigationDrawer({ items, secondaryItems, currentPath, userName }: {
       <div class="navigation-drawer__spacer" />
       {userName && (
         <div class="navigation-drawer__footer">
-          <a href="/studio" class={`navigation-drawer__item ${isActive('/studio', currentPath) ? 'navigation-drawer__item--active' : ''}`}>
-            <SvgIcon name="studio" size={24} />
-            <span>Studio</span>
-          </a>
           <a href="/works/create" class="navigation-drawer__create">
             <SvgIcon name="create" size={20} />
             <span>New Work</span>
@@ -266,10 +260,6 @@ function ModalDrawer({ isOpen, onClose, primaryItems, secondaryItems, currentPat
           <>
             <div class="modal-drawer__divider" />
             <div class="modal-drawer__section">
-              <a href="/studio" class="modal-drawer__item" onClick={onClose}>
-                <SvgIcon name="studio" size={24} />
-                <span>Studio</span>
-              </a>
               <a href="/works/create" class="modal-drawer__item modal-drawer__item--create" onClick={onClose}>
                 <SvgIcon name="create" size={24} />
                 <span>New Work</span>
@@ -309,8 +299,8 @@ function MobileAppBar({ onMenuClick, userName }: { onMenuClick: () => void; user
       <a href="/" class="mobile-app-bar__title">fanfiction.fyi</a>
       <div class="mobile-app-bar__actions">
         {userName ? (
-          <a href="/studio" class="mobile-app-bar__create" aria-label="Creator Studio">
-            <SvgIcon name="studio" size={24} />
+          <a href="/works/create" class="mobile-app-bar__create" aria-label="New Work">
+            <SvgIcon name="create" size={24} />
           </a>
         ) : (
           <a href="/login" class="mobile-app-bar__signin">Sign In</a>
@@ -329,13 +319,15 @@ interface AdaptiveNavProps {
   isReadingMode?: boolean;
 }
 
+// ── Shared signal for modal drawer open/close state ──
+const modalOpenSignal = signal(false);
+
 export default function AdaptiveNav({ currentPath, userName, isAdmin, isReadingMode }: AdaptiveNavProps) {
-  const [modalOpen, setModalOpen] = useState(false);
   const [bottomNavHidden, setBottomNavHidden] = useState(false);
   const lastScrollY = useRef(0);
 
-  const openModal = useCallback(() => setModalOpen(true), []);
-  const closeModal = useCallback(() => setModalOpen(false), []);
+  const openModal = useCallback(() => { modalOpenSignal.value = true; }, []);
+  const closeModal = useCallback(() => { modalOpenSignal.value = false; }, []);
 
   // Scroll-hide for mobile bottom nav (only in reading mode per acceptance criteria)
   useEffect(() => {
@@ -354,16 +346,18 @@ export default function AdaptiveNav({ currentPath, userName, isAdmin, isReadingM
     return () => window.removeEventListener('scroll', handleScroll);
   }, [isReadingMode]);
 
-  // Build primary nav items — include Bookmarks only if logged in
-  const primaryNav = userName
-    ? PRIMARY_NAV
-    : PRIMARY_NAV.filter((item) => item.href !== '/bookmarks');
+  // Build primary nav items — include Bookmarks and Profile only if logged in
+  // For mobile bottom nav, ensure at least 4 items for good layout
+  const guestPrimaryNav: NavItem[] = [
+    { label: 'Home', href: '/', icon: 'home' },
+    { label: 'Search', href: '/search', icon: 'manage_search' },
+    { label: 'Works', href: '/works', icon: 'search' },
+    { label: 'Authors', href: '/pseuds', icon: 'person' },
+  ];
+  const primaryNav = userName ? PRIMARY_NAV : guestPrimaryNav;
 
   // Build secondary nav for drawer/modal
   const secondaryNav = [...SECONDARY_NAV];
-  if (userName) {
-    secondaryNav.unshift(...STUDIO_NAV);
-  }
   if (isAdmin) {
     secondaryNav.push(...ADMIN_NAV);
   }
@@ -389,7 +383,7 @@ export default function AdaptiveNav({ currentPath, userName, isAdmin, isReadingM
 
       {/* Modal Drawer — overlay, activated by hamburger */}
       <ModalDrawer
-        isOpen={modalOpen}
+        isOpen={modalOpenSignal.value}
         onClose={closeModal}
         primaryItems={primaryNav}
         secondaryItems={secondaryNav}
