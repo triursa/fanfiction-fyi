@@ -1,5 +1,4 @@
 import { useEffect, useRef, useState, useCallback } from 'preact/hooks';
-import { h } from 'preact';
 import { Editor } from '@tiptap/core';
 import StarterKit from '@tiptap/starter-kit';
 import Link from '@tiptap/extension-link';
@@ -10,29 +9,57 @@ import Image from '@tiptap/extension-image';
 import CharacterCount from '@tiptap/extension-character-count';
 import { common, createLowlight } from 'lowlight';
 import { markdownToHtml, htmlToMarkdown } from '@/lib/markdown';
-import { editorMarkdown, editorContent, editorImageKeys, editorSetContent, editorOnContentChange } from '@/lib/editor-signals';
+import { editorMarkdown, editorContent, editorImageKeys, editorSetContent, editorOnContentChange, editorTriggerImageUpload, editorTriggerLinkDialog } from '@/lib/editor-signals';
 import LinkDialog from './LinkDialog';
+import SlashCommandMenu, { createSlashCommandExtension } from './SlashCommandMenu';
+import ShortcutsModal from './ShortcutsModal';
 
 const lowlight = createLowlight(common);
 
-/** Upload an image file to the server and return the URL */
-async function uploadImageFile(file: File, workId: number | string): Promise<{ key: string; url: string }> {
-  const formData = new FormData();
-  formData.append('file', file);
-  formData.append('type', 'chapter');
-  formData.append('id', String(workId));
+/** Upload an image file to the server and return the URL. Uses XHR for progress events. */
+function uploadImageFileXHR(
+  file: File,
+  workId: number | string,
+  onProgress?: (percent: number) => void
+): Promise<{ key: string; url: string }> {
+  return new Promise((resolve, reject) => {
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('type', 'chapter');
+    formData.append('id', String(workId));
 
-  const res = await fetch('/api/upload', {
-    method: 'POST',
-    body: formData,
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', '/api/upload');
+
+    xhr.upload.addEventListener('progress', (e) => {
+      if (e.lengthComputable && onProgress) {
+        const pct = Math.round((e.loaded / e.total) * 100);
+        onProgress(pct);
+      }
+    });
+
+    xhr.addEventListener('load', () => {
+      if (xhr.status >= 200 && xhr.status < 300) {
+        try {
+          resolve(JSON.parse(xhr.responseText));
+        } catch {
+          reject(new Error('Invalid response from server'));
+        }
+      } else {
+        try {
+          const data = JSON.parse(xhr.responseText);
+          reject(new Error(data.error || 'Upload failed'));
+        } catch {
+          reject(new Error('Upload failed'));
+        }
+      }
+    });
+
+    xhr.addEventListener('error', () => reject(new Error('Network error during upload')));
+    xhr.addEventListener('abort', () => reject(new Error('Upload aborted')));
+
+    xhr.send(formData);
   });
-
-  if (!res.ok) {
-    const data = await res.json().catch(() => ({ error: 'Upload failed' }));
-    throw new Error(data.error || 'Upload failed');
-  }
-
-  return res.json();
 }
 
 interface EditorProps {
@@ -74,10 +101,11 @@ export default function TipTapEditor({
 }: EditorProps) {
   const editorRef = useRef<Editor | null>(null);
   const mountRef = useRef<HTMLDivElement | null>(null);
-  const [isEditorReady, setIsEditorReady] = useState(false);
-  const [isUploading, setIsUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState<number | null>(null);
   const onContentChangeRef = useRef(onContentChange);
   onContentChangeRef.current = onContentChange;
+  const wrapperRef = useRef<HTMLDivElement | null>(null);
+  const [isDragOver, setIsDragOver] = useState(false);
 
   // Expose workId globally for upload function
   useEffect(() => {
@@ -128,6 +156,7 @@ export default function TipTapEditor({
           },
         }),
         CharacterCount,
+        createSlashCommandExtension(),
       ],
       content: content || '',
       onUpdate: ({ editor: e }) => {
@@ -157,12 +186,10 @@ export default function TipTapEditor({
     const initialMd = content ? htmlToMarkdown(editor.getHTML()) : '';
     editorMarkdown.value = initialMd;
     editorContent.value = initialMd;
-    setIsEditorReady(true);
 
     return () => {
       editor.destroy();
       editorRef.current = null;
-      setIsEditorReady(false);
     };
   }, []);
 
@@ -173,7 +200,7 @@ export default function TipTapEditor({
     }
   }, [placeholder]);
 
-  // ── Image Upload Handler ──
+  // ── Image Upload Handler (with XHR progress) ──
   const handleImageUpload = useCallback(async (file: File) => {
     if (!editorRef.current) return;
 
@@ -190,10 +217,12 @@ export default function TipTapEditor({
       return;
     }
 
-    setIsUploading(true);
+    setUploadProgress(0);
     try {
       const effectiveWorkId = workId || (window as any).__editorWorkId || '0';
-      const result = await uploadImageFile(file, effectiveWorkId);
+      const result = await uploadImageFileXHR(file, effectiveWorkId, (pct) => {
+        setUploadProgress(pct);
+      });
       // Insert image into editor at current position
       editorRef.current.chain().focus().setImage({
         src: result.url,
@@ -208,12 +237,18 @@ export default function TipTapEditor({
     } catch (e: any) {
       alert(e.message || 'Image upload failed');
     } finally {
-      setIsUploading(false);
+      setUploadProgress(null);
     }
   }, [workId]);
 
-  // ── File input for image upload button ──
-  const handleImageButtonClick = useCallback(() => {
+  // Expose image upload trigger for slash commands
+  useEffect(() => {
+    editorTriggerImageUpload.value = handleImageButtonClick;
+    return () => { editorTriggerImageUpload.value = undefined; };
+  }, []);
+
+  // Helper for image button click — defined outside useEffect so it's stable
+  function handleImageButtonClick() {
     const input = document.createElement('input');
     input.type = 'file';
     input.accept = 'image/gif,image/png,image/jpeg,image/webp';
@@ -224,7 +259,7 @@ export default function TipTapEditor({
       }
     };
     input.click();
-  }, [handleImageUpload]);
+  }
 
   // ── Drag & drop + paste handlers ──
   useEffect(() => {
@@ -239,6 +274,7 @@ export default function TipTapEditor({
 
       e.preventDefault();
       e.stopPropagation();
+      setIsDragOver(false);
 
       // Upload each image sequentially
       (async () => {
@@ -268,17 +304,26 @@ export default function TipTapEditor({
     const handleDragOver = (e: DragEvent) => {
       if (e.dataTransfer?.types?.includes('Files')) {
         e.preventDefault();
+        setIsDragOver(true);
       }
+    };
+
+    const handleDragLeave = (e: DragEvent) => {
+      // Only set false if leaving the editor element entirely
+      if (editorEl.contains(e.relatedTarget as Node)) return;
+      setIsDragOver(false);
     };
 
     editorEl.addEventListener('drop', handleDrop);
     editorEl.addEventListener('paste', handlePaste);
     editorEl.addEventListener('dragover', handleDragOver);
+    editorEl.addEventListener('dragleave', handleDragLeave);
 
     return () => {
       editorEl.removeEventListener('drop', handleDrop);
       editorEl.removeEventListener('paste', handlePaste);
       editorEl.removeEventListener('dragover', handleDragOver);
+      editorEl.removeEventListener('dragleave', handleDragLeave);
     };
   }, [handleImageUpload]);
 
@@ -319,6 +364,16 @@ export default function TipTapEditor({
     setLinkDialogUrl(prev || 'https://');
     setLinkDialogOpen(true);
   }, []);
+
+  // Expose link dialog trigger for slash commands
+  useEffect(() => {
+    editorTriggerLinkDialog.value = () => {
+      if (editorRef.current) {
+        openLinkDialog(editorRef.current);
+      }
+    };
+    return () => { editorTriggerLinkDialog.value = undefined; };
+  }, [openLinkDialog]);
 
   const handleLinkConfirm = useCallback((url: string) => {
     setLinkDialogOpen(false);
@@ -413,8 +468,13 @@ export default function TipTapEditor({
 
   const editor = editorRef.current;
 
+  // ── Word count + reading time ──
+  const words = editor ? (editor.storage.characterCount?.words?.() ?? countWords(editor.getText())) : 0;
+  const readingTime = Math.max(1, Math.ceil(words / 200));
+  const formattedWords = words.toLocaleString();
+
   return (
-    <div class="tiptap-wrapper">
+    <div ref={wrapperRef} class={`tiptap-wrapper${isDragOver ? ' tiptap-wrapper--dragover' : ''}`}>
       <div class="tiptap-toolbar" role="toolbar" aria-label="Formatting toolbar">
         {toolbarButtons.map((btn, i) =>
           btn.separator ? (
@@ -447,15 +507,28 @@ export default function TipTapEditor({
       <div class="tiptap-editor-area" ref={mountRef}>
       </div>
 
-      {isUploading && (
+      {/* Drag overlay */}
+      {isDragOver && (
+        <div class="tiptap-drag-overlay">
+          <span class="tiptap-drag-overlay-text">Drop images here</span>
+        </div>
+      )}
+
+      {/* Upload progress */}
+      {uploadProgress !== null && (
         <div class="tiptap-upload-overlay">
-          <span class="tiptap-upload-status">Uploading image…</span>
+          <div class="tiptap-upload-progress">
+            <div class="tiptap-upload-progress-bar-wrap">
+              <div class="tiptap-upload-progress-bar" style={{ width: `${uploadProgress}%` }} />
+            </div>
+            <span class="tiptap-upload-progress-text">Uploading {uploadProgress}%</span>
+          </div>
         </div>
       )}
 
       <div class="tiptap-footer">
         <span class="tiptap-wordcount">
-          {editor ? (editor.storage.characterCount?.words?.() ?? countWords(editor.getText())) : 0} words
+          {formattedWords} words · {readingTime} min read
         </span>
       </div>
 
@@ -465,6 +538,9 @@ export default function TipTapEditor({
         onConfirm={handleLinkConfirm}
         onCancel={handleLinkCancel}
       />
+
+      {editor && <SlashCommandMenu editor={editor} />}
+      <ShortcutsModal />
     </div>
   );
 }

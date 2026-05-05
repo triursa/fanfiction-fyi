@@ -17,3 +17,15 @@ export const editorSetContent = signal<((mdOrHtml: string) => void) | undefined>
  * the Editor component reads and calls it on every update.
  */
 export const editorOnContentChange = signal<((md: string) => void) | undefined>(undefined);
+
+/**
+ * Callback to trigger the image upload handler from outside the Editor.
+ * Set by Editor component on mount.
+ */
+export const editorTriggerImageUpload = signal<(() => void) | undefined>(undefined);
+
+/**
+ * Callback to trigger the link dialog from outside the Editor.
+ * Set by Editor component on mount.
+ */
+export const editorTriggerLinkDialog = signal<(() => void) | undefined>(undefined);
