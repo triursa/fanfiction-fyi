@@ -1,6 +1,7 @@
 ---
 export const prerender = false;
 import Base from '../../layouts/Base.astro';
+import BrowseKeyboardNav from '../../components/BrowseKeyboardNav';
 import { getDrizzle } from '../../lib/db';
 import { works, chapters, tags, taggings, pseuds, creatorships } from '../../lib/schema';
 import { eq, and, isNotNull, desc, sql } from 'drizzle-orm';
@@ -96,6 +97,8 @@ for (const w of worksList) {
     {page > 1 && <a href={`/works?page=${page - 1}`} class="btn-secondary">← Previous</a>}
     {worksList.length === limit && <a href={`/works?page=${page + 1}`} class="btn-secondary">Next →</a>}
   </section>
+
+  <BrowseKeyboardNav client:load />
 </Base>
 
 <style is:global>
