@@ -2,6 +2,7 @@
 export const prerender = false;
 import Base from '../../layouts/Base.astro';
 import { getDrizzle } from '../../lib/db';
+import { getAuth, checkApproved } from '../../lib/auth';
 import { collections as collectionsTable, collectionItems } from '../../lib/schema';
 import { sql, desc, inArray } from 'drizzle-orm';
 
@@ -27,11 +28,21 @@ const collections = collectionRows.map(c => ({
   // Keep snake_case aliases for template compatibility
   created_at: c.createdAt,
 }));
+
+// Check if user is logged in and approved
+const d1b = Astro.locals.runtime.env.DB as D1Database;
+const authUser = await getAuth(d1b, Astro.request);
+const canCreate = authUser ? (() => { const a = checkApproved(authUser); return !('forbidden' in a); })() : false;
 ---
 
 <Base title="Collections — fanfiction.fyi">
   <section class="collections-listing">
-    <h1 class="page-title">Collections</h1>
+    <div class="page-header-row">
+      <h1 class="page-title">Collections</h1>
+      {canCreate && (
+        <a href="/collections/new" class="btn-create">+ New Collection</a>
+      )}
+    </div>
 
     {collections.length === 0 && (
       <p class="placeholder-text">No public collections yet. Be the first to curate one!</p>
@@ -60,7 +71,10 @@ const collections = collectionRows.map(c => ({
   @import '../../styles/theme.css';
 
   .collections-listing { max-width: 900px; margin: 0 auto; }
-  .page-title { font: var(--md-sys-typescale-headline-medium); color: var(--md-sys-color-on-surface); margin: 0 0 var(--space-6); }
+  .page-header-row { display: flex; align-items: center; justify-content: space-between; margin-bottom: var(--space-6); }
+  .page-title { font: var(--md-sys-typescale-headline-medium); color: var(--md-sys-color-on-surface); margin: 0; }
+  .btn-create { font: var(--md-sys-typescale-label-large); color: var(--md-sys-color-on-primary); background: var(--md-sys-color-primary); border: none; border-radius: var(--md-sys-shape-corner-full); padding: var(--space-2) var(--space-5); cursor: pointer; text-decoration: none; display: inline-flex; align-items: center; transition: background var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard); }
+  .btn-create:hover { background: var(--md-sys-color-primary-container); color: var(--md-sys-color-on-primary-container); }
   .placeholder-text { font: var(--md-sys-typescale-body-large); color: var(--md-sys-color-outline); font-style: italic; }
 
   .collections-grid {
