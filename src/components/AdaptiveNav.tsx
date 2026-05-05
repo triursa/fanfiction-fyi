@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from 'preact/hooks';
+import { useState, useEffect, useRef, useCallback, useMemo } from 'preact/hooks';
 import { signal } from '@preact/signals';
 
 // ── Navigation item definitions ──
@@ -97,7 +97,7 @@ function MobileBottomNav({ items, currentPath, hidden }: { items: NavItem[]; cur
 
 // ── Navigation Rail (600px – 839px) ──
 
-function NavigationRail({ items, currentPath, onMenuClick }: { items: NavItem[]; currentPath: string; onMenuClick: () => void }) {
+function NavigationRail({ items, currentPath, onMenuClick, userName }: { items: NavItem[]; currentPath: string; onMenuClick: () => void; userName?: string }) {
   return (
     <nav class="adaptive-nav navigation-rail" aria-label="Main navigation">
       <button class="navigation-rail__fab" onClick={onMenuClick} aria-label="Open menu">
@@ -119,9 +119,11 @@ function NavigationRail({ items, currentPath, onMenuClick }: { items: NavItem[];
         ))}
       </div>
       <div class="navigation-rail__spacer" />
-      <a href="/works/create" class="navigation-rail__create" aria-label="New Work" title="New Work">
-        <SvgIcon name="create" size={24} />
-      </a>
+      {userName && (
+        <a href="/works/create" class="navigation-rail__create" aria-label="New Work" title="New Work">
+          <SvgIcon name="create" size={24} />
+        </a>
+      )}
     </nav>
   );
 }
@@ -319,10 +321,9 @@ interface AdaptiveNavProps {
   isReadingMode?: boolean;
 }
 
-// ── Shared signal for modal drawer open/close state ──
-const modalOpenSignal = signal(false);
-
 export default function AdaptiveNav({ currentPath, userName, isAdmin, isReadingMode }: AdaptiveNavProps) {
+  // Scoped to this component instance to avoid cross-instance coupling
+  const modalOpenSignal = useMemo(() => signal(false), []);
   const [bottomNavHidden, setBottomNavHidden] = useState(false);
   const lastScrollY = useRef(0);
 
@@ -356,8 +357,10 @@ export default function AdaptiveNav({ currentPath, userName, isAdmin, isReadingM
   ];
   const primaryNav = userName ? PRIMARY_NAV : guestPrimaryNav;
 
-  // Build secondary nav for drawer/modal
-  const secondaryNav = [...SECONDARY_NAV];
+  // Build secondary nav for drawer/modal — filter out items already in primaryNav (avoids
+  // duplicate Works/Authors entries when guests have them in their primary nav)
+  const primaryHrefs = new Set(primaryNav.map((item) => item.href));
+  const secondaryNav = SECONDARY_NAV.filter((item) => !primaryHrefs.has(item.href));
   if (isAdmin) {
     secondaryNav.push(...ADMIN_NAV);
   }
@@ -371,7 +374,7 @@ export default function AdaptiveNav({ currentPath, userName, isAdmin, isReadingM
       <MobileBottomNav items={primaryNav.slice(0, 5)} currentPath={currentPath} hidden={bottomNavHidden} />
 
       {/* Navigation Rail — visible 600px – 839px */}
-      <NavigationRail items={primaryNav} currentPath={currentPath} onMenuClick={openModal} />
+      <NavigationRail items={primaryNav} currentPath={currentPath} onMenuClick={openModal} userName={userName} />
 
       {/* Navigation Drawer — visible 840px+ */}
       <NavigationDrawer
