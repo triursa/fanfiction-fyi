@@ -9,7 +9,7 @@ import Image from '@tiptap/extension-image';
 import CharacterCount from '@tiptap/extension-character-count';
 import { common, createLowlight } from 'lowlight';
 import { markdownToHtml, htmlToMarkdown } from '@/lib/markdown';
-import { editorMarkdown, editorContent, editorImageKeys, editorWordCount, editorSetContent, editorOnContentChange, editorTriggerImageUpload, editorTriggerLinkDialog } from '@/lib/editor-signals';
+import { editorMarkdown, editorContent, editorHtml, editorImageKeys, editorWordCount, editorSetContent, editorOnContentChange, editorTriggerImageUpload, editorTriggerLinkDialog } from '@/lib/editor-signals';
 import LinkDialog from './LinkDialog';
 import SlashCommandMenu, { createSlashCommandExtension } from './SlashCommandMenu';
 import ShortcutsModal from './ShortcutsModal';
@@ -125,6 +125,7 @@ export default function TipTapEditor({
       const md = htmlToMarkdown(editorRef.current.getHTML());
       editorMarkdown.value = md;
       editorContent.value = md;
+      editorHtml.value = editorRef.current.getHTML();
       editorWordCount.value = countWords(editorRef.current.getText());
     };
     editorSetContent.value = handler;
@@ -163,9 +164,10 @@ export default function TipTapEditor({
       onUpdate: ({ editor: e }) => {
         const html = e.getHTML();
         const md = htmlToMarkdown(html);
-        // Expose markdown via signals for form submission
+        // Expose markdown and HTML via signals for form submission
         editorMarkdown.value = md;
         editorContent.value = md;
+        editorHtml.value = html;
         // Update canonical word count from editor text (not markdown)
         // to avoid 0-word bugs when htmlToMarkdown degrades content
         editorWordCount.value = countWords(e.getText());
@@ -190,6 +192,7 @@ export default function TipTapEditor({
     const initialMd = content ? htmlToMarkdown(editor.getHTML()) : '';
     editorMarkdown.value = initialMd;
     editorContent.value = initialMd;
+    editorHtml.value = content ? editor.getHTML() : '';
     editorWordCount.value = content ? countWords(editor.getText()) : 0;
 
     return () => {

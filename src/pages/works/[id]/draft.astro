@@ -501,7 +501,7 @@ const initialChapterData = JSON.stringify({
 </style>
 
 <script define:vars={{ workId, workData, initialChapterData }}>
-  import { editorMarkdown, editorWordCount, editorSetContent, editorOnContentChange } from '../../../lib/editor-signals';
+  import { editorMarkdown, editorHtml, editorWordCount, editorSetContent, editorOnContentChange } from '../../../lib/editor-signals';
   import { saveDraftToLocal, loadDraftFromLocal, clearDraftFromLocal } from '../../../lib/localstorage-draft';
 
   const work = JSON.parse(workData);
@@ -556,9 +556,8 @@ const initialChapterData = JSON.stringify({
       if (setFn) {
         setFn(localDraft.markdown);
       }
-      // Update word count — the editorSetContent call already updates editorWordCount,
-      // but the signal update may not have propagated yet, so defer the display update.
-      setTimeout(() => updateWordCountDisplay(), 50);
+      // editorSetContent synchronously updates editorWordCount; update the display immediately.
+      updateWordCountDisplay();
       showToast('Draft restored from local backup', 'success');
     }
     clearDraftFromLocal(workId, currentChapterId);
@@ -656,9 +655,8 @@ const initialChapterData = JSON.stringify({
         if (setFn) {
           setFn(contentMd);
         }
-        // Word count is updated via editorWordCount signal after setContent;
-        // defer the display update to ensure the signal has propagated.
-        setTimeout(() => updateWordCountDisplay(), 50);
+        // editorSetContent synchronously updates editorWordCount; update the display immediately.
+        updateWordCountDisplay();
       }
     } catch {
       // Content loaded from cache, editor already populated
@@ -772,10 +770,11 @@ const initialChapterData = JSON.stringify({
       const res = await fetch(`/api/works/${workId}/chapters/${currentChapterId}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ title, content_md: contentMd, draft: draft ? 1 : 0 }),
+        body: JSON.stringify({ title, content_md: contentMd, content_html: editorHtml.value, draft: draft ? 1 : 0 }),
       });
       clientLog('saveChapter_response', `status=${res.status} ok=${res.ok}`);
       if (res.ok) {
+        const savedChapter = await res.json().catch(() => ({}));
         // Only clear dirty flag if no new edits happened while we were saving
         const contentNow = editorMarkdown.value || '';
         if (contentNow === contentAtSaveStart) {
@@ -789,12 +788,13 @@ const initialChapterData = JSON.stringify({
           autosaveStatus.textContent = 'Auto-saved';
           autosaveStatus.style.color = 'var(--md-sys-color-outline)';
         }
-        // Update local chapter data
+        // Update local chapter data using the server's persisted word_count so the
+        // UI stays in sync with what was actually stored (not a client-side estimate).
         const ch = work.chapters.find((c) => c.id === currentChapterId);
         if (ch) {
           ch.title = title;
           ch.draft = draft;
-          ch.word_count = editorWordCount.value;
+          ch.word_count = savedChapter.wordCount ?? savedChapter.word_count ?? editorWordCount.value;
         }
         renderChapterList();
         updateWordCountDisplay();
