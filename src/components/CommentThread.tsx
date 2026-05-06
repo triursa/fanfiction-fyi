@@ -36,10 +36,22 @@ function buildTree(comments: CommentData[]): Map<number, CommentData[]> {
   return tree;
 }
 
-/** Normalize a SQLite datetime string ("YYYY-MM-DD HH:MM:SS") to a valid Date. */
+/**
+ * Normalize a SQLite datetime string ("YYYY-MM-DD HH:MM:SS") to a Date.
+ * All timestamps in this database are stored in UTC via SQLite's datetime('now')
+ * or CURRENT_TIMESTAMP, so appending 'Z' is always correct here.
+ */
 function parseSQLiteDate(dateStr: string): Date {
   // SQLite CURRENT_TIMESTAMP uses a space instead of 'T'; replace to produce valid ISO 8601
   return new Date(dateStr.replace(' ', 'T') + 'Z');
+}
+
+/**
+ * Format a Date as a SQLite-style UTC datetime string ("YYYY-MM-DD HH:MM:SS").
+ * Used when creating optimistic comment entries before the server responds.
+ */
+export function toSQLiteDate(date: Date): string {
+  return date.toISOString().slice(0, 19).replace('T', ' ');
 }
 
 function formatRelativeDate(dateStr: string): string {

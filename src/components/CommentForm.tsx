@@ -1,5 +1,5 @@
 import { useState, useCallback } from 'preact/hooks';
-import type { CommentData } from './CommentThread';
+import { toSQLiteDate, type CommentData } from './CommentThread';
 
 interface CommentPayload {
   content: string;
@@ -55,14 +55,15 @@ export default function CommentForm({
     if (pseudId) {
       const now = new Date();
       const tempComment: CommentData = {
-        id: -now.getTime(),
+        // Use timestamp + random suffix to avoid same-millisecond collisions
+        id: -(now.getTime() * 1000 + Math.floor(Math.random() * 1000)),
         work_id: workId,
         chapter_id: chapterId ?? null,
         pseud_id: pseudId,
         parent_id: parentId ?? null,
         content: trimmed,
         content_html: null,
-        created_at: now.toISOString().slice(0, 19).replace('T', ' '),
+        created_at: toSQLiteDate(now),
         pseud_name: pseudName ?? '',
       };
       tempId = tempComment.id;
