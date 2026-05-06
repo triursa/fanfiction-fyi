@@ -3,6 +3,17 @@ compatibility_date = "2026-04-27"
 compatibility_flags = ["nodejs_compat"]
 pages_build_output_dir = "./dist"
 
+# Non-secret plaintext environment variables.
+# Override per-environment via the Cloudflare Pages dashboard
+# (Pages → project → Settings → Environment variables) or with:
+#   npx wrangler pages secret put FOUNDER_EMAIL   # for secrets
+# See .env.example for full documentation of each variable.
+[vars]
+# Email address that receives the 'founder' role on first OAuth signup.
+# Leave empty to disable automatic founder promotion.
+# Override this value in the Cloudflare Pages dashboard for production.
+FOUNDER_EMAIL = ""
+
 [[d1_databases]]
 binding = "DB"
 database_name = "fanfiction-fyi-db"
