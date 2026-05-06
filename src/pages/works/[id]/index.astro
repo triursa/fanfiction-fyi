@@ -2,6 +2,7 @@
 export const prerender = false;
 import Base from '../../../layouts/Base.astro';
 import TagCluster from '../../../components/TagCluster.tsx';
+import CommentThread from '../../../components/CommentThread';
 import { getDrizzle } from '../../../lib/db';
 import { works, chapters, creatorships, readings, sessions, users, pseuds as pseudsTable, tags, taggings, chapterReactions, comments, bookmarks, kudos, workRelations, serialWorks, series } from '../../../lib/schema';
 import { eq, and, isNull, isNotNull, desc, sql } from 'drizzle-orm';
@@ -93,7 +94,7 @@ if (sessionMatch) {
   if (session) {
     authUser = await db.select().from(users).where(eq(users.id, session.userId)).get();
     if (authUser) {
-      const userPseud = await db.select({ id: pseudsTable.id }).from(pseudsTable)
+      const userPseud = await db.select({ id: pseudsTable.id, name: pseudsTable.name }).from(pseudsTable)
         .where(eq(pseudsTable.userId, authUser.id))
         .orderBy(pseudsTable.id)
         .limit(1)
@@ -339,53 +340,15 @@ const commentsJson = JSON.stringify(allComments);
       )}
 
       <!-- Comments Section -->
-      <section class="comments-section">
-        <h3 class="comments-title">Comments ({allComments.length})</h3>
-
-        {authUser ? (
-          <form id="comment-form" class="comment-form">
-            <input type="hidden" name="work_id" value={work.id} />
-            <input type="hidden" name="chapter_id" value={chapter?.id ?? ''} />
-            <input type="hidden" name="parent_id" id="reply-parent-id" value="" />
-            <div class="comment-form-header">
-              <span id="reply-indicator" class="reply-indicator" style="display:none;">
-                Replying to <span id="reply-to-name"></span>
-                <button type="button" id="cancel-reply" class="cancel-reply-btn">✕</button>
-              </span>
-            </div>
-            <textarea id="comment-content" name="content" placeholder="Leave a comment…" rows="3" required class="comment-textarea"></textarea>
-            <button type="submit" class="btn-primary">Post Comment</button>
-          </form>
-        ) : (
-          <p class="login-prompt"><a href="/login">Sign in</a> to leave a comment.</p>
-        )}
-
-        <div id="comments-thread" class="comments-thread" data-comments={commentsJson}>
-          {allComments.filter(c => !c.parent_id).map(comment => (
-            <div class="comment-item" data-comment-id={comment.id}>
-              <div class="comment-body">
-                <span class="comment-author">{comment.pseud_name}</span>
-                <span class="comment-date">{new Date(comment.created_at).toLocaleDateString()}</span>
-                <div class="comment-content" set:html={comment.content_html || markdownToHtml(comment.content || '')} />
-                {authUser && (
-                  <button class="reply-btn" data-comment-id={comment.id} data-pseud-name={comment.pseud_name}>Reply</button>
-                )}
-              </div>
-              <div class="comment-replies">
-                {allComments.filter(r => r.parent_id === comment.id).map(reply => (
-                  <div class="comment-item comment-reply" data-comment-id={reply.id}>
-                    <div class="comment-body">
-                      <span class="comment-author">{reply.pseud_name}</span>
-                      <span class="comment-date">{new Date(reply.created_at).toLocaleDateString()}</span>
-                      <div class="comment-content" set:html={reply.content_html || markdownToHtml(reply.content || '')} />
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          ))}
-        </div>
-      </section>
+      <CommentThread
+        client:load
+        workId={work.id}
+        chapterId={null}
+        comments={allComments}
+        authed={!!authUser}
+        currentPseudId={userPseudId}
+        currentPseudName={authUser ? (pseuds.find(p => p.user_id === authUser.id)?.name ?? null) : null}
+      />
     </div>
 
     <!-- Sticky sidebar on desktop -->
@@ -721,28 +684,7 @@ const commentsJson = JSON.stringify(allComments);
   .badge-private-inline { font: var(--md-sys-typescale-label-small); background: var(--md-sys-color-tertiary-container); color: var(--md-sys-color-on-tertiary-container); padding: 2px var(--space-2); border-radius: var(--md-sys-shape-corner-full); margin-left: var(--space-2); }
   .bookmark-user-notes { font: var(--md-sys-typescale-body-medium); color: var(--md-sys-color-on-surface-variant); margin: var(--space-2) 0 0; font-style: italic; }
 
-  /* ── Comments ── */
-  .comments-section { margin-top: var(--space-10); border-top: 1px solid var(--md-sys-color-outline-variant); padding-top: var(--space-6); }
-  .comments-title { font: var(--md-sys-typescale-headline-medium); color: var(--md-sys-color-on-surface); margin: 0 0 var(--space-4); }
-  .comment-form { margin-bottom: var(--space-6); }
-  .comment-form-header { margin-bottom: var(--space-2); }
-  .reply-indicator { font: var(--md-sys-typescale-body-small); color: var(--md-sys-color-primary); background: var(--md-sys-color-primary-container); padding: var(--space-1) var(--space-2); border-radius: var(--md-sys-shape-corner-full); display: inline-flex; align-items: center; gap: var(--space-2); }
-  .cancel-reply-btn { background: none; border: none; color: var(--md-sys-color-on-primary-container); cursor: pointer; font-size: 14px; padding: 0 var(--space-1); }
-  .comment-textarea { width: 100%; font: var(--md-sys-typescale-body-large); background: var(--md-sys-color-surface-container); color: var(--md-sys-color-on-surface); border: 1px solid var(--md-sys-color-outline-variant); border-radius: var(--md-sys-shape-corner-medium); padding: var(--space-3); resize: vertical; }
-  .comment-textarea:focus { outline: none; border-color: var(--md-sys-color-primary); }
-  .login-prompt { font: var(--md-sys-typescale-body-large); color: var(--md-sys-color-outline); }
-  .login-prompt a { color: var(--md-sys-color-primary); }
-
-  .comments-thread { display: flex; flex-direction: column; gap: var(--space-4); }
-  .comment-item { background: var(--md-sys-color-surface-container); border-radius: var(--md-sys-shape-corner-medium); padding: var(--space-4); }
-  .comment-author { font: var(--md-sys-typescale-label-large); color: var(--md-sys-color-primary); }
-  .comment-date { font: var(--md-sys-typescale-body-small); color: var(--md-sys-color-outline); margin-left: var(--space-2); }
-  .comment-content { font: var(--md-sys-typescale-body-large); color: var(--md-sys-color-on-surface); line-height: 1.7; margin-top: var(--space-2); }
-  .comment-content p { margin: var(--space-1) 0; }
-  .reply-btn { font: var(--md-sys-typescale-label-medium); color: var(--md-sys-color-primary); background: none; border: none; cursor: pointer; margin-top: var(--space-2); padding: 0; }
-  .reply-btn:hover { text-decoration: underline; }
-  .comment-replies { margin-left: var(--space-6); margin-top: var(--space-3); display: flex; flex-direction: column; gap: var(--space-2); }
-  .comment-reply { background: var(--md-sys-color-surface-container-high); }
+  /* ── Comments (moved to theme.css) ── */
 
   @media (max-width: 1023px) {
     .work-layout { gap: var(--space-6); padding: var(--space-4); }
@@ -913,58 +855,4 @@ const commentsJson = JSON.stringify(allComments);
       body: JSON.stringify({ last_chapter: chapterId }),
     }).catch(() => {});
   } catch { /* silently fail */ }
-
-  // Comment form
-  const commentForm = document.getElementById('comment-form');
-  if (commentForm) {
-    commentForm.addEventListener('submit', async (e) => {
-      e.preventDefault();
-      const content = document.getElementById('comment-content').value.trim();
-      const parentId = document.getElementById('reply-parent-id').value;
-      if (!content) return;
-
-      try {
-        const body = { content, work_id: workId };
-        if (parentId) body.parent_id = Number(parentId);
-        if (chapterId) body.chapter_id = chapterId;
-
-        const res = await fetch(`/api/works/${workId}/comments`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(body),
-        });
-        if (res.ok) {
-          window.location.reload();
-        }
-      } catch { /* silently fail */ }
-    });
-  }
-
-  // Reply buttons
-  document.querySelectorAll('.reply-btn').forEach(btn => {
-    btn.addEventListener('click', () => {
-      const commentId = btn.dataset.commentId;
-      const pseudName = btn.dataset.pseudName;
-      const parentInput = document.getElementById('reply-parent-id');
-      const indicator = document.getElementById('reply-indicator');
-      const replyName = document.getElementById('reply-to-name');
-      if (parentInput && indicator && replyName) {
-        parentInput.value = commentId;
-        replyName.textContent = pseudName;
-        indicator.style.display = 'inline-flex';
-      }
-      document.getElementById('comment-content')?.focus();
-    });
-  });
-
-  // Cancel reply
-  const cancelReply = document.getElementById('cancel-reply');
-  if (cancelReply) {
-    cancelReply.addEventListener('click', () => {
-      const parentInput = document.getElementById('reply-parent-id');
-      const indicator = document.getElementById('reply-indicator');
-      if (parentInput) parentInput.value = '';
-      if (indicator) indicator.style.display = 'none';
-    });
-  }
 </script>
