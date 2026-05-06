@@ -62,7 +62,7 @@ export default function CommentForm({
         parent_id: parentId ?? null,
         content: trimmed,
         content_html: null,
-        created_at: now.toISOString().replace('T', ' ').slice(0, 19),
+        created_at: now.toISOString().slice(0, 19).replace('T', ' '),
         pseud_name: pseudName ?? '',
       };
       tempId = tempComment.id;
@@ -88,12 +88,18 @@ export default function CommentForm({
           setShowPreview(false);
         }
       } else {
-        if (tempId !== null) onCancelPost?.(tempId);
+        if (tempId !== null) {
+          onCancelPost?.(tempId);
+          setContent(trimmed); // Restore content so user can retry
+        }
         const data = await res.json().catch(() => ({}));
         setError(data.error || 'Failed to post comment. Please try again.');
       }
     } catch {
-      if (tempId !== null) onCancelPost?.(tempId);
+      if (tempId !== null) {
+        onCancelPost?.(tempId);
+        setContent(trimmed); // Restore content so user can retry
+      }
       setError('Network error. Please try again.');
     } finally {
       setSubmitting(false);
