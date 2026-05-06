@@ -38,6 +38,7 @@ function isPublicPath(pathname: string): boolean {
   // Public content pages (browse, read, search)
   if (pathname === '/works' || pathname.startsWith('/works/')) return true;
   if (pathname === '/characters' || pathname.startsWith('/characters/')) return true;
+  if (pathname === '/pseuds' || pathname.startsWith('/pseuds/')) return true;
   if (pathname === '/tags' || pathname.startsWith('/tags/')) return true;
   if (pathname === '/series' || pathname.startsWith('/series/')) return true;
   if (pathname === '/collections' || pathname.startsWith('/collections/')) return true;
