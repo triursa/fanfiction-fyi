@@ -1,0 +1,252 @@
+---
+export const prerender = false;
+import Base from '../../layouts/Base.astro';
+import { getDrizzle } from '../../lib/db';
+import { users, sessions, pseuds as pseudsTable, readings, works, chapters } from '../../lib/schema';
+import { eq, and, gt, desc, sql } from 'drizzle-orm';
+
+const d1 = Astro.locals.runtime.env.DB as D1Database;
+const db = getDrizzle(d1);
+
+// Auth check
+const cookie = Astro.request.headers.get('cookie') ?? '';
+const sessionMatch = cookie.match(/session=([a-f0-9]+)/);
+if (!sessionMatch) return Astro.redirect('/login');
+
+const session = await db.select({ userId: sessions.userId })
+  .from(sessions)
+  .where(and(eq(sessions.token, sessionMatch[1]), gt(sessions.expiresAt, sql`(datetime('now'))`)))
+  .get();
+if (!session) return Astro.redirect('/login');
+
+const user = await db.select().from(users).where(eq(users.id, session.userId)).get();
+if (!user) return Astro.redirect('/login');
+
+const userPseuds = await db.select({ id: pseudsTable.id, name: pseudsTable.name })
+  .from(pseudsTable)
+  .where(eq(pseudsTable.userId, user.id))
+  .orderBy(pseudsTable.id)
+  .all();
+const pseudId = userPseuds[0]?.id;
+if (!pseudId) return Astro.redirect('/login');
+
+// Fetch all readings with work info and published chapter count
+const readingRows = await db
+  .select({
+    readingId: readings.id,
+    workId: readings.workId,
+    forLater: readings.forLater,
+    lastChapter: readings.lastChapter,
+    updatedAt: readings.updatedAt,
+    workTitle: works.title,
+    workSummary: works.summary,
+    wordCount: works.wordCount,
+    complete: works.complete,
+    workUpdatedAt: works.updatedAt,
+    chapterCount: sql<number>`(SELECT COUNT(*) FROM chapters WHERE chapters.work_id = works.id AND chapters.draft = 0)`,
+  })
+  .from(readings)
+  .innerJoin(works, eq(readings.workId, works.id))
+  .where(eq(readings.pseudId, pseudId))
+  .orderBy(desc(readings.updatedAt))
+  .all();
+
+// Enrich with chapter position for progress calculation
+const historyItems = await Promise.all(readingRows.map(async (row) => {
+  let lastChapterPosition: number | null = null;
+  if (row.lastChapter) {
+    const chap = await db.select({ position: chapters.position })
+      .from(chapters)
+      .where(and(eq(chapters.id, row.lastChapter), eq(chapters.draft, 0)))
+      .get();
+    lastChapterPosition = chap?.position ?? null;
+  }
+  const progress = row.chapterCount > 0 && lastChapterPosition
+    ? Math.round((lastChapterPosition / row.chapterCount) * 100)
+    : 0;
+  return {
+    ...row,
+    lastChapterPosition,
+    progress,
+    // Snake-case aliases for template
+    work_id: row.workId,
+    word_count: row.wordCount,
+    work_updated_at: row.workUpdatedAt,
+    updated_at: row.updatedAt,
+    for_later: row.forLater,
+    chapter_count: row.chapterCount,
+    last_chapter: row.lastChapter,
+    last_chapter_position: lastChapterPosition,
+  };
+}));
+
+// Separate into "Currently Reading" and "Marked for Later"
+const currentlyReading = historyItems.filter(r => !r.forLater);
+const markedForLater = historyItems.filter(r => r.forLater);
+---
+
+<Base title="Reading History — fanfiction.fyi">
+  <section class="history-page">
+    <h1 class="page-title">Reading History</h1>
+
+    <!-- Currently Reading -->
+    <section class="history-section">
+      <h2 class="section-title">
+        Currently Reading
+        <span class="section-count">{currentlyReading.length}</span>
+      </h2>
+
+      {currentlyReading.length === 0 ? (
+        <p class="empty-message">No reading history yet. Start reading a work and your progress will be tracked here.</p>
+      ) : (
+        <ul class="history-list">
+          {currentlyReading.map(item => (
+            <li class="history-card" data-work-id={item.work_id}>
+              <div class="history-card-main">
+                <div class="history-card-header">
+                  <a href={`/works/${item.work_id}`} class="history-title">{item.workTitle}</a>
+                  {item.complete ? (
+                    <span class="badge badge-complete">Complete</span>
+                  ) : (
+                    <span class="badge badge-ongoing">Ongoing</span>
+                  )}
+                </div>
+                {item.workSummary && (
+                  <p class="history-summary">{item.workSummary.length > 150 ? item.workSummary.slice(0, 150) + '…' : item.workSummary}</p>
+                )}
+                <div class="history-meta">
+                  <span>{item.word_count?.toLocaleString()} words</span>
+                  <span>·</span>
+                  <span>{item.chapter_count} chapter{item.chapter_count !== 1 ? 's' : ''}</span>
+                  {item.lastChapterPosition && (
+                    <>
+                      <span>·</span>
+                      <span>Last read: Chapter {item.lastChapterPosition}</span>
+                    </>
+                  )}
+                </div>
+
+                <!-- Progress bar -->
+                {item.chapter_count > 0 && (
+                  <div class="progress-bar-track">
+                    <div
+                      class="progress-bar-fill"
+                      style={`width: ${item.progress}%`}
+                      role="progressbar"
+                      aria-valuenow={item.progress}
+                      aria-valuemin={0}
+                      aria-valuemax={100}
+                    />
+                    <span class="progress-label">{item.progress}%</span>
+                  </div>
+                )}
+
+                <div class="history-actions">
+                  <a href={item.lastChapter ? `/works/${item.work_id}#chapter-${item.lastChapter}` : `/works/${item.work_id}`} class="btn-continue">
+                    Continue Reading
+                  </a>
+                  <button class="btn-mark-for-later" data-work-id={item.work_id} data-for-later={item.forLater ? '1' : '0'}>
+                    {item.forLater ? 'Remove from Later' : 'Mark for Later'}
+                  </button>
+                  <button class="btn-remove-history" data-work-id={item.work_id}>Remove</button>
+                </div>
+              </div>
+
+              <div class="history-card-time">
+                <span class="time-label">{new Date(item.updated_at + 'Z').toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}</span>
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
+
+    <!-- Marked for Later -->
+    {markedForLater.length > 0 && (
+      <section class="history-section">
+        <h2 class="section-title">
+          Marked for Later
+          <span class="section-count">{markedForLater.length}</span>
+        </h2>
+
+        <ul class="history-list">
+          {markedForLater.map(item => (
+            <li class="history-card history-card-later" data-work-id={item.work_id}>
+              <div class="history-card-main">
+                <div class="history-card-header">
+                  <a href={`/works/${item.work_id}`} class="history-title">{item.workTitle}</a>
+                  {item.complete ? (
+                    <span class="badge badge-complete">Complete</span>
+                  ) : (
+                    <span class="badge badge-ongoing">Ongoing</span>
+                  )}
+                </div>
+                {item.workSummary && (
+                  <p class="history-summary">{item.workSummary.length > 150 ? item.workSummary.slice(0, 150) + '…' : item.workSummary}</p>
+                )}
+                <div class="history-meta">
+                  <span>{item.word_count?.toLocaleString()} words</span>
+                  <span>·</span>
+                  <span>{item.chapter_count} chapter{item.chapter_count !== 1 ? 's' : ''}</span>
+                </div>
+
+                <div class="history-actions">
+                  <a href={`/works/${item.work_id}`} class="btn-continue">Start Reading</a>
+                  <button class="btn-mark-for-later" data-work-id={item.work_id} data-for-later="1">Remove from Later</button>
+                  <button class="btn-remove-history" data-work-id={item.work_id}>Remove</button>
+                </div>
+              </div>
+
+              <div class="history-card-time">
+                <span class="time-label">{new Date(item.updated_at + 'Z').toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}</span>
+              </div>
+            </li>
+          ))}
+        </ul>
+      </section>
+    )}
+  </section>
+</Base>
+
+<style is:global>
+  @import '../../styles/theme.css';
+</style>
+
+<script define:vars={{}}>
+  // Mark for Later / Remove from Later
+  document.querySelectorAll('.btn-mark-for-later').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const workId = btn.dataset.workId;
+      const isForLater = btn.dataset.forLater === '1';
+      try {
+        const res = await fetch(`/api/works/${workId}/progress`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ for_later: !isForLater }),
+        });
+        if (res.ok) window.location.reload();
+      } catch {}
+    });
+  });
+
+  // Remove from history
+  document.querySelectorAll('.btn-remove-history').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const workId = btn.dataset.workId;
+      try {
+        const res = await fetch(`/api/works/${workId}/progress`, {
+          method: 'DELETE',
+        });
+        if (res.ok) {
+          const card = btn.closest('.history-card');
+          if (card) {
+            card.style.opacity = '0';
+            card.style.transform = 'translateX(20px)';
+            card.style.transition = 'opacity 0.3s, transform 0.3s';
+            setTimeout(() => card.remove(), 300);
+          }
+        }
+      } catch {}
+    });
+  });
+</script>
