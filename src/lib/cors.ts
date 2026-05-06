@@ -28,7 +28,7 @@ function getAllowedOrigin(request: Request): string {
 export function corsHeaders(request: Request): HeadersInit {
   return {
     "Access-Control-Allow-Origin": getAllowedOrigin(request),
-    "Access-Control-Allow-Methods": "GET, OPTIONS",
+    "Access-Control-Allow-Methods": "GET, PUT, OPTIONS",
     "Access-Control-Allow-Headers": "Content-Type, Authorization",
   };
 }

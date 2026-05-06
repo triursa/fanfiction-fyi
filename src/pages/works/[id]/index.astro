@@ -3,6 +3,7 @@ export const prerender = false;
 import Base from '../../../layouts/Base.astro';
 import TagCluster from '../../../components/TagCluster.tsx';
 import CommentThread from '../../../components/CommentThread';
+import ReportButton from '../../../components/ReportButton';
 import { getDrizzle } from '../../../lib/db';
 import { works, chapters, creatorships, readings, sessions, users, pseuds as pseudsTable, tags, taggings, chapterReactions, comments, bookmarks, kudos, workRelations, serialWorks, series } from '../../../lib/schema';
 import { eq, and, isNull, isNotNull, desc, sql } from 'drizzle-orm';
@@ -453,6 +454,7 @@ const commentsJson = JSON.stringify(allComments);
               </button>
             </Fragment>
           )}
+          <ReportButton client:load targetType="work" targetId={work.id} targetLabel={work.title} authed={!!authUser} />
         </div>
       </div>
 

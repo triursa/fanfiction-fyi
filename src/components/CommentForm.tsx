@@ -64,6 +64,7 @@ export default function CommentForm({
         content: trimmed,
         content_html: null,
         created_at: toSQLiteDate(now),
+        updated_at: null,
         pseud_name: pseudName ?? '',
       };
       tempId = tempComment.id;

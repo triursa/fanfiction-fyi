@@ -6,3 +6,4 @@ export * from './tags';
 export * from './characters';
 export * from './canon';
 export * from './publish-log';
+export * from './moderation';

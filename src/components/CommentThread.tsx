@@ -1,5 +1,6 @@
 import { useState, useCallback, useRef } from 'preact/hooks';
 import CommentForm from './CommentForm';
+import ReportButton from './ReportButton';
 
 export interface CommentData {
   id: number;
@@ -10,6 +11,7 @@ export interface CommentData {
   content: string;
   content_html: string | null;
   created_at: string;
+  updated_at: string | null;
   pseud_name: string;
 }
 
@@ -85,6 +87,9 @@ function CommentItem({
   depth,
   onReply,
   authed,
+  currentPseudId,
+  workId,
+  onUpdateComment,
   treeRef,
 }: {
   comment: CommentData;
@@ -92,14 +97,58 @@ function CommentItem({
   depth: number;
   onReply: (parentId: number, pseudName: string) => void;
   authed: boolean;
+  currentPseudId?: number | null;
+  workId: number;
+  onUpdateComment: (id: number, updated: CommentData) => void;
   treeRef: Map<number, CommentData[]>;
 }) {
   const [expanded, setExpanded] = useState(depth < 2);
+  const [editing, setEditing] = useState(false);
+  const [editText, setEditText] = useState('');
+  const [saving, setSaving] = useState(false);
   const hasReplies = replies.length > 0;
   const isOptimistic = comment.id < 0;
   // Max indent depth — flatten at depth 6+
   const isDeep = depth >= 6;
   const repliesId = `comment-replies-${comment.id}`;
+
+  const isOwnComment = currentPseudId != null && currentPseudId === comment.pseud_id;
+
+  const startEdit = useCallback(() => {
+    setEditText(comment.content);
+    setEditing(true);
+  }, [comment.content]);
+
+  const cancelEdit = useCallback(() => {
+    setEditing(false);
+    setEditText('');
+  }, []);
+
+  const saveEdit = useCallback(async () => {
+    if (!editText.trim()) return;
+    setSaving(true);
+    try {
+      const res = await fetch(`/api/works/${workId}/comments/${comment.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ content: editText.trim() }),
+        credentials: 'same-origin',
+      });
+      if (!res.ok) {
+        const data: any = await res.json().catch(() => ({}));
+        console.error('Failed to edit comment:', data.error || res.statusText);
+        return;
+      }
+      const updated: CommentData = await res.json();
+      onUpdateComment(comment.id, updated);
+      setEditing(false);
+      setEditText('');
+    } catch (err) {
+      console.error('Failed to edit comment:', err);
+    } finally {
+      setSaving(false);
+    }
+  }, [editText, workId, comment.id, onUpdateComment]);
 
   return (
     <div class={`comment-item${depth > 0 ? ' comment-reply' : ''}${isDeep ? ' comment-deep' : ''}${isOptimistic ? ' optimistic' : ''}`}
@@ -110,16 +159,47 @@ function CommentItem({
           <a href={`/pseuds/${comment.pseud_id}`} class="comment-author">{comment.pseud_name}</a>
           <span class="comment-date" title={parseSQLiteDate(comment.created_at).toLocaleString()}>
             {formatRelativeDate(comment.created_at)}
+            {comment.updated_at ? ' (edited)' : ''}
           </span>
         </div>
-        <div
-          class="comment-content"
-          dangerouslySetInnerHTML={{
-            __html: comment.content_html ?? escapeHtml(comment.content),
-          }}
-        />
+        {editing ? (
+          <div class="comment-edit-form">
+            <textarea
+              value={editText}
+              onInput={(e: any) => setEditText(e.target.value)}
+              rows={4}
+              class="comment-edit-textarea"
+            />
+            <div class="comment-edit-actions">
+              <button class="comment-edit-save-btn" onClick={saveEdit} disabled={saving || !editText.trim()}>
+                {saving ? 'Saving…' : 'Save'}
+              </button>
+              <button class="comment-edit-cancel-btn" onClick={cancelEdit} disabled={saving}>
+                Cancel
+              </button>
+            </div>
+          </div>
+        ) : (
+          <div
+            class="comment-content"
+            dangerouslySetInnerHTML={{
+              __html: comment.content_html ?? escapeHtml(comment.content),
+            }}
+          />
+        )}
         {authed && !isOptimistic && (
-          <button class="reply-btn" onClick={() => onReply(comment.id, comment.pseud_name)}>Reply</button>
+          <div class="comment-actions">
+            <button class="reply-btn" onClick={() => onReply(comment.id, comment.pseud_name)}>Reply</button>
+            {isOwnComment && !editing && (
+              <button class="edit-btn" onClick={startEdit}>Edit</button>
+            )}
+            <ReportButton
+              targetType="comment"
+              targetId={comment.id}
+              targetLabel={comment.content.slice(0, 80)}
+              authed={authed}
+            />
+          </div>
         )}
       </div>
 
@@ -145,6 +225,9 @@ function CommentItem({
               depth={depth + 1}
               onReply={onReply}
               authed={authed}
+              currentPseudId={currentPseudId}
+              workId={workId}
+              onUpdateComment={onUpdateComment}
               treeRef={treeRef}
             />
           ))}
@@ -193,6 +276,10 @@ export default function CommentThread({
     setComments((prev) => prev.filter((c) => c.id !== tempId));
   }, []);
 
+  const handleUpdateComment = useCallback((id: number, updated: CommentData) => {
+    setComments((prev) => prev.map((c) => (c.id === id ? updated : c)));
+  }, []);
+
   const total = comments.length;
 
   return (
@@ -230,6 +317,9 @@ export default function CommentThread({
               depth={0}
               onReply={handleReply}
               authed={authed}
+              currentPseudId={currentPseudId}
+              workId={workId}
+              onUpdateComment={handleUpdateComment}
               treeRef={tree}
             />
           );

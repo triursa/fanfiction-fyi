@@ -84,20 +84,35 @@ const works = workRows.map(w => ({
     <div class="collection-works">
       <h2 class="section-title">Works ({works.length})</h2>
 
+      {isOwner && (
+        <div class="add-work-section">
+          <button type="button" id="add-work-btn" class="btn-add-work">+ Add Work</button>
+          <div id="add-work-dialog" class="add-work-dialog" style="display:none;">
+            <input type="text" id="work-search-input" placeholder="Search works by title…" class="form-input" />
+            <div id="work-search-results" class="work-search-results"></div>
+          </div>
+        </div>
+      )}
+
       {works.length === 0 && (
-        <p class="placeholder-text">This collection is empty.</p>
+        <p class="placeholder-text">This collection is empty.{isOwner && ' Add works using the button above.'}</p>
       )}
 
       <div class="works-grid">
         {works.map(w => (
-          <a href={`/works/${w.id}`} class="work-card">
-            <h3 class="work-card__title">{w.title}</h3>
-            {w.summary && <p class="work-card__summary">{w.summary.length > 200 ? w.summary.slice(0, 200) + '…' : w.summary}</p>}
-            <div class="work-card__meta">
-              <span>{w.word_count.toLocaleString()} words</span>
-              {w.published_at && <><span>·</span><span>Published {new Date(w.published_at).toLocaleDateString()}</span></>}
-            </div>
-          </a>
+          <div class="work-card-wrapper">
+            <a href={`/works/${w.id}`} class="work-card">
+              <h3 class="work-card__title">{w.title}</h3>
+              {w.summary && <p class="work-card__summary">{w.summary.length > 200 ? w.summary.slice(0, 200) + '…' : w.summary}</p>}
+              <div class="work-card__meta">
+                <span>{w.word_count.toLocaleString()} words</span>
+                {w.published_at && <><span>·</span><span>Published {new Date(w.published_at).toLocaleDateString()}</span></>}
+              </div>
+            </a>
+            {isOwner && (
+              <button type="button" class="btn-remove-work" data-work-id={w.id} data-work-title={w.title}>Remove</button>
+            )}
+          </div>
         ))}
       </div>
     </div>
@@ -251,19 +266,122 @@ const works = workRows.map(w => ({
     background: rgba(140, 145, 153, 0.15);
     color: var(--md-sys-color-outline);
   }
+
+  .add-work-section {
+    margin-bottom: var(--space-4);
+  }
+
+  .btn-add-work {
+    font: var(--md-sys-typescale-label-large);
+    background: var(--md-sys-color-primary-container);
+    color: var(--md-sys-color-on-primary-container);
+    border: none;
+    border-radius: var(--md-sys-shape-corner-full);
+    padding: var(--space-2) var(--space-5);
+    cursor: pointer;
+  }
+
+  .btn-add-work:hover {
+    background: var(--md-sys-color-primary);
+    color: var(--md-sys-color-on-primary);
+  }
+
+  .add-work-dialog {
+    margin-top: var(--space-3);
+    padding: var(--space-4);
+    background: var(--md-sys-color-surface-container);
+    border-radius: var(--md-sys-shape-corner-medium);
+    border: 1px solid var(--md-sys-color-outline-variant);
+  }
+
+  .work-search-results {
+    margin-top: var(--space-2);
+    max-height: 200px;
+    overflow-y: auto;
+  }
+
+  .work-search-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: var(--space-2) var(--space-3);
+    cursor: pointer;
+    border-radius: 4px;
+  }
+
+  .work-search-item:hover {
+    background: var(--md-sys-color-surface-container-high);
+  }
+
+  .work-search-item-title {
+    font: var(--md-sys-typescale-body-medium);
+    color: var(--md-sys-color-on-surface);
+  }
+
+  .work-search-item-add {
+    font: var(--md-sys-typescale-label-small);
+    background: var(--md-sys-color-primary-container);
+    color: var(--md-sys-color-on-primary-container);
+    border: none;
+    border-radius: 4px;
+    padding: 0.2rem 0.5rem;
+    cursor: pointer;
+  }
+
+  .work-card-wrapper {
+    position: relative;
+  }
+
+  .btn-remove-work {
+    position: absolute;
+    top: var(--space-2);
+    right: var(--space-2);
+    font: var(--md-sys-typescale-label-small);
+    background: var(--md-sys-color-error-container);
+    color: var(--md-sys-color-on-error-container);
+    border: none;
+    border-radius: 4px;
+    padding: 0.2rem 0.5rem;
+    cursor: pointer;
+    opacity: 0;
+    transition: opacity var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard);
+  }
+
+  .work-card-wrapper:hover .btn-remove-work {
+    opacity: 1;
+  }
+
+  .form-input {
+    font: var(--md-sys-typescale-body-large);
+    padding: var(--space-2) var(--space-3);
+    background: var(--md-sys-color-surface-container-lowest);
+    border: 1px solid var(--md-sys-color-outline-variant);
+    border-radius: var(--md-sys-shape-corner-small);
+    color: var(--md-sys-color-on-surface);
+    width: 100%;
+    box-sizing: border-box;
+  }
+
+  .form-input:focus {
+    outline: 2px solid var(--md-sys-color-primary);
+    outline-offset: -1px;
+  }
 </style>
 
 <script>
+  const collectionId = document.querySelector('[data-collection-id]')?.dataset.collectionId;
+
+  // Delete collection
   const deleteBtn = document.getElementById('delete-collection-btn');
   if (deleteBtn) {
     deleteBtn.addEventListener('click', async () => {
       if (!confirm('Delete this collection? This cannot be undone.')) return;
-      const collectionId = deleteBtn.dataset.collectionId;
+      const cId = deleteBtn.dataset.collectionId;
       try {
-        const res = await fetch(`/api/collections/${collectionId}`, {
+        const res = await fetch(`/api/collections/${cId}`, {
           method: 'DELETE',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ id: Number(collectionId) }),
+          body: JSON.stringify({ id: Number(cId) }),
         });
         if (res.ok) {
           window.location.href = '/collections';
@@ -276,4 +394,97 @@ const works = workRows.map(w => ({
       }
     });
   }
+
+  // Add work - toggle dialog
+  const addWorkBtn = document.getElementById('add-work-btn');
+  const addWorkDialog = document.getElementById('add-work-dialog');
+  const workSearchInput = document.getElementById('work-search-input') as HTMLInputElement;
+  const workSearchResults = document.getElementById('work-search-results');
+
+  if (addWorkBtn && addWorkDialog) {
+    addWorkBtn.addEventListener('click', () => {
+      const visible = addWorkDialog.style.display !== 'none';
+      addWorkDialog.style.display = visible ? 'none' : 'block';
+      if (!visible) workSearchInput?.focus();
+    });
+
+    // Search works
+    let searchTimeout: number;
+    workSearchInput?.addEventListener('input', () => {
+      clearTimeout(searchTimeout);
+      const query = workSearchInput.value.trim();
+      if (!query) { workSearchResults!.innerHTML = ''; return; }
+      searchTimeout = window.setTimeout(async () => {
+        try {
+          const res = await fetch(`/api/search?q=${encodeURIComponent(query)}&limit=5`);
+          if (res.ok) {
+            const data = await res.json();
+            workSearchResults!.innerHTML = '';
+            for (const w of data.works || []) {
+              const item = document.createElement('div');
+              item.className = 'work-search-item';
+              item.innerHTML = `<span class="work-search-item-title">${w.title}</span><button class="work-search-item-add" data-work-id="${w.id}">Add</button>`;
+              workSearchResults!.appendChild(item);
+            }
+          }
+        } catch { /* ignore */ }
+      }, 300);
+    });
+  }
+
+  // Add work from search results
+  document.addEventListener('click', async (e: Event) => {
+    const target = e.target as HTMLElement;
+    if (!target.classList.contains('work-search-item-add')) return;
+    const workId = Number(target.dataset.workId);
+    const cId = Number(document.querySelector('[data-collection-id]')?.dataset.collectionId);
+    if (!workId || !cId) return;
+    target.textContent = 'Adding…';
+    target.setAttribute('disabled', 'true');
+    try {
+      const res = await fetch('/api/collectionItems', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ collection_id: cId, work_id: workId }),
+      });
+      if (res.ok) {
+        window.location.reload();
+      } else {
+        const data = await res.json().catch(() => ({}));
+        alert(data.error || 'Failed to add work');
+        target.textContent = 'Add';
+        target.removeAttribute('disabled');
+      }
+    } catch {
+      alert('Network error');
+      target.textContent = 'Add';
+      target.removeAttribute('disabled');
+    }
+  });
+
+  // Remove work from collection
+  document.querySelectorAll('.btn-remove-work').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const workId = Number((btn as HTMLElement).dataset.workId);
+      const workTitle = (btn as HTMLElement).dataset.workTitle;
+      const cId = Number(document.querySelector('[data-collection-id]')?.dataset.collectionId);
+      if (!workId || !cId) return;
+      if (!confirm(`Remove "${workTitle}" from this collection?`)) return;
+      try {
+        const res = await fetch('/api/collectionItems', {
+          method: 'DELETE',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ collection_id: cId, work_id: workId }),
+        });
+        if (res.ok) {
+          window.location.reload();
+        } else {
+          const data = await res.json().catch(() => ({}));
+          alert(data.error || 'Failed to remove work');
+        }
+      } catch {
+        alert('Network error');
+      }
+    });
+  });
 </script>
