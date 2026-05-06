@@ -52,7 +52,7 @@ export default function CommentForm({
 
     // Optimistic insert: show the comment immediately before the network request
     let tempId: number | null = null;
-    if (pseudId) {
+    if (pseudId !== null && pseudId !== undefined) {
       const now = new Date();
       const tempComment: CommentData = {
         // Use timestamp + random suffix to avoid same-millisecond collisions

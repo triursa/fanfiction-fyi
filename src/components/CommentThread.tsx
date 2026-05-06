@@ -54,6 +54,15 @@ export function toSQLiteDate(date: Date): string {
   return date.toISOString().slice(0, 19).replace('T', ' ');
 }
 
+/** Escape user-supplied text for safe inline HTML rendering. */
+function escapeHtml(text: string): string {
+  return text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/\n/g, '<br />');
+}
+
 function formatRelativeDate(dateStr: string): string {
   const date = parseSQLiteDate(dateStr);
   const now = new Date();
@@ -106,12 +115,7 @@ function CommentItem({
         <div
           class="comment-content"
           dangerouslySetInnerHTML={{
-            __html: comment.content_html ??
-              comment.content
-                .replace(/&/g, '&amp;')
-                .replace(/</g, '&lt;')
-                .replace(/>/g, '&gt;')
-                .replace(/\n/g, '<br />'),
+            __html: comment.content_html ?? escapeHtml(comment.content),
           }}
         />
         {authed && !isOptimistic && (
