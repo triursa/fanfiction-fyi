@@ -28,13 +28,20 @@ function isPublicPath(pathname: string): boolean {
   if (pathname.startsWith('/api/auth/')) return true;
   if (pathname.startsWith('/api/bugs/')) return true;
   // Public read-only API endpoints
-  if (pathname.startsWith('/api/works') && !pathname.includes('/chapters/')) return true;
+  // /api/works: read endpoints (GET) are public, write endpoints use requireAuth internally
+  // Only auth-gated sub-routes needing middleware protection: /progress, /mine
+  if (pathname.startsWith('/api/works')) {
+    if (pathname.includes('/progress') || pathname.includes('/mine')) return false;
+    return true;
+  }
   if (pathname.startsWith('/api/pseuds')) return true;
   if (pathname.startsWith('/api/tags')) return true;
   if (pathname.startsWith('/api/search')) return true;
   if (pathname.startsWith('/api/collections')) return true;
   if (pathname.startsWith('/api/series')) return true;
   if (pathname.startsWith('/api/characters')) return true;
+  // Canon API: GET endpoints are public reads, writes use requireAuth internally
+  if (pathname.startsWith('/api/canon')) return true;
   // Public content pages (browse, read, search)
   if (pathname === '/works' || pathname.startsWith('/works/')) return true;
   if (pathname === '/characters' || pathname.startsWith('/characters/')) return true;
@@ -43,6 +50,7 @@ function isPublicPath(pathname: string): boolean {
   if (pathname === '/series' || pathname.startsWith('/series/')) return true;
   if (pathname === '/collections' || pathname.startsWith('/collections/')) return true;
   if (pathname === '/search') return true;
+  if (pathname === '/canon' || pathname.startsWith('/canon/')) return true;
   if (pathname === '/') return true;
 
   // Exact match paths
