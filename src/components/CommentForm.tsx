@@ -1,12 +1,23 @@
 import { useState, useCallback } from 'preact/hooks';
+import type { CommentData } from './CommentThread';
+
+interface CommentPayload {
+  content: string;
+  work_id: number;
+  parent_id?: number;
+  chapter_id?: number;
+}
 
 interface CommentFormProps {
   workId: number;
   chapterId?: number | null;
   parentId?: number | null;
   replyingToName?: string | null;
+  pseudId?: number | null;
   onCancelReply?: () => void;
-  onPosted: (comment: any) => void;
+  onPosted: (comment: CommentData) => void;
+  onConfirmPost?: (tempId: number, real: CommentData) => void;
+  onCancelPost?: (tempId: number) => void;
   pseudName?: string | null;
 }
 
@@ -15,8 +26,11 @@ export default function CommentForm({
   chapterId,
   parentId,
   replyingToName,
+  pseudId,
   onCancelReply,
   onPosted,
+  onConfirmPost,
+  onCancelPost,
   pseudName,
 }: CommentFormProps) {
   const [content, setContent] = useState('');
@@ -31,32 +45,60 @@ export default function CommentForm({
     setSubmitting(true);
     setError(null);
 
-    const body: any = { content: content.trim(), work_id: workId };
-    if (parentId) body.parent_id = parentId;
-    if (chapterId) body.chapter_id = chapterId;
+    const trimmed = content.trim();
+    const payload: CommentPayload = { content: trimmed, work_id: workId };
+    if (parentId) payload.parent_id = parentId;
+    if (chapterId) payload.chapter_id = chapterId;
+
+    // Optimistic insert: show the comment immediately before the network request
+    let tempId: number | null = null;
+    if (pseudId) {
+      const now = new Date();
+      const tempComment: CommentData = {
+        id: -now.getTime(),
+        work_id: workId,
+        chapter_id: chapterId ?? null,
+        pseud_id: pseudId,
+        parent_id: parentId ?? null,
+        content: trimmed,
+        content_html: null,
+        created_at: now.toISOString().replace('T', ' ').slice(0, 19),
+        pseud_name: pseudName ?? '',
+      };
+      tempId = tempComment.id;
+      onPosted(tempComment);
+      setContent('');
+      setShowPreview(false);
+    }
 
     try {
       const res = await fetch(`/api/works/${workId}/comments`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
+        body: JSON.stringify(payload),
       });
 
       if (res.ok) {
-        const comment = await res.json();
-        onPosted(comment);
-        setContent('');
-        setShowPreview(false);
+        const real: CommentData = await res.json();
+        if (tempId !== null) {
+          onConfirmPost?.(tempId, real);
+        } else {
+          onPosted(real);
+          setContent('');
+          setShowPreview(false);
+        }
       } else {
+        if (tempId !== null) onCancelPost?.(tempId);
         const data = await res.json().catch(() => ({}));
         setError(data.error || 'Failed to post comment. Please try again.');
       }
     } catch {
+      if (tempId !== null) onCancelPost?.(tempId);
       setError('Network error. Please try again.');
     } finally {
       setSubmitting(false);
     }
-  }, [content, submitting, workId, chapterId, parentId, onPosted]);
+  }, [content, submitting, workId, chapterId, parentId, pseudId, pseudName, onPosted, onConfirmPost, onCancelPost]);
 
   return (
     <form class="comment-form" onSubmit={handleSubmit}>

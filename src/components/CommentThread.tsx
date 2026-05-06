@@ -1,7 +1,7 @@
 import { useState, useCallback, useRef } from 'preact/hooks';
 import CommentForm from './CommentForm';
 
-interface CommentData {
+export interface CommentData {
   id: number;
   work_id: number;
   chapter_id: number | null;
@@ -36,8 +36,14 @@ function buildTree(comments: CommentData[]): Map<number, CommentData[]> {
   return tree;
 }
 
+/** Normalize a SQLite datetime string ("YYYY-MM-DD HH:MM:SS") to a valid Date. */
+function parseSQLiteDate(dateStr: string): Date {
+  // SQLite CURRENT_TIMESTAMP uses a space instead of 'T'; replace to produce valid ISO 8601
+  return new Date(dateStr.replace(' ', 'T') + 'Z');
+}
+
 function formatRelativeDate(dateStr: string): string {
-  const date = new Date(dateStr + 'Z'); // Assume UTC
+  const date = parseSQLiteDate(dateStr);
   const now = new Date();
   const diffMs = now.getTime() - date.getTime();
   const diffSec = Math.floor(diffMs / 1000);
@@ -69,42 +75,65 @@ function CommentItem({
 }) {
   const [expanded, setExpanded] = useState(depth < 2);
   const hasReplies = replies.length > 0;
+  const isOptimistic = comment.id < 0;
   // Max indent depth — flatten at depth 6+
   const isDeep = depth >= 6;
+  const repliesId = `comment-replies-${comment.id}`;
 
   return (
-    <div class={`comment-item${depth > 0 ? ' comment-reply' : ''}${isDeep ? ' comment-deep' : ''}`}
+    <div class={`comment-item${depth > 0 ? ' comment-reply' : ''}${isDeep ? ' comment-deep' : ''}${isOptimistic ? ' optimistic' : ''}`}
          data-comment-id={comment.id}
          style={depth > 0 && !isDeep ? { marginLeft: `${Math.min(depth, 5) * 20}px` } : undefined}>
       <div class="comment-body">
         <div class="comment-header">
           <a href={`/pseuds/${comment.pseud_id}`} class="comment-author">{comment.pseud_name}</a>
-          <span class="comment-date" title={new Date(comment.created_at + 'Z').toLocaleString()}>
+          <span class="comment-date" title={parseSQLiteDate(comment.created_at).toLocaleString()}>
             {formatRelativeDate(comment.created_at)}
           </span>
         </div>
-        <div class="comment-content" dangerouslySetInnerHTML={{ __html: comment.content_html || '' }} />
-        {authed && (
+        <div
+          class="comment-content"
+          dangerouslySetInnerHTML={{
+            __html: comment.content_html ??
+              comment.content
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/\n/g, '<br />'),
+          }}
+        />
+        {authed && !isOptimistic && (
           <button class="reply-btn" onClick={() => onReply(comment.id, comment.pseud_name)}>Reply</button>
         )}
       </div>
 
-      {hasReplies && !expanded && (
-        <button class="comment-expand-btn" onClick={() => setExpanded(true)}>
-          Show {replies.length} {replies.length === 1 ? 'reply' : 'replies'}
+      {hasReplies && (
+        <button
+          class="comment-expand-btn"
+          onClick={() => setExpanded((prev) => !prev)}
+          aria-expanded={expanded}
+          aria-controls={repliesId}
+        >
+          {expanded
+            ? `Hide ${replies.length} ${replies.length === 1 ? 'reply' : 'replies'}`
+            : `Show ${replies.length} ${replies.length === 1 ? 'reply' : 'replies'}`}
         </button>
       )}
-      {hasReplies && expanded && replies.map(reply => (
-        <CommentItem
-          key={reply.id}
-          comment={reply}
-          replies={treeRef.get(reply.id) ?? []}
-          depth={depth + 1}
-          onReply={onReply}
-          authed={authed}
-          treeRef={treeRef}
-        />
-      ))}
+      {hasReplies && expanded && (
+        <div id={repliesId}>
+          {replies.map(reply => (
+            <CommentItem
+              key={reply.id}
+              comment={reply}
+              replies={treeRef.get(reply.id) ?? []}
+              depth={depth + 1}
+              onReply={onReply}
+              authed={authed}
+              treeRef={treeRef}
+            />
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -135,9 +164,17 @@ export default function CommentThread({
   }, []);
 
   const handleCommentPosted = useCallback((newComment: CommentData) => {
-    // Optimistic insert — add to local state
+    // Optimistic insert — add to local state immediately (temp id < 0 until confirmed)
     setComments((prev) => [...prev, newComment]);
     setReplyingTo(null);
+  }, []);
+
+  const handleConfirmPost = useCallback((tempId: number, real: CommentData) => {
+    setComments((prev) => prev.map((c) => (c.id === tempId ? real : c)));
+  }, []);
+
+  const handleCancelPost = useCallback((tempId: number) => {
+    setComments((prev) => prev.filter((c) => c.id !== tempId));
   }, []);
 
   const total = comments.length;
@@ -154,6 +191,9 @@ export default function CommentThread({
           replyingToName={replyingTo?.name ?? null}
           onCancelReply={cancelReply}
           onPosted={handleCommentPosted}
+          onConfirmPost={handleConfirmPost}
+          onCancelPost={handleCancelPost}
+          pseudId={currentPseudId}
           pseudName={currentPseudName}
         />
       ) : (
