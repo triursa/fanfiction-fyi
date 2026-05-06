@@ -326,3 +326,46 @@ body {
   outline-offset: 2px;
   border-radius: var(--md-sys-shape-corner-medium);
 }
+
+/* ── Comments ── */
+.comments-section { margin-top: var(--space-10); border-top: 1px solid var(--md-sys-color-outline-variant); padding-top: var(--space-6); }
+.comments-title { font: var(--md-sys-typescale-headline-medium); color: var(--md-sys-color-on-surface); margin: 0 0 var(--space-4); }
+.comments-empty { font: var(--md-sys-typescale-body-large); color: var(--md-sys-color-outline); }
+.login-prompt { font: var(--md-sys-typescale-body-large); color: var(--md-sys-color-outline); }
+.login-prompt a { color: var(--md-sys-color-primary); }
+
+.comments-thread { display: flex; flex-direction: column; gap: var(--space-4); }
+
+.comment-item { background: var(--md-sys-color-surface-container); border-radius: var(--md-sys-shape-corner-medium); padding: var(--space-4); transition: background-color 0.15s; }
+.comment-item.comment-deep { border-left: 3px solid var(--md-sys-color-primary-container); }
+.comment-item.optimistic { opacity: 0.6; }
+.comment-body { }
+.comment-header { display: flex; align-items: baseline; gap: var(--space-2); }
+.comment-author { font: var(--md-sys-typescale-label-large); color: var(--md-sys-color-primary); }
+.comment-date { font: var(--md-sys-typescale-body-small); color: var(--md-sys-color-outline); }
+.comment-content { font: var(--md-sys-typescale-body-large); color: var(--md-sys-color-on-surface); line-height: 1.7; margin-top: var(--space-2); }
+.comment-content p { margin: var(--space-1) 0; }
+.reply-btn { font: var(--md-sys-typescale-label-medium); color: var(--md-sys-color-primary); background: none; border: none; cursor: pointer; margin-top: var(--space-2); padding: 0; }
+.reply-btn:hover { text-decoration: underline; }
+
+.comment-replies { margin-left: var(--space-6); margin-top: var(--space-3); display: flex; flex-direction: column; gap: var(--space-2); }
+.comment-reply { background: var(--md-sys-color-surface-container-high); }
+.comment-expand-btn { font: var(--md-sys-typescale-label-medium); color: var(--md-sys-color-primary); background: none; border: none; cursor: pointer; padding: var(--space-1) 0; margin-top: var(--space-2); }
+.comment-expand-btn:hover { text-decoration: underline; }
+
+/* ── Comment Form ── */
+.comment-form { margin-bottom: var(--space-6); }
+.comment-form-header { margin-bottom: var(--space-2); display: flex; align-items: center; gap: var(--space-2); }
+.reply-indicator { font: var(--md-sys-typescale-body-small); color: var(--md-sys-color-primary); background: var(--md-sys-color-primary-container); padding: var(--space-1) var(--space-2); border-radius: var(--md-sys-shape-corner-full); display: inline-flex; align-items: center; gap: var(--space-2); }
+.cancel-reply-btn { background: none; border: none; color: var(--md-sys-color-on-primary-container); cursor: pointer; font-size: 14px; padding: 0 var(--space-1); }
+.comment-input-area { display: flex; flex-direction: column; gap: var(--space-2); }
+.comment-textarea { width: 100%; font: var(--md-sys-typescale-body-large); background: var(--md-sys-color-surface-container); color: var(--md-sys-color-on-surface); border: 1px solid var(--md-sys-color-outline-variant); border-radius: var(--md-sys-shape-corner-medium); padding: var(--space-3); resize: vertical; min-height: 100px; transition: border-color 0.15s; }
+.comment-textarea:focus { outline: none; border-color: var(--md-sys-color-primary); }
+.comment-form-actions { display: flex; align-items: center; gap: var(--space-3); margin-top: var(--space-2); }
+.comment-submit-btn { }
+.comment-submit-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.comment-preview-toggle { font: var(--md-sys-typescale-label-medium); color: var(--md-sys-color-primary); background: none; border: none; cursor: pointer; }
+.comment-preview-toggle:hover { text-decoration: underline; }
+.comment-preview { background: var(--md-sys-color-surface-container); border-radius: var(--md-sys-shape-corner-medium); padding: var(--space-3); }
+.comment-preview-label { font: var(--md-sys-typescale-label-medium); color: var(--md-sys-color-outline); margin-bottom: var(--space-2); }
+.comment-error { font: var(--md-sys-typescale-body-small); color: var(--md-sys-color-error); margin-top: var(--space-2); }
