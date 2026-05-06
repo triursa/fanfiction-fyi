@@ -60,6 +60,7 @@ export const comments = sqliteTable('comments', {
   parentId: integer('parent_id').references((): any => comments.id, { onDelete: 'cascade' }),
   content: text('content').notNull(),
   createdAt: text('created_at').notNull().default('CURRENT_TIMESTAMP'),
+  updatedAt: text('updated_at'), // Set on edit (#89)
 });
 
 export const kudos = sqliteTable('kudos', {

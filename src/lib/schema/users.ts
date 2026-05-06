@@ -17,6 +17,7 @@ export const users = sqliteTable('users', {
   createdAt: text('created_at').notNull().default('(datetime(\'now\'))'),
   updatedAt: text('updated_at').notNull().default('(datetime(\'now\'))'),
   banned: integer('banned').notNull().default(0),
+  suspendedUntil: text('suspended_until'), // Unix timestamp or ISO datetime for temp suspension (#91)
   theme: text('theme').default('obsidian'),
   bio: text('bio').default(''),
   emailVisibility: text('email_visibility', {

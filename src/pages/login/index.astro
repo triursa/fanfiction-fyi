@@ -213,8 +213,19 @@ import Base from '../../layouts/Base.astro';
       oauth_callback_failed: 'An error occurred during sign-in. Please try again.',
       oauth_no_email: 'Google account has no email',
       banned: 'This account has been suspended',
+      suspended: 'This account is temporarily suspended',
     };
     errorEl.textContent = messages[oauthError] || 'Google sign-in failed';
+    // If suspended with until date, append it
+    if (oauthError === 'suspended') {
+      const until = urlParams.get('until');
+      if (until) {
+        try {
+          const date = new Date(until + 'Z');
+          errorEl.textContent += ` until ${date.toLocaleString()}`;
+        } catch {}
+      }
+    }
   }
 
   form.addEventListener('submit', async (e) => {
@@ -266,6 +277,14 @@ import Base from '../../layouts/Base.astro';
           errorEl.textContent = 'Your account was created with Google. Please use the "Sign in with Google" button above.';
         } else if (data.error === 'banned') {
           errorEl.textContent = 'This account has been suspended';
+        } else if (data.error === 'suspended') {
+          errorEl.textContent = 'This account is temporarily suspended';
+          if (data.suspendedUntil) {
+            try {
+              const date = new Date(data.suspendedUntil + 'Z');
+              errorEl.textContent += ` until ${date.toLocaleString()}`;
+            } catch {}
+          }
         } else if (res.status >= 500) {
           errorEl.textContent = 'Something went wrong. If you signed up with Google, try signing in with Google instead.';
         } else {

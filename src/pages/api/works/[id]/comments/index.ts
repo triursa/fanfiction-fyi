@@ -40,6 +40,7 @@ export const GET: APIRoute = async ({ params, locals, url, request }) => {
       parentId: comments.parentId,
       content: comments.content,
       createdAt: comments.createdAt,
+      updatedAt: comments.updatedAt,
       pseudName: pseuds.name,
     })
     .from(comments)
@@ -57,6 +58,7 @@ export const GET: APIRoute = async ({ params, locals, url, request }) => {
     content: c.content,
     content_html: c.content ? markdownToHtml(c.content) : null,
     created_at: c.createdAt,
+    updated_at: c.updatedAt ?? null,
     pseud_name: c.pseudName,
   }));
 
@@ -126,6 +128,7 @@ export const POST: APIRoute = async ({ params, request, locals }) => {
       parentId: comments.parentId,
       content: comments.content,
       createdAt: comments.createdAt,
+      updatedAt: comments.updatedAt,
       pseudName: pseuds.name,
     })
     .from(comments)
@@ -142,6 +145,7 @@ export const POST: APIRoute = async ({ params, request, locals }) => {
     content: comment.content,
     content_html: comment.content ? markdownToHtml(comment.content) : null,
     created_at: comment.createdAt,
+    updated_at: comment.updatedAt ?? null,
     pseud_name: comment.pseudName,
   } : null;
 

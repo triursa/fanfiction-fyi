@@ -133,6 +133,7 @@ export const onRequest = defineMiddleware(async (context, next) => {
     role: users.role,
     approved: users.approved,
     banned: users.banned,
+    suspendedUntil: users.suspendedUntil,
   }).from(users).where(eq(users.id, session.userId)).get();
 
   if (!user) {
@@ -161,6 +162,23 @@ export const onRequest = defineMiddleware(async (context, next) => {
         'Set-Cookie': 'session=; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=0',
       },
     });
+  }
+
+  // Suspended users — keep session, block access until suspension lifts
+  if (user.suspendedUntil) {
+    const suspendedTime = new Date(user.suspendedUntil + 'Z').getTime();
+    if (Date.now() < suspendedTime) {
+      // Still suspended
+      if (pathname.startsWith('/api/')) {
+        return new Response(JSON.stringify({ error: 'suspended', suspendedUntil: user.suspendedUntil }), {
+          status: 403,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+      return context.redirect(`/login?error=suspended&until=${encodeURIComponent(user.suspendedUntil)}`);
+    }
+    // Suspension expired — auto-restore by clearing the field
+    await db.update(users).set({ suspendedUntil: null }).where(eq(users.id, user.id));
   }
 
   // Unapproved users

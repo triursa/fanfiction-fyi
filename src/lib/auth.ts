@@ -148,15 +148,22 @@ export async function requireAuth(
   return auth;
 }
 
-// Check if a user is approved (not banned, and approved = 1)
+// Check if a user is approved (not banned, not suspended, and approved = 1)
 // Returns: null if unauthenticated, { forbidden: 'banned' } if banned,
+//   { forbidden: 'suspended', suspendedUntil: string } if suspended,
 //   { forbidden: 'unapproved' } if not yet approved, or the auth info if OK
 export function checkApproved(auth: { user: UserRow; pseuds: PseudRow[] } | null):
   | { user: UserRow; pseuds: PseudRow[] }
-  | { forbidden: 'banned' | 'unapproved' }
+  | { forbidden: 'banned' | 'suspended' | 'unapproved'; suspendedUntil?: string }
   | null {
   if (!auth) return null;
   if (auth.user.banned) return { forbidden: 'banned' };
+  if (auth.user.suspendedUntil) {
+    const suspendedTime = new Date(auth.user.suspendedUntil + 'Z').getTime();
+    if (Date.now() < suspendedTime) {
+      return { forbidden: 'suspended', suspendedUntil: auth.user.suspendedUntil };
+    }
+  }
   if (!auth.user.approved) return { forbidden: 'unapproved' };
   return auth;
 }

@@ -4,6 +4,7 @@ import { getDrizzle } from '@/lib/db';
 import { requireRole } from '@/lib/auth';
 import { UserRole } from '@/lib/types';
 import { comments } from '@/lib/schema';
+import { logAudit } from '@/lib/audit';
 import { eq } from 'drizzle-orm';
 import type { APIRoute } from 'astro';
 
@@ -26,5 +27,6 @@ export const DELETE: APIRoute = async ({ params, request, locals }) => {
   }
 
   await db.delete(comments).where(eq(comments.id, commentId));
+  await logAudit(d1, auth.user.id, 'comment.delete', 'comment', commentId);
   return new Response(JSON.stringify({ ok: true }), { headers: { 'Content-Type': 'application/json' } });
 };

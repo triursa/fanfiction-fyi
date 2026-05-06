@@ -10,7 +10,9 @@ const auth = await getAuth(d1, Astro.request);
 if (!auth) return Astro.redirect('/login');
 const approval = checkApproved(auth);
 if ('forbidden' in approval) {
-  return Astro.redirect(approval.forbidden === 'unapproved' ? '/pending-approval' : '/login?error=banned');
+  if (approval.forbidden === 'unapproved') return Astro.redirect('/pending-approval');
+  if (approval.forbidden === 'suspended') return Astro.redirect(`/login?error=suspended&until=${encodeURIComponent(approval.suspendedUntil ?? '')}`);
+  return Astro.redirect('/login?error=banned');
 }
 ---
 
