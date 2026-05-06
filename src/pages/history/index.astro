@@ -2,35 +2,23 @@
 export const prerender = false;
 import Base from '../../layouts/Base.astro';
 import { getDrizzle } from '../../lib/db';
-import { users, sessions, pseuds as pseudsTable, readings, works, chapters } from '../../lib/schema';
-import { eq, and, gt, desc, sql } from 'drizzle-orm';
+import { getAuth } from '../../lib/auth';
+import { readings, works } from '../../lib/schema';
+import { eq, desc, sql } from 'drizzle-orm';
 
 const d1 = Astro.locals.runtime.env.DB as D1Database;
 const db = getDrizzle(d1);
 
-// Auth check
-const cookie = Astro.request.headers.get('cookie') ?? '';
-const sessionMatch = cookie.match(/session=([a-f0-9]+)/);
-if (!sessionMatch) return Astro.redirect('/login');
+// Auth check — use shared helper for consistency with API routes
+const auth = await getAuth(d1, Astro.request);
+if (!auth) return Astro.redirect('/login');
 
-const session = await db.select({ userId: sessions.userId })
-  .from(sessions)
-  .where(and(eq(sessions.token, sessionMatch[1]), gt(sessions.expiresAt, sql`(datetime('now'))`)))
-  .get();
-if (!session) return Astro.redirect('/login');
+// Pick the default pseud (is_default=1) with a fallback to the first pseud
+const defaultPseud = auth.pseuds.find(p => p.isDefault === 1) ?? auth.pseuds[0];
+if (!defaultPseud) return Astro.redirect('/login');
+const pseudId = defaultPseud.id;
 
-const user = await db.select().from(users).where(eq(users.id, session.userId)).get();
-if (!user) return Astro.redirect('/login');
-
-const userPseuds = await db.select({ id: pseudsTable.id, name: pseudsTable.name })
-  .from(pseudsTable)
-  .where(eq(pseudsTable.userId, user.id))
-  .orderBy(pseudsTable.id)
-  .all();
-const pseudId = userPseuds[0]?.id;
-if (!pseudId) return Astro.redirect('/login');
-
-// Fetch all readings with work info and published chapter count
+// Fetch all readings with work info, published chapter count, and last chapter position
 const readingRows = await db
   .select({
     readingId: readings.id,
@@ -44,6 +32,8 @@ const readingRows = await db
     complete: works.complete,
     workUpdatedAt: works.updatedAt,
     chapterCount: sql<number>`(SELECT COUNT(*) FROM chapters WHERE chapters.work_id = works.id AND chapters.draft = 0)`,
+    // Resolve last-read chapter position in the same query to avoid N+1
+    lastChapterPosition: sql<number | null>`(SELECT position FROM chapters WHERE id = readings.last_chapter AND draft = 0)`,
   })
   .from(readings)
   .innerJoin(works, eq(readings.workId, works.id))
@@ -51,22 +41,12 @@ const readingRows = await db
   .orderBy(desc(readings.updatedAt))
   .all();
 
-// Enrich with chapter position for progress calculation
-const historyItems = await Promise.all(readingRows.map(async (row) => {
-  let lastChapterPosition: number | null = null;
-  if (row.lastChapter) {
-    const chap = await db.select({ position: chapters.position })
-      .from(chapters)
-      .where(and(eq(chapters.id, row.lastChapter), eq(chapters.draft, 0)))
-      .get();
-    lastChapterPosition = chap?.position ?? null;
-  }
-  const progress = row.chapterCount > 0 && lastChapterPosition
-    ? Math.round((lastChapterPosition / row.chapterCount) * 100)
+const historyItems = readingRows.map((row) => {
+  const progress = row.chapterCount > 0 && row.lastChapterPosition
+    ? Math.round((row.lastChapterPosition / row.chapterCount) * 100)
     : 0;
   return {
     ...row,
-    lastChapterPosition,
     progress,
     // Snake-case aliases for template
     work_id: row.workId,
@@ -76,9 +56,9 @@ const historyItems = await Promise.all(readingRows.map(async (row) => {
     for_later: row.forLater,
     chapter_count: row.chapterCount,
     last_chapter: row.lastChapter,
-    last_chapter_position: lastChapterPosition,
+    last_chapter_position: row.lastChapterPosition,
   };
-}));
+});
 
 // Separate into "Currently Reading" and "Marked for Later"
 const currentlyReading = historyItems.filter(r => !r.forLater);
@@ -128,21 +108,25 @@ const markedForLater = historyItems.filter(r => r.forLater);
 
                 <!-- Progress bar -->
                 {item.chapter_count > 0 && (
-                  <div class="progress-bar-track">
+                  <div class="progress-bar-wrapper">
                     <div
-                      class="progress-bar-fill"
-                      style={`width: ${item.progress}%`}
+                      class="progress-bar-track"
                       role="progressbar"
                       aria-valuenow={item.progress}
                       aria-valuemin={0}
                       aria-valuemax={100}
-                    />
+                    >
+                      <div
+                        class="progress-bar-fill"
+                        style={`width: ${item.progress}%`}
+                      />
+                    </div>
                     <span class="progress-label">{item.progress}%</span>
                   </div>
                 )}
 
                 <div class="history-actions">
-                  <a href={item.lastChapter ? `/works/${item.work_id}#chapter-${item.lastChapter}` : `/works/${item.work_id}`} class="btn-continue">
+                  <a href={item.lastChapter ? `/works/${item.work_id}/read?chapter=${item.lastChapter}` : `/works/${item.work_id}`} class="btn-continue">
                     Continue Reading
                   </a>
                   <button class="btn-mark-for-later" data-work-id={item.work_id} data-for-later={item.forLater ? '1' : '0'}>
@@ -153,7 +137,7 @@ const markedForLater = historyItems.filter(r => r.forLater);
               </div>
 
               <div class="history-card-time">
-                <span class="time-label">{new Date(item.updated_at + 'Z').toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}</span>
+                <span class="time-label">{new Date(item.updated_at.replace(' ', 'T') + 'Z').toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}</span>
               </div>
             </li>
           ))}
@@ -198,7 +182,7 @@ const markedForLater = historyItems.filter(r => r.forLater);
               </div>
 
               <div class="history-card-time">
-                <span class="time-label">{new Date(item.updated_at + 'Z').toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}</span>
+                <span class="time-label">{new Date(item.updated_at.replace(' ', 'T') + 'Z').toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}</span>
               </div>
             </li>
           ))}

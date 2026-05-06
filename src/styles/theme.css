@@ -389,9 +389,10 @@ body {
 .history-actions { margin-top: var(--space-3); display: flex; flex-wrap: wrap; gap: var(--space-2); }
 
 /* Progress bar */
-.progress-bar-track { position: relative; height: 6px; background: var(--md-sys-color-surface-container-highest); border-radius: var(--md-sys-shape-corner-full); margin-top: var(--space-2); overflow: hidden; }
-.progress-bar-fill { height: 100%; background: var(--md-sys-color-primary); border-radius: var(--md-sys-shape-corner-full); transition: width 0.4s ease; min-width: 4px; }
-.progress-label { font: var(--md-sys-typescale-label-small); color: var(--md-sys-color-outline); margin-top: 2px; }
+.progress-bar-wrapper { margin-top: var(--space-2); display: flex; align-items: center; gap: var(--space-2); }
+.progress-bar-track { position: relative; flex: 1; height: 6px; background: var(--md-sys-color-surface-container-highest); border-radius: var(--md-sys-shape-corner-full); overflow: hidden; }
+.progress-bar-fill { height: 100%; background: var(--md-sys-color-primary); border-radius: var(--md-sys-shape-corner-full); transition: width 0.4s ease; }
+.progress-label { font: var(--md-sys-typescale-label-small); color: var(--md-sys-color-outline); white-space: nowrap; }
 
 /* History buttons */
 .btn-continue { font: var(--md-sys-typescale-label-large); color: var(--md-sys-color-on-primary); background: var(--md-sys-color-primary); padding: var(--space-1) var(--space-3); border-radius: var(--md-sys-shape-corner-full); text-decoration: none; border: none; cursor: pointer; }
