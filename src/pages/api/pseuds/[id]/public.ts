@@ -3,6 +3,7 @@ export const prerender = false;
 import { getDrizzle } from '@/lib/db';
 import { pseuds, works, creatorships, tags, taggings, kudos, chapters } from '@/lib/schema';
 import { eq, sql, and, isNotNull, inArray, desc } from 'drizzle-orm';
+import { cacheHeaders } from '@/lib/cors';
 import type { APIRoute } from 'astro';
 
 /**
@@ -226,5 +227,5 @@ export const GET: APIRoute = async ({ locals, params }) => {
       wordCountTimeline,
     },
     activity: activityDates,
-  }), { headers: { 'Content-Type': 'application/json' } });
+  }), { headers: { 'Content-Type': 'application/json', ...cacheHeaders('public') } });
 };

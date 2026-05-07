@@ -2,6 +2,7 @@ export const prerender = false;
 
 import { getDrizzle } from '@/lib/db';
 import { requireAuth } from '@/lib/auth';
+import { cacheHeaders } from '@/lib/cors';
 import { readings, works } from '@/lib/schema';
 import { eq, desc, sql } from 'drizzle-orm';
 import type { APIRoute } from 'astro';
@@ -47,6 +48,6 @@ export const GET: APIRoute = async ({ request, locals }) => {
   }));
 
   return new Response(JSON.stringify(enriched), {
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ...cacheHeaders('private') },
   });
 };

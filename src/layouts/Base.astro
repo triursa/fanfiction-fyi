@@ -4,6 +4,7 @@ import { getDrizzle } from '../lib/db';
 import { users, sessions, pseuds } from '../lib/schema';
 import { ROLE_LEVEL, UserRole } from '../lib/types';
 import { THEMES } from '../styles/themes';
+import { ViewTransitions } from 'astro:transitions';
 import BugReport from '../components/BugReport';
 import AdaptiveNav from '../components/AdaptiveNav';
 import { eq, and, gt, sql, asc } from 'drizzle-orm';
@@ -82,6 +83,7 @@ const isAdmin = isModOrAbove;
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
     <title>{title}</title>
+    <ViewTransitions />
     {themeOverrideCSS && <style>{themeOverrideCSS}</style>}
     <!-- Serialized theme colors for client-side localStorage fallback -->
     <script type="application/json" id="ff-themes-data" set:html={JSON.stringify(Object.fromEntries(Object.entries(THEMES).map(([k, v]) => [k, v.colors])))} />
@@ -89,7 +91,7 @@ const isAdmin = isModOrAbove;
   <body data-theme={userTheme ?? 'obsidian'} data-reading-mode={isReadingMode ? 'true' : undefined}>
     <!-- Inline script to apply localStorage theme ASAP, before paint -->
     <script is:inline>
-    (function() {
+    function applyTheme() {
       try {
         var stored = localStorage.getItem('ff-theme');
         if (stored && stored !== 'obsidian') {
@@ -107,6 +109,43 @@ const isAdmin = isModOrAbove;
           }
         }
       } catch(e) {}
+    }
+    applyTheme();
+    document.addEventListener('astro:after-swap', applyTheme);
+    </script>
+    <!-- Show skeleton during navigations, hide on page load -->
+    <script is:inline>
+    (function() {
+      // Hide skeleton on page load (content is already painted via SSR)
+      var skeleton = document.querySelector('.page-skeleton');
+      if (skeleton) skeleton.classList.remove('active');
+      var content = document.querySelector('.page-content');
+      if (content) content.style.display = '';
+
+      // Intercept same-origin link clicks to show skeleton during navigation
+      document.addEventListener('click', function(e) {
+        if (e.defaultPrevented) return;
+        if (e.button !== 0) return;
+        if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+        var link = e.target.closest('a[href]');
+        if (!link) return;
+        if (link.hasAttribute('download')) return;
+        var target = link.getAttribute('target');
+        if (target && target !== '_self') return;
+        var href = link.getAttribute('href');
+        if (!href || href.startsWith('#') || href.startsWith('http') || href.startsWith('mailto:') || href.startsWith('tel:')) return;
+        try {
+          var url = new URL(href, location.origin);
+          if (url.origin !== location.origin) return;
+        } catch(ex) { return; }
+        // Show skeleton, hide content for a brief transition feel
+        var skeleton = document.querySelector('.page-skeleton');
+        var content = document.querySelector('.page-content');
+        if (skeleton && content) {
+          skeleton.classList.add('active');
+          content.style.display = 'none';
+        }
+      });
     })();
     </script>
     <!-- Adaptive Navigation: swaps between mobile bottom bar, tablet rail, and desktop drawer -->
@@ -117,7 +156,7 @@ const isAdmin = isModOrAbove;
       isAdmin={isAdmin}
       isReadingMode={isReadingMode}
     />
-    <main class="main-content">
+    <main class="main-content" transition:animate="fade">
       <slot />
     </main>
     <footer class="app-footer">
@@ -142,6 +181,24 @@ const isAdmin = isModOrAbove;
     margin: 0 auto;
     padding: var(--space-6);
     min-height: calc(100vh - 120px);
+  }
+
+  /* ── Page Skeleton (visible during view transitions/navigation) ── */
+  .page-skeleton {
+    display: none; /* Hidden by default; shown via JS during navigations */
+  }
+  .page-skeleton.active {
+    display: block;
+  }
+  .skeleton-page-title {
+    width: 40%;
+    height: 1.75rem;
+    margin-bottom: var(--space-6);
+  }
+  .skeleton-page-content {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75em;
   }
 
   .app-footer {

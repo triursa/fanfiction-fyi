@@ -2,7 +2,7 @@ export const prerender = false;
 
 import { getDrizzle } from '@/lib/db';
 import { requireAuth } from '@/lib/auth';
-import { corsHeaders, handleCors } from '@/lib/cors';
+import { corsHeaders, handleCors, cacheHeaders } from '@/lib/cors';
 import type { APIRoute } from 'astro';
 import type { EntityType } from '@/lib/types';
 import { UserRole, hasRoleLevel } from '@/lib/types';
@@ -39,7 +39,7 @@ export const GET: APIRoute = async ({ url, locals, request }) => {
 
       return new Response(
         JSON.stringify({ works: worksList }),
-        { headers: { 'Content-Type': 'application/json', ...cors } },
+        { headers: { 'Content-Type': 'application/json', ...cors, ...cacheHeaders('public') } },
       );
     }
 
@@ -64,7 +64,7 @@ export const GET: APIRoute = async ({ url, locals, request }) => {
 
       return new Response(
         JSON.stringify({ entities }),
-        { headers: { 'Content-Type': 'application/json', ...cors } },
+        { headers: { 'Content-Type': 'application/json', ...cors, ...cacheHeaders('public') } },
       );
     }
 

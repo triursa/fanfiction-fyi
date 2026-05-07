@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'preact/hooks';
 import { signal } from '@preact/signals';
+import NotificationBell from './NotificationBell';
 
 // ── Navigation item definitions ──
 
@@ -121,6 +122,7 @@ function NavigationRail({ items, currentPath, onMenuClick, userName }: { items: 
         ))}
       </div>
       <div class="navigation-rail__spacer" />
+      {userName && <NotificationBell />}
       {userName && (
         <a href="/works/create" class="navigation-rail__create" aria-label="New Work" title="New Work">
           <SvgIcon name="create" size={24} />
@@ -169,6 +171,7 @@ function NavigationDrawer({ items, secondaryItems, currentPath, userName }: {
         ))}
       </div>
       <div class="navigation-drawer__spacer" />
+      {userName && <NotificationBell />}
       {userName && (
         <div class="navigation-drawer__footer">
           <a href="/works/create" class="navigation-drawer__create">
@@ -302,6 +305,7 @@ function MobileAppBar({ onMenuClick, userName }: { onMenuClick: () => void; user
       </button>
       <a href="/" class="mobile-app-bar__title">fanfiction.fyi</a>
       <div class="mobile-app-bar__actions">
+        {userName && <NotificationBell />}
         {userName ? (
           <a href="/works/create" class="mobile-app-bar__create" aria-label="New Work">
             <SvgIcon name="create" size={24} />

@@ -139,6 +139,36 @@ const userPseuds = await db.select().from(pseuds).where(eq(pseuds.userId, user.i
         </form>
       </div>
     </details>
+
+    <!-- Notification Preferences -->
+    <details class="settings-section">
+      <summary class="section-title">Notification Preferences</summary>
+      <div class="section-body">
+        <p class="current-value">Choose which notifications you'd like to receive.</p>
+        <div id="notif-prefs-list" class="notif-prefs-list"></div>
+        <p class="form-success" id="notif-prefs-success"></p>
+      </div>
+    </details>
+
+    <!-- API Keys -->
+    <details class="settings-section">
+      <summary class="section-title">API Keys</summary>
+      <div class="section-body">
+        <p class="current-value">Manage API keys for programmatic access to the fanfiction.fyi API.</p>
+        <div id="api-keys-list" class="api-keys-list"></div>
+        <div class="api-key-create">
+          <label class="settings-label" for="api-key-name">Key Name</label>
+          <input type="text" id="api-key-name" placeholder="e.g. MyBot" maxlength="64" class="settings-input" />
+          <button type="button" id="api-key-create-btn" class="settings-btn">Create Key</button>
+        </div>
+        <p class="form-error" id="api-key-error"></p>
+        <div id="api-key-secret" class="api-key-secret" style="display:none">
+          <p class="form-success">Key created! Copy it now — it won't be shown again.</p>
+          <code id="api-key-secret-value" class="api-key-secret-value"></code>
+          <button type="button" id="api-key-copy-btn" class="settings-btn settings-btn--secondary">Copy to Clipboard</button>
+        </div>
+      </div>
+    </details>
   </section>
 </Base>
 
@@ -317,6 +347,139 @@ const userPseuds = await db.select().from(pseuds).where(eq(pseuds.userId, user.i
     gap: var(--space-2);
   }
 
+  .notif-prefs-list {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+    margin-bottom: var(--space-3);
+  }
+
+  .notif-pref-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: var(--space-2) var(--space-3);
+    background: var(--md-sys-color-surface-container-lowest);
+    border: 1px solid var(--md-sys-color-outline-variant);
+    border-radius: var(--md-sys-shape-corner-medium);
+  }
+
+  .notif-pref-label {
+    font: var(--md-sys-typescale-body-medium);
+    color: var(--md-sys-color-on-surface);
+  }
+
+  .notif-pref-toggle {
+    position: relative;
+    width: 52px;
+    height: 32px;
+    appearance: none;
+    background: var(--md-sys-color-surface-container-highest);
+    border: 2px solid var(--md-sys-color-outline);
+    border-radius: 16px;
+    cursor: pointer;
+    transition: background 0.2s, border-color 0.2s;
+  }
+
+  .notif-pref-toggle:checked {
+    background: var(--md-sys-color-primary);
+    border-color: var(--md-sys-color-primary);
+  }
+
+  .notif-pref-toggle::before {
+    content: '';
+    position: absolute;
+    top: 2px;
+    left: 2px;
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    background: var(--md-sys-color-outline);
+    transition: transform 0.2s, background 0.2s;
+  }
+
+  .notif-pref-toggle:checked::before {
+    transform: translateX(20px);
+    background: var(--md-sys-color-on-primary);
+  }
+
+  .api-keys-list {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+    margin-bottom: var(--space-3);
+  }
+
+  .api-key-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: var(--space-2) var(--space-3);
+    background: var(--md-sys-color-surface-container-lowest);
+    border: 1px solid var(--md-sys-color-outline-variant);
+    border-radius: var(--md-sys-shape-corner-medium);
+  }
+
+  .api-key-info {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+  }
+
+  .api-key-name {
+    font: var(--md-sys-typescale-body-medium);
+    color: var(--md-sys-color-on-surface);
+  }
+
+  .api-key-meta {
+    font: var(--md-sys-typescale-body-small);
+    color: var(--md-sys-color-outline);
+  }
+
+  .api-key-revoke {
+    font: var(--md-sys-typescale-label-small);
+    color: var(--md-sys-color-error);
+    background: none;
+    border: 1px solid var(--md-sys-color-error);
+    border-radius: var(--md-sys-shape-corner-small);
+    padding: var(--space-1) var(--space-2);
+    cursor: pointer;
+  }
+
+  .api-key-revoke:hover {
+    background: var(--md-sys-color-error-container);
+    color: var(--md-sys-color-on-error-container);
+  }
+
+  .api-key-create {
+    display: flex;
+    gap: var(--space-2);
+    align-items: flex-end;
+    margin-bottom: var(--space-2);
+  }
+
+  .api-key-create .settings-input {
+    flex: 1;
+  }
+
+  .api-key-secret-value {
+    display: block;
+    background: var(--md-sys-color-surface-container-highest);
+    border: 1px solid var(--md-sys-color-outline-variant);
+    border-radius: var(--md-sys-shape-corner-small);
+    padding: var(--space-2) var(--space-3);
+    font-family: var(--font-mono);
+    font-size: 0.875rem;
+    word-break: break-all;
+    margin-bottom: var(--space-2);
+  }
+
+  .settings-btn--secondary {
+    background: var(--md-sys-color-surface-container-highest);
+    color: var(--md-sys-color-on-surface-variant);
+    border: 1px solid var(--md-sys-color-outline-variant);
+  }
+
   @media (max-width: 600px) {
     .settings-page {
       padding: var(--space-4) var(--space-2);
@@ -325,6 +488,10 @@ const userPseuds = await db.select().from(pseuds).where(eq(pseuds.userId, user.i
       flex-direction: column;
       align-items: flex-start;
       gap: var(--space-2);
+    }
+    .api-key-create {
+      flex-direction: column;
+      align-items: stretch;
     }
   }
 </style>
@@ -483,5 +650,147 @@ const userPseuds = await db.select().from(pseuds).where(eq(pseuds.userId, user.i
     } catch {
       err.textContent = 'Network error. Please try again.';
     }
+  });
+
+  // Notification Preferences
+  const NOTIF_TYPE_LABELS: Record<string, string> = {
+    comment_reply: 'Comment Replies',
+    kudos: 'Kudos',
+    new_chapter: 'New Chapters',
+    collection_invite: 'Collection Invites',
+    work_featured: 'Work Featured',
+    system: 'System Messages',
+  };
+
+  async function loadNotifPrefs() {
+    const container = document.getElementById('notif-prefs-list');
+    if (!container) return;
+    try {
+      const res = await fetch('/api/notifications/preferences');
+      if (!res.ok) return;
+      const data = await res.json();
+      container.innerHTML = '';
+      for (const pref of data.preferences) {
+        const row = document.createElement('div');
+        row.className = 'notif-pref-row';
+        const label = document.createElement('span');
+        label.className = 'notif-pref-label';
+        label.textContent = NOTIF_TYPE_LABELS[pref.type] || pref.type;
+        const toggle = document.createElement('input');
+        toggle.type = 'checkbox';
+        toggle.className = 'notif-pref-toggle';
+        toggle.checked = pref.enabled;
+        toggle.setAttribute('aria-label', `${NOTIF_TYPE_LABELS[pref.type] || pref.type} notifications`);
+        toggle.addEventListener('change', async () => {
+          try {
+            const updateRes = await fetch('/api/notifications/preferences', {
+              method: 'PUT',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ type: pref.type, enabled: toggle.checked }),
+            });
+            const succ = document.getElementById('notif-prefs-success')!;
+            if (updateRes.ok) {
+              succ.textContent = 'Notification preferences updated.';
+              setTimeout(() => { succ.textContent = ''; }, 2000);
+            }
+          } catch { /* ignore */ }
+        });
+        row.appendChild(label);
+        row.appendChild(toggle);
+        container.appendChild(row);
+      }
+    } catch { /* ignore */ }
+  }
+
+  loadNotifPrefs();
+
+  // API Keys
+  async function loadApiKeys() {
+    const container = document.getElementById('api-keys-list');
+    if (!container) return;
+    try {
+      const res = await fetch('/api/user/keys');
+      if (!res.ok) return;
+      const data = await res.json();
+      container.innerHTML = '';
+      for (const key of data.keys || []) {
+        const row = document.createElement('div');
+        row.className = 'api-key-row';
+        const info = document.createElement('div');
+        info.className = 'api-key-info';
+        const name = document.createElement('span');
+        name.className = 'api-key-name';
+        name.textContent = key.name;
+        const meta = document.createElement('span');
+        meta.className = 'api-key-meta';
+        meta.textContent = `${key.keyPrefix}… • Created ${new Date(key.created_at + (key.created_at.includes('Z') ? '' : 'Z')).toLocaleDateString()}` + (key.last_used_at ? ` • Last used ${new Date(key.last_used_at + 'Z').toLocaleDateString()}` : '');
+        info.appendChild(name);
+        info.appendChild(meta);
+        const revokeBtn = document.createElement('button');
+        revokeBtn.className = 'api-key-revoke';
+        revokeBtn.textContent = 'Revoke';
+        revokeBtn.addEventListener('click', async () => {
+          if (!confirm(`Revoke API key "${key.name}"? This cannot be undone.`)) return;
+          revokeBtn.disabled = true;
+          try {
+            const delRes = await fetch(`/api/user/keys/${key.id}`, { method: 'DELETE' });
+            if (delRes.ok) {
+              row.remove();
+            }
+          } catch { /* ignore */ }
+          revokeBtn.disabled = false;
+        });
+        row.appendChild(info);
+        row.appendChild(revokeBtn);
+        container.appendChild(row);
+      }
+    } catch { /* ignore */ }
+  }
+
+  loadApiKeys();
+
+  // API key creation
+  const createKeyBtn = document.getElementById('api-key-create-btn');
+  const keyNameInput = document.getElementById('api-key-name') as HTMLInputElement;
+  const keyError = document.getElementById('api-key-error')!;
+  const keySecretDiv = document.getElementById('api-key-secret')!;
+  const keySecretValue = document.getElementById('api-key-secret-value')!;
+  const copyBtn = document.getElementById('api-key-copy-btn')!;
+
+  createKeyBtn?.addEventListener('click', async () => {
+    const name = keyNameInput?.value?.trim();
+    if (!name) {
+      keyError.textContent = 'Please enter a key name.';
+      return;
+    }
+    keyError.textContent = '';
+    createKeyBtn.setAttribute('disabled', 'true');
+    try {
+      const res = await fetch('/api/user/keys', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        keyError.textContent = data.error || 'Failed to create key.';
+        return;
+      }
+      keyNameInput.value = '';
+      keySecretValue.textContent = data.key.secret;
+      keySecretDiv.style.display = 'block';
+      loadApiKeys();
+    } catch {
+      keyError.textContent = 'Network error. Please try again.';
+    }
+    createKeyBtn.removeAttribute('disabled');
+  });
+
+  copyBtn?.addEventListener('click', () => {
+    const secret = keySecretValue.textContent || '';
+    navigator.clipboard.writeText(secret).then(() => {
+      copyBtn.textContent = 'Copied!';
+      setTimeout(() => { copyBtn.textContent = 'Copy to Clipboard'; }, 2000);
+    });
   });
 </script>

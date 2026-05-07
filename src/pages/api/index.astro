@@ -6,11 +6,16 @@ import Base from '../../layouts/Base.astro';
 <Base title="API Documentation — fanfiction.fyi">
   <article class="api-docs">
     <h1>API Documentation</h1>
+    <div class="api-docs__links">
+      <a href="/api/openapi.json" class="api-docs__spec-link">OpenAPI 3.1 Spec (JSON)</a>
+      <a href="/api/docs" class="api-docs__spec-link">Interactive Docs (Scalar)</a>
+    </div>
     <p class="api-docs__intro">
-      The fanfiction.fyi read-only API provides JSON access to works, tags,
-      search, collections, and comments. All public endpoints support
+      The fanfiction.fyi API provides JSON access to works, tags,
+      search, collections, comments, and more. Public endpoints support
       <code>GET</code> and <code>OPTIONS</code> (CORS preflight). Cross-origin
-      requests are accepted from any origin.
+      requests are accepted from any origin. Authenticated endpoints require a
+      session cookie or <code>Authorization: Bearer ffy_…</code> API key.
     </p>
 
     <!-- Works -->
@@ -217,6 +222,26 @@ import Base from '../../layouts/Base.astro';
     font: var(--md-sys-typescale-headline-large);
     color: var(--md-sys-color-on-surface);
     margin: 0 0 var(--space-4);
+  }
+
+  .api-docs__links {
+    display: flex;
+    gap: var(--space-4);
+    margin-bottom: var(--space-4);
+  }
+
+  .api-docs__spec-link {
+    font: var(--md-sys-typescale-label-large);
+    color: var(--md-sys-color-primary);
+    text-decoration: none;
+    padding: var(--space-2) var(--space-4);
+    border: 1px solid var(--md-sys-color-outline-variant);
+    border-radius: var(--md-sys-shape-corner-medium);
+    transition: background 0.15s;
+  }
+
+  .api-docs__spec-link:hover {
+    background: var(--md-sys-color-surface-container-high);
   }
 
   .api-docs__intro {
