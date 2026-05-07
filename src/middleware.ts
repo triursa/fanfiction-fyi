@@ -13,6 +13,9 @@ const PUBLIC_PATHS = [
   '/feed.xml',
   '/privacy',
   '/terms',
+  '/api',         // API docs index page
+  '/api/docs',    // Interactive API docs (Scalar)
+  '/api/openapi.json', // OpenAPI spec
 ];
 
 const PUBLIC_PATH_PREFIXES = [

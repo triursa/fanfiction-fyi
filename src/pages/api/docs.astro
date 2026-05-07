@@ -1,0 +1,47 @@
+---
+export const prerender = false;
+import Base from '../../layouts/Base.astro';
+---
+<Base title="API Docs — fanfiction.fyi">
+  <article class="api-docs-page">
+    <h1>Interactive API Documentation</h1>
+    <p class="api-docs__intro">
+      Explore the fanfiction.fyi API interactively. Authenticate with a session cookie or Bearer API key.
+    </p>
+    <div id="scalar-api-docs"></div>
+  </article>
+</Base>
+
+<style is:global>
+  .api-docs-page {
+    max-width: 960px;
+    margin: 0 auto;
+    padding: var(--space-6) var(--space-4);
+  }
+
+  .api-docs-page h1 {
+    font: var(--md-sys-typescale-headline-large);
+    color: var(--md-sys-color-on-surface);
+    margin-bottom: var(--space-2);
+  }
+
+  .api-docs__intro {
+    font: var(--md-sys-typescale-body-large);
+    color: var(--md-sys-color-on-surface-variant);
+    margin-bottom: var(--space-6);
+  }
+
+  /* Override Scalar's default styles to match our theme */
+  .api-docs-page [data-testid="scalar-api-reference"] {
+    --scalar-font: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+  }
+</style>
+
+<script define:vars={{}}">
+  // Load Scalar API reference dynamically
+  const script = document.createElement('script');
+  script.src = 'https://cdn.jsdelivr.net/npm/@scalar/api-reference@1';
+  script.setAttribute('data-url', '/api/openapi.json');
+  script.setAttribute('data-standalone', 'true');
+  document.getElementById('scalar-api-docs')?.appendChild(script);
+</script>
