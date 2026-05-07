@@ -3,7 +3,7 @@ export const prerender = false;
 import { getDrizzle } from '@/lib/db';
 import { tags, taggings, pseuds, creatorships, works } from '@/lib/schema';
 import { inArray, sql, isNotNull, and, eq } from 'drizzle-orm';
-import { corsHeaders, handleCors } from '@/lib/cors';
+import { corsHeaders, handleCors, cacheHeaders } from '@/lib/cors';
 import type { APIRoute } from 'astro';
 
 export const OPTIONS: APIRoute = async ({ request }) => {
@@ -133,8 +133,11 @@ export const GET: APIRoute = async ({ url, locals, request }) => {
     }
   }
 
+  // Search results change frequently — use 60s (1 min) cache
+  const searchCache: Record<string, string> = { 'Cache-Control': 'public, max-age=60' };
+
   return new Response(
     JSON.stringify({ results, total, page }),
-    { headers: { 'Content-Type': 'application/json', ...cors } }
+    { headers: { 'Content-Type': 'application/json', ...cors, ...searchCache } }
   );
 };

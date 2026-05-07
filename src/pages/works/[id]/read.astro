@@ -1192,7 +1192,7 @@ const moodCSS = (!moodDisabled && currentMood && MOOD_PALETTES[currentMood])
         </div>
       </div>
 
-      <div class="reading-prose">
+      <div class="reading-prose" data-chapter-content>
         {currentChapterData.content_html && <div set:html={resolveCanonLinks(currentChapterData.content_html, canonIndex)} />}
         {!currentChapterData.content_html && currentChapterData.content_md && <div set:html={resolveCanonLinks(markdownToHtml(currentChapterData.content_md), canonIndex)} />}
         {!currentChapterData.content_html && !currentChapterData.content_md && <p>No content available for this chapter.</p>}

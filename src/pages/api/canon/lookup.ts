@@ -1,7 +1,7 @@
 export const prerender = false;
 
 import { getDrizzle } from '@/lib/db';
-import { corsHeaders, handleCors } from '@/lib/cors';
+import { corsHeaders, handleCors, cacheHeaders } from '@/lib/cors';
 import { markdownToHtml } from '@/lib/markdown';
 import type { APIRoute } from 'astro';
 import { eq, asc } from 'drizzle-orm';
@@ -76,7 +76,7 @@ export const GET: APIRoute = async ({ url, locals, request }) => {
           fandom_name: entry.tags?.name ?? null,
           works: works || [],
         }),
-        { headers: { 'Content-Type': 'application/json', ...cors } },
+        { headers: { 'Content-Type': 'application/json', ...cors, ...cacheHeaders('public') } },
       );
     } else {
       // location — use raw SQL for self-join + tag join
@@ -134,7 +134,7 @@ export const GET: APIRoute = async ({ url, locals, request }) => {
           children: children || [],
           works: works || [],
         }),
-        { headers: { 'Content-Type': 'application/json', ...cors } },
+        { headers: { 'Content-Type': 'application/json', ...cors, ...cacheHeaders('public') } },
       );
     }
   } catch (e: any) {

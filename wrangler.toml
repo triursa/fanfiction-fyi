@@ -22,3 +22,8 @@ database_id = "d4a29888-6e20-4391-8aa0-c131b4c36d88"
 [[r2_buckets]]
 binding = "MEDIA"
 bucket_name = "fanfiction-fyi-media"
+
+# Smart Placement runs the Worker in the closest Cloudflare location
+# to the D1 database, reducing latency for data-bound requests.
+[placement]
+mode = "smart"

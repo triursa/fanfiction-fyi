@@ -2,7 +2,7 @@ export const prerender = false;
 
 import { getDrizzle } from '@/lib/db';
 import { requireAuth } from '@/lib/auth';
-import { corsHeaders, handleCors } from '@/lib/cors';
+import { corsHeaders, handleCors, cacheHeaders } from '@/lib/cors';
 import { markdownToHtml } from '@/lib/markdown';
 import type { APIRoute } from 'astro';
 import type { LoreCategory } from '@/lib/types';
@@ -93,7 +93,7 @@ export const GET: APIRoute = async ({ params, locals, request }) => {
 
     return new Response(
       JSON.stringify(result),
-      { headers: { 'Content-Type': 'application/json', ...cors } },
+      { headers: { 'Content-Type': 'application/json', ...cors, ...cacheHeaders('public') } },
     );
   } catch (e: any) {
     return new Response(

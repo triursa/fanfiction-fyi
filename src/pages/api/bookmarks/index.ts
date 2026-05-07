@@ -2,6 +2,7 @@ export const prerender = false;
 
 import { getDrizzle } from '@/lib/db';
 import { requireAuth } from '@/lib/auth';
+import { cacheHeaders } from '@/lib/cors';
 import { markdownToHtml } from '@/lib/markdown';
 import { bookmarks, works } from '@/lib/schema';
 import { eq, and, or, like, gt, lt, gte, lte, sql, desc, asc, count, inArray } from 'drizzle-orm';
@@ -54,7 +55,7 @@ export const GET: APIRoute = async ({ request, locals }) => {
     return row;
   });
 
-  return new Response(JSON.stringify({ bookmarks: bookmarksList }), { headers: { 'Content-Type': 'application/json' } });
+  return new Response(JSON.stringify({ bookmarks: bookmarksList }), { headers: { 'Content-Type': 'application/json', ...cacheHeaders('private') } });
 };
 
 export const POST: APIRoute = async ({ request, locals }) => {

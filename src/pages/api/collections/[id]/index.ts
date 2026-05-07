@@ -3,6 +3,7 @@ export const prerender = false;
 import { getDrizzle } from '@/lib/db';
 import { requireAuth, checkApproved } from '@/lib/auth';
 import { collections, collectionItems, works, pseuds } from '@/lib/schema';
+import { cacheHeaders } from '@/lib/cors';
 import { eq, and, or, like, gt, lt, gte, lte, sql, desc, asc, count, inArray, isNotNull } from 'drizzle-orm';
 import type { APIRoute } from 'astro';
 
@@ -97,7 +98,7 @@ export const GET: APIRoute = async ({ params, locals }) => {
   }
 
   return new Response(JSON.stringify({ collection, works: workList }), {
-    headers: { 'Content-Type': 'application/json' }
+    headers: { 'Content-Type': 'application/json', ...cacheHeaders('public') }
   });
 };
 

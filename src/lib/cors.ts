@@ -34,6 +34,30 @@ export function corsHeaders(request: Request): HeadersInit {
 }
 
 /**
+ * Cache-Control header helpers for API responses.
+ *
+ * - 'public'  → public, max-age=300 (5 min) — for publicly visible GET endpoints
+ * - 'private' → private, no-cache             — for auth-gated endpoints (must revalidate per user)
+ * - 'none'    → no-store                       — for frequently changing or sensitive responses
+ *
+ * NOTE: FTS5 Unicode61 stemmer is NOT supported on Cloudflare D1 — the built-in
+ * FTS5 only supports the default and unicode61 tokenizers without custom tokenizers/stemmers.
+ * Skip the stemmer item from issue #99.
+ */
+export function cacheHeaders(
+  type: 'public' | 'private' | 'none' = 'none',
+): Record<string, string> {
+  switch (type) {
+    case 'public':
+      return { 'Cache-Control': 'public, max-age=300' };
+    case 'private':
+      return { 'Cache-Control': 'private, no-cache' };
+    default:
+      return { 'Cache-Control': 'no-store' };
+  }
+}
+
+/**
  * Handles a CORS preflight (OPTIONS) request.
  * Returns a 204 Response if the request is OPTIONS, or `null` otherwise
  * so the caller can continue with normal request processing.

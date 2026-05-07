@@ -3,6 +3,7 @@ import { useState, useEffect } from 'preact/hooks';
 import ActivityHeatmap from './ActivityHeatmap';
 import Sparkline from './Sparkline';
 import GenrePie from './GenrePie';
+import { SkeletonProfile } from './Skeleton';
 
 interface PortfolioData {
   pseud: {
@@ -42,10 +43,8 @@ export default function PseudPortfolio({ pseudId }: { pseudId: number }) {
 
   if (loading) {
     return (
-      <div class="portfolio-loading">
-        <div class="portfolio-skeleton" />
-        <div class="portfolio-skeleton" style={{ height: '200px' }} />
-        <div class="portfolio-skeleton" style={{ height: '120px' }} />
+      <div role="status" aria-label="Loading profile">
+        <SkeletonProfile />
       </div>
     );
   }

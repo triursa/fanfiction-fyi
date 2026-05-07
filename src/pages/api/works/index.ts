@@ -3,7 +3,7 @@ export const prerender = false;
 import { getDrizzle } from '@/lib/db';
 import { getAuth } from '@/lib/auth';
 import { markdownToHtml } from '@/lib/markdown';
-import { corsHeaders, handleCors } from '@/lib/cors';
+import { corsHeaders, handleCors, cacheHeaders } from '@/lib/cors';
 import { checkRateLimit, recordFailedAttempt } from '@/lib/rate-limit';
 import { works, chapters, creatorships, tags, taggings, pseuds } from '@/lib/schema';
 import { eq, and, or, like, gt, lt, gte, lte, sql, desc, asc, count, inArray, isNotNull, isNull } from 'drizzle-orm';
@@ -61,7 +61,7 @@ export const GET: APIRoute = async ({ url, locals, request }) => {
       (w as any).pseuds = wPseuds;
     }
 
-    return new Response(JSON.stringify(workList), { headers: { 'Content-Type': 'application/json', ...cors } });
+    return new Response(JSON.stringify(workList), { headers: { 'Content-Type': 'application/json', ...cors, ...cacheHeaders('public') } });
   }
 
   // No tag filter — simple query
@@ -89,7 +89,7 @@ export const GET: APIRoute = async ({ url, locals, request }) => {
     (w as any).pseuds = wPseuds;
   }
 
-  return new Response(JSON.stringify(workList), { headers: { 'Content-Type': 'application/json', ...cors } });
+  return new Response(JSON.stringify(workList), { headers: { 'Content-Type': 'application/json', ...cors, ...cacheHeaders('public') } });
 };
 
 export const POST: APIRoute = async ({ request, locals }) => {

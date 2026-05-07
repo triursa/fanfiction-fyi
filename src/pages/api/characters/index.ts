@@ -2,7 +2,7 @@ export const prerender = false;
 
 import { getDrizzle } from '@/lib/db';
 import { characters, characterGroups, characterAppearances } from '@/lib/schema';
-import { corsHeaders, handleCors } from '@/lib/cors';
+import { corsHeaders, handleCors, cacheHeaders } from '@/lib/cors';
 import { eq, and, like, sql, isNotNull, desc, asc, count } from 'drizzle-orm';
 import type { APIRoute } from 'astro';
 
@@ -93,6 +93,6 @@ export const GET: APIRoute = async ({ url, locals, request }) => {
   }));
 
   return new Response(JSON.stringify({ characters: charactersResult, total, page, limit }), {
-    headers: { 'Content-Type': 'application/json', ...cors },
+    headers: { 'Content-Type': 'application/json', ...cors, ...cacheHeaders('public') },
   });
 };

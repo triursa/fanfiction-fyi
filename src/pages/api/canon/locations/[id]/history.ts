@@ -1,6 +1,6 @@
 export const prerender = false;
 
-import { corsHeaders, handleCors } from '@/lib/cors';
+import { corsHeaders, handleCors, cacheHeaders } from '@/lib/cors';
 import type { APIRoute } from 'astro';
 
 export const OPTIONS: APIRoute = async ({ request }) => {
@@ -31,7 +31,7 @@ export const GET: APIRoute = async ({ params, locals, request }) => {
 
     return new Response(
       JSON.stringify({ edits }),
-      { headers: { 'Content-Type': 'application/json', ...cors } },
+      { headers: { 'Content-Type': 'application/json', ...cors, ...cacheHeaders('public') } },
     );
   } catch (e: any) {
     return new Response(

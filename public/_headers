@@ -1,0 +1,7 @@
+# Cloudflare Pages headers — immutable cache for hashed static assets
+/_astro/*
+  Cache-Control: public, max-age=31536000, immutable
+
+# Service worker must always revalidate
+/sw.js
+  Cache-Control: no-cache

@@ -2,6 +2,7 @@ import { h } from 'preact';
 import { useState, useEffect, useRef } from 'preact/hooks';
 import FilterChips from './FilterChips';
 import WorkCard from './WorkCard';
+import { SkeletonCard } from './Skeleton';
 
 type Filters = { type: string; complete: string; word_min: number; word_max: number };
 
@@ -175,7 +176,11 @@ export default function SearchPage({ initialQuery, initialFilters, initialPage, 
 
       <FilterChips filters={filters} onChange={handleFilterChange} />
 
-      {loading && <p class="search-loading">Searching…</p>}
+      {loading && (
+        <div class="results-list" role="status" aria-label="Loading search results">
+          {Array.from({ length: 5 }, (_, i) => <SkeletonCard key={i} />)}
+        </div>
+      )}
 
       {hasSearched && !loading && results.length === 0 && (
         <p class="no-results">
@@ -189,17 +194,19 @@ export default function SearchPage({ initialQuery, initialFilters, initialPage, 
         <p class="placeholder-text">Enter a search query or use filters to find works.</p>
       )}
 
-      {results.length > 0 && (
+      {!loading && results.length > 0 && (
         <div class="results-meta">
           <span>{total.toLocaleString()} result{total !== 1 ? 's' : ''}</span>
         </div>
       )}
 
-      <div class="results-list">
-        {results.map(w => (
-          <WorkCard key={w.id} {...w} />
-        ))}
-      </div>
+      {!loading && (
+        <div class="results-list">
+          {results.map(w => (
+            <WorkCard key={w.id} {...w} />
+          ))}
+        </div>
+      )}
 
       {totalPages > 1 && (
         <nav class="pagination">

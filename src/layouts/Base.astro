@@ -113,6 +113,35 @@ const isAdmin = isModOrAbove;
     applyTheme();
     document.addEventListener('astro:after-swap', applyTheme);
     </script>
+    <!-- Show skeleton during navigations, hide on page load -->
+    <script is:inline>
+    (function() {
+      // Hide skeleton on page load (content is already painted via SSR)
+      var skeleton = document.querySelector('.page-skeleton');
+      if (skeleton) skeleton.classList.remove('active');
+      var content = document.querySelector('.page-content');
+      if (content) content.style.display = '';
+
+      // Intercept same-origin link clicks to show skeleton during navigation
+      document.addEventListener('click', function(e) {
+        var link = e.target.closest('a[href]');
+        if (!link) return;
+        var href = link.getAttribute('href');
+        if (!href || href.startsWith('#') || href.startsWith('http') || href.startsWith('mailto:') || href.startsWith('tel:')) return;
+        try {
+          var url = new URL(href, location.origin);
+          if (url.origin !== location.origin) return;
+        } catch(ex) { return; }
+        // Show skeleton, hide content for a brief transition feel
+        var skeleton = document.querySelector('.page-skeleton');
+        var content = document.querySelector('.page-content');
+        if (skeleton && content) {
+          skeleton.classList.add('active');
+          content.style.display = 'none';
+        }
+      });
+    })();
+    </script>
     <!-- Adaptive Navigation: swaps between mobile bottom bar, tablet rail, and desktop drawer -->
     <AdaptiveNav
       client:load
@@ -146,6 +175,24 @@ const isAdmin = isModOrAbove;
     margin: 0 auto;
     padding: var(--space-6);
     min-height: calc(100vh - 120px);
+  }
+
+  /* ── Page Skeleton (visible during view transitions/navigation) ── */
+  .page-skeleton {
+    display: none; /* Hidden by default; shown via JS during navigations */
+  }
+  .page-skeleton.active {
+    display: block;
+  }
+  .skeleton-page-title {
+    width: 40%;
+    height: 1.75rem;
+    margin-bottom: var(--space-6);
+  }
+  .skeleton-page-content {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75em;
   }
 
   .app-footer {
