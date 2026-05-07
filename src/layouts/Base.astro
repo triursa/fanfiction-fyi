@@ -4,6 +4,7 @@ import { getDrizzle } from '../lib/db';
 import { users, sessions, pseuds } from '../lib/schema';
 import { ROLE_LEVEL, UserRole } from '../lib/types';
 import { THEMES } from '../styles/themes';
+import { ViewTransitions } from 'astro:transitions';
 import BugReport from '../components/BugReport';
 import AdaptiveNav from '../components/AdaptiveNav';
 import { eq, and, gt, sql, asc } from 'drizzle-orm';
@@ -82,6 +83,7 @@ const isAdmin = isModOrAbove;
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
     <title>{title}</title>
+    <ViewTransitions />
     {themeOverrideCSS && <style>{themeOverrideCSS}</style>}
     <!-- Serialized theme colors for client-side localStorage fallback -->
     <script type="application/json" id="ff-themes-data" set:html={JSON.stringify(Object.fromEntries(Object.entries(THEMES).map(([k, v]) => [k, v.colors])))} />
@@ -89,7 +91,7 @@ const isAdmin = isModOrAbove;
   <body data-theme={userTheme ?? 'obsidian'} data-reading-mode={isReadingMode ? 'true' : undefined}>
     <!-- Inline script to apply localStorage theme ASAP, before paint -->
     <script is:inline>
-    (function() {
+    function applyTheme() {
       try {
         var stored = localStorage.getItem('ff-theme');
         if (stored && stored !== 'obsidian') {
@@ -107,7 +109,9 @@ const isAdmin = isModOrAbove;
           }
         }
       } catch(e) {}
-    })();
+    }
+    applyTheme();
+    document.addEventListener('astro:after-swap', applyTheme);
     </script>
     <!-- Adaptive Navigation: swaps between mobile bottom bar, tablet rail, and desktop drawer -->
     <AdaptiveNav
@@ -117,7 +121,7 @@ const isAdmin = isModOrAbove;
       isAdmin={isAdmin}
       isReadingMode={isReadingMode}
     />
-    <main class="main-content">
+    <main class="main-content" transition:animate="fade">
       <slot />
     </main>
     <footer class="app-footer">
