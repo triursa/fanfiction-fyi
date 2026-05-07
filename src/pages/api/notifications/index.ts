@@ -3,7 +3,7 @@ export const prerender = false;
 import { getDrizzle } from '@/lib/db';
 import { requireAuth } from '@/lib/auth';
 import { notifications } from '@/lib/schema';
-import { eq, and, desc, sql, count } from 'drizzle-orm';
+import { eq, and, desc, count } from 'drizzle-orm';
 import type { APIRoute } from 'astro';
 
 export const GET: APIRoute = async ({ url, locals, request }) => {
