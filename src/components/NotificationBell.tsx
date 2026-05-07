@@ -4,13 +4,13 @@ type NotificationType = 'comment_reply' | 'kudos' | 'new_chapter' | 'collection_
 
 interface Notification {
   id: number;
-  user_id: number;
+  userId: number;
   type: NotificationType;
   title: string;
   body: string | null;
   link: string | null;
   read: number | boolean;
-  created_at: string;
+  createdAt: string;
 }
 
 function timeAgo(dateStr: string): string {
@@ -66,7 +66,7 @@ function NotificationPanel({ notifications: notifs, unreadCount, onMarkAllRead, 
             {n.body && (
               <p class="notif-panel__body">{n.body.length > 120 ? n.body.substring(0, 120) + '…' : n.body}</p>
             )}
-            <span class="notif-panel__time">{timeAgo(n.created_at)}</span>
+            <span class="notif-panel__time">{timeAgo(n.createdAt)}</span>
           </div>
           <button
             class="notif-panel__delete"
@@ -153,8 +153,11 @@ export default function NotificationBell() {
     try {
       const res = await fetch(`/api/notifications/${id}`, { method: 'DELETE' });
       if (res.ok) {
+        const deleted = notifs.find(n => n.id === id);
         setNotifs(prev => prev.filter(n => n.id !== id));
-        setUnreadCount(prev => Math.max(0, prev - 1));
+        if (deleted && !deleted.read) {
+          setUnreadCount(prev => Math.max(0, prev - 1));
+        }
       }
     } catch { /* ignore */ }
   };

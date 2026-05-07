@@ -124,8 +124,14 @@ const isAdmin = isModOrAbove;
 
       // Intercept same-origin link clicks to show skeleton during navigation
       document.addEventListener('click', function(e) {
+        if (e.defaultPrevented) return;
+        if (e.button !== 0) return;
+        if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
         var link = e.target.closest('a[href]');
         if (!link) return;
+        if (link.hasAttribute('download')) return;
+        var target = link.getAttribute('target');
+        if (target && target !== '_self') return;
         var href = link.getAttribute('href');
         if (!href || href.startsWith('#') || href.startsWith('http') || href.startsWith('mailto:') || href.startsWith('tel:')) return;
         try {

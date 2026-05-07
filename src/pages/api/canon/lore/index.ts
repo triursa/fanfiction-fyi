@@ -116,7 +116,7 @@ export const GET: APIRoute = async ({ url, locals, request }) => {
 
     return new Response(
       JSON.stringify({ entries, total, page, limit }),
-      { headers: { 'Content-Type': 'application/json', ...cors, ...cacheHeaders('public') } },
+      { headers: { 'Content-Type': 'application/json', ...cors, ...cacheHeaders('private') } },
     );
   } catch (e: any) {
     return new Response(

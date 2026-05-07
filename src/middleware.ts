@@ -66,6 +66,7 @@ function isPublicPath(pathname: string): boolean {
 export const onRequest = defineMiddleware(async (context, next) => {
   const { pathname } = context.url;
   const method = context.request.method;
+  const d1 = context.locals.runtime.env.DB as D1Database;
 
   // Publish flow debug logging
   const isPublishRelated = pathname.startsWith('/api/works') && (method === 'PUT' || method === 'POST');
@@ -101,11 +102,10 @@ export const onRequest = defineMiddleware(async (context, next) => {
         // API key auth successful — set minimal user in locals
         context.locals.user = apiKeyResult.user;
         const response = await next();
-        // Add rate limit headers
-        response.headers.set('X-RateLimit-Limit', apiKeyResult.key.rateLimitTier === 'pro' ? '120' : '60');
-        response.headers.set('X-RateLimit-Remaining', '59'); // Simplified — real rate limiting would need a counter
         const csp = cspHeaders();
-        response.headers.set(Object.keys(csp)[0], Object.values(csp)[0]);
+        for (const [header, value] of Object.entries(csp)) {
+          response.headers.set(header, value);
+        }
         return response;
       }
       // Invalid/expired API key
@@ -129,7 +129,6 @@ export const onRequest = defineMiddleware(async (context, next) => {
     return context.redirect('/login');
   }
 
-  const d1 = context.locals.runtime.env.DB as D1Database;
   const db = getDrizzle(d1);
 
   // Look up session and user
@@ -225,6 +224,8 @@ export const onRequest = defineMiddleware(async (context, next) => {
   // Continue to the page/API handler, then add CSP headers
   const response = await next();
   const csp = cspHeaders();
-  response.headers.set(Object.keys(csp)[0], Object.values(csp)[0]);
+  for (const [header, value] of Object.entries(csp)) {
+    response.headers.set(header, value);
+  }
   return response;
 });
