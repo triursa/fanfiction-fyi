@@ -139,6 +139,16 @@ const userPseuds = await db.select().from(pseuds).where(eq(pseuds.userId, user.i
         </form>
       </div>
     </details>
+
+    <!-- Notification Preferences -->
+    <details class="settings-section">
+      <summary class="section-title">Notification Preferences</summary>
+      <div class="section-body">
+        <p class="current-value">Choose which notifications you'd like to receive.</p>
+        <div id="notif-prefs-list" class="notif-prefs-list"></div>
+        <p class="form-success" id="notif-prefs-success"></p>
+      </div>
+    </details>
   </section>
 </Base>
 
@@ -317,6 +327,62 @@ const userPseuds = await db.select().from(pseuds).where(eq(pseuds.userId, user.i
     gap: var(--space-2);
   }
 
+  .notif-prefs-list {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+    margin-bottom: var(--space-3);
+  }
+
+  .notif-pref-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: var(--space-2) var(--space-3);
+    background: var(--md-sys-color-surface-container-lowest);
+    border: 1px solid var(--md-sys-color-outline-variant);
+    border-radius: var(--md-sys-shape-corner-medium);
+  }
+
+  .notif-pref-label {
+    font: var(--md-sys-typescale-body-medium);
+    color: var(--md-sys-color-on-surface);
+  }
+
+  .notif-pref-toggle {
+    position: relative;
+    width: 52px;
+    height: 32px;
+    appearance: none;
+    background: var(--md-sys-color-surface-container-highest);
+    border: 2px solid var(--md-sys-color-outline);
+    border-radius: 16px;
+    cursor: pointer;
+    transition: background 0.2s, border-color 0.2s;
+  }
+
+  .notif-pref-toggle:checked {
+    background: var(--md-sys-color-primary);
+    border-color: var(--md-sys-color-primary);
+  }
+
+  .notif-pref-toggle::before {
+    content: '';
+    position: absolute;
+    top: 2px;
+    left: 2px;
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    background: var(--md-sys-color-outline);
+    transition: transform 0.2s, background 0.2s;
+  }
+
+  .notif-pref-toggle:checked::before {
+    transform: translateX(20px);
+    background: var(--md-sys-color-on-primary);
+  }
+
   @media (max-width: 600px) {
     .settings-page {
       padding: var(--space-4) var(--space-2);
@@ -484,4 +550,56 @@ const userPseuds = await db.select().from(pseuds).where(eq(pseuds.userId, user.i
       err.textContent = 'Network error. Please try again.';
     }
   });
+
+  // Notification Preferences
+  const NOTIF_TYPE_LABELS: Record<string, string> = {
+    comment_reply: 'Comment Replies',
+    kudos: 'Kudos',
+    new_chapter: 'New Chapters',
+    collection_invite: 'Collection Invites',
+    work_featured: 'Work Featured',
+    system: 'System Messages',
+  };
+
+  async function loadNotifPrefs() {
+    const container = document.getElementById('notif-prefs-list');
+    if (!container) return;
+    try {
+      const res = await fetch('/api/notifications/preferences');
+      if (!res.ok) return;
+      const data = await res.json();
+      container.innerHTML = '';
+      for (const pref of data.preferences) {
+        const row = document.createElement('div');
+        row.className = 'notif-pref-row';
+        const label = document.createElement('span');
+        label.className = 'notif-pref-label';
+        label.textContent = NOTIF_TYPE_LABELS[pref.type] || pref.type;
+        const toggle = document.createElement('input');
+        toggle.type = 'checkbox';
+        toggle.className = 'notif-pref-toggle';
+        toggle.checked = pref.enabled;
+        toggle.setAttribute('aria-label', `${NOTIF_TYPE_LABELS[pref.type] || pref.type} notifications`);
+        toggle.addEventListener('change', async () => {
+          try {
+            const updateRes = await fetch('/api/notifications/preferences', {
+              method: 'PUT',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ type: pref.type, enabled: toggle.checked }),
+            });
+            const succ = document.getElementById('notif-prefs-success')!;
+            if (updateRes.ok) {
+              succ.textContent = 'Notification preferences updated.';
+              setTimeout(() => { succ.textContent = ''; }, 2000);
+            }
+          } catch { /* ignore */ }
+        });
+        row.appendChild(label);
+        row.appendChild(toggle);
+        container.appendChild(row);
+      }
+    } catch { /* ignore */ }
+  }
+
+  loadNotifPrefs();
 </script>
