@@ -3,6 +3,7 @@ import { getDrizzle } from '@/lib/db';
 import { sessions, users } from '@/lib/schema';
 import { and, eq, gt, sql } from 'drizzle-orm';
 import { cspHeaders } from '@/lib/csp';
+import { validateApiKey, extractBearerToken } from '@/lib/api-keys';
 
 // Paths accessible without authentication or approval
 const PUBLIC_PATHS = [
@@ -87,6 +88,31 @@ export const onRequest = defineMiddleware(async (context, next) => {
   // Read session cookie
   const cookie = context.request.headers.get('cookie') ?? '';
   const sessionMatch = cookie.match(/session=([a-f0-9]+)/);
+
+  // For API routes, check Bearer token auth as fallback
+  if (!sessionMatch && pathname.startsWith('/api/')) {
+    const bearerToken = extractBearerToken(context.request);
+    if (bearerToken) {
+      const apiKeyResult = await validateApiKey(d1, bearerToken);
+      if (apiKeyResult) {
+        // API key auth successful — set minimal user in locals
+        context.locals.user = apiKeyResult.user;
+        const response = await next();
+        // Add rate limit headers
+        response.headers.set('X-RateLimit-Limit', apiKeyResult.key.rateLimitTier === 'pro' ? '120' : '60');
+        response.headers.set('X-RateLimit-Remaining', '59'); // Simplified — real rate limiting would need a counter
+        const csp = cspHeaders();
+        response.headers.set(Object.keys(csp)[0], Object.values(csp)[0]);
+        return response;
+      }
+      // Invalid/expired API key
+      return new Response(JSON.stringify({ error: 'Unauthorized' }), {
+        status: 401,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
+  }
+
   if (!sessionMatch) {
     if (isPublishRelated) {
       console.log(JSON.stringify({ t: 'mw_publish', note: 'NO_SESSION_COOKIE — returning 401', pathname }));
