@@ -8,11 +8,12 @@ pages_build_output_dir = "./dist"
 # (Pages → project → Settings → Environment variables) or with:
 #   npx wrangler pages secret put FOUNDER_EMAIL   # for secrets
 # See .env.example for full documentation of each variable.
-[vars]
-# Email address that receives the 'founder' role on first OAuth signup.
-# Leave empty to disable automatic founder promotion.
-# Override this value in the Cloudflare Pages dashboard for production.
-FOUNDER_EMAIL = ""
+# Environment variables are managed via Cloudflare Pages secrets:
+#   wrangler pages secret put GOOGLE_CLIENT_ID --project-name fanfiction-fyi
+#   wrangler pages secret put GOOGLE_CLIENT_SECRET --project-name fanfiction-fyi
+#   wrangler pages secret put FOUNDER_EMAIL --project-name fanfiction-fyi
+#   wrangler pages secret put GITHUB_TOKEN --project-name fanfiction-fyi
+# Do NOT add secrets to [vars] below — they override Pages secrets.
 
 [[d1_databases]]
 binding = "DB"
