@@ -19,6 +19,8 @@ const GOOGLE_JWKS = createRemoteJWKSet(new URL('https://www.googleapis.com/oauth
  * D1 eventual consistency: changes may take 500-800ms to be visible in subsequent reads
  */
 export const GET: APIRoute = async ({ url, locals, request }) => {
+  // TOP-LEVEL SAFETY WRAPPER: catch anything that might escape inner try/catch blocks
+  try {
   const d1 = locals.runtime.env.DB as D1Database;
   const db = getDrizzle(d1);
   const env = locals.runtime.env;
@@ -265,5 +267,15 @@ export const GET: APIRoute = async ({ url, locals, request }) => {
     console.error('Google OAuth callback error (standard flow):', err);
     const errDetail = err instanceof Error ? `${err.message}|${err.stack?.slice(0, 200)}` : String(err);
     return Response.redirect(`${url.origin}/login?error=oauth_callback_failed&detail=${encodeURIComponent(errDetail.slice(0, 300))}`, 302);
+  }
+
+  } catch (topLevelErr) {
+    // SAFETY NET: catch any unhandled errors at the module/handler level
+    console.error('Google OAuth callback TOP-LEVEL error:', topLevelErr);
+    const detail = topLevelErr instanceof Error ? `${topLevelErr.message}__STACK__${topLevelErr.stack?.slice(0, 500)}` : String(topLevelErr);
+    return new Response(JSON.stringify({ error: 'internal', detail }), {
+      status: 500,
+      headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' },
+    });
   }
 };
