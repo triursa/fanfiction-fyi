@@ -216,6 +216,11 @@ import Base from '../../layouts/Base.astro';
       suspended: 'This account is temporarily suspended',
     };
     errorEl.textContent = messages[oauthError] || 'Google sign-in failed';
+    // Show detail param for debugging OAuth errors
+    const detail = urlParams.get('detail');
+    if (detail) {
+      errorEl.textContent += ' (' + detail + ')';
+    }
     // If suspended with until date, append it
     if (oauthError === 'suspended') {
       const until = urlParams.get('until');

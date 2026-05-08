@@ -263,6 +263,7 @@ export const GET: APIRoute = async ({ url, locals, request }) => {
     });
   } catch (err) {
     console.error('Google OAuth callback error (standard flow):', err);
-    return Response.redirect(`${url.origin}/login?error=oauth_callback_failed`, 302);
+    const errDetail = err instanceof Error ? `${err.message}|${err.stack?.slice(0, 200)}` : String(err);
+    return Response.redirect(`${url.origin}/login?error=oauth_callback_failed&detail=${encodeURIComponent(errDetail.slice(0, 300))}`, 302);
   }
 };
