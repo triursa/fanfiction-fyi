@@ -45,7 +45,7 @@ export const PUT: APIRoute = async ({ params, request, locals }) => {
   }
 
   await db.update(users)
-    .set({ suspendedUntil: sql`(datetime('now', '+${duration} hours'))`, updatedAt: sql`(datetime('now'))` })
+    .set({ suspendedUntil: sql.raw(`datetime('now', '+${Number(duration)} hours')`), updatedAt: sql`(datetime('now'))` })
     .where(eq(users.id, userId));
 
   const updatedUser = await db

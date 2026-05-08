@@ -95,7 +95,7 @@ export async function createSession(db: D1Database, userId: number): Promise<str
     userId,
     token,
     createdAt: sql`(datetime('now'))`,
-    expiresAt: sql`(datetime('now', '+${SESSION_DAYS} days'))`,
+    expiresAt: sql`(datetime('now', '+30 days'))`,
   });
   return token;
 }
