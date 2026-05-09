@@ -6,6 +6,7 @@ import { eq, and, isNotNull, sql } from 'drizzle-orm';
 import { markdownToHtml } from '../../../lib/markdown';
 import { THEMES } from '../../../styles/themes';
 import ReadingMode from '../../../components/ReadingMode';
+import AnnotationsLayer from '../../../components/AnnotationsLayer';
 import TagCluster from '../../../components/TagCluster.tsx';
 import { buildCanonIndex, resolveCanonLinks } from '../../../lib/canon-resolver';
 
@@ -1212,6 +1213,11 @@ const moodCSS = (!moodDisabled && currentMood && MOOD_PALETTES[currentMood])
         myReactions={myReactions}
         fontSize={fontSizeClass}
         workTitle={work.title}
+      />
+      <AnnotationsLayer client:load
+        workId={workId}
+        chapterId={currentChapter.id}
+        userId={authUser?.id ?? null}
       />
     </section>
 

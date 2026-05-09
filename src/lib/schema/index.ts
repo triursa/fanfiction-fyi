@@ -9,3 +9,4 @@ export * from './publish-log';
 export * from './moderation';
 export * from './notifications';
 export * from './api-keys';
+export * from './annotations';
