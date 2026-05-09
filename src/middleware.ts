@@ -68,24 +68,9 @@ export const onRequest = defineMiddleware(async (context, next) => {
   const method = context.request.method;
   const d1 = context.locals.runtime.env.DB as D1Database;
 
-  // Publish flow debug logging
-  const isPublishRelated = pathname.startsWith('/api/works') && (method === 'PUT' || method === 'POST');
-  if (isPublishRelated) {
-    const hasCookie = !!(context.request.headers.get('cookie') ?? '').match(/session=([a-f0-9]+)/);
-    console.log(JSON.stringify({
-      t: 'mw_publish',
-      method,
-      pathname,
-      hasSessionCookie: hasCookie,
-      contentType: context.request.headers.get('Content-Type'),
-    }));
-  }
 
   // Allow all public paths through without auth checks
   if (isPublicPath(pathname)) {
-    if (isPublishRelated) {
-      console.log(JSON.stringify({ t: 'mw_publish', note: 'isPublicPath=true — skipping auth', pathname }));
-    }
     return next();
   }
 
@@ -117,9 +102,6 @@ export const onRequest = defineMiddleware(async (context, next) => {
   }
 
   if (!sessionMatch) {
-    if (isPublishRelated) {
-      console.log(JSON.stringify({ t: 'mw_publish', note: 'NO_SESSION_COOKIE — returning 401', pathname }));
-    }
     if (pathname.startsWith('/api/')) {
       return new Response(JSON.stringify({ error: 'Unauthorized' }), {
         status: 401,
@@ -138,9 +120,6 @@ export const onRequest = defineMiddleware(async (context, next) => {
     .get();
 
   if (!session) {
-    if (isPublishRelated) {
-      console.log(JSON.stringify({ t: 'mw_publish', note: 'SESSION_EXPIRED_OR_INVALID — returning 401', pathname }));
-    }
     if (pathname.startsWith('/api/')) {
       return new Response(JSON.stringify({ error: 'Unauthorized' }), {
         status: 401,
