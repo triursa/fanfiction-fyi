@@ -723,7 +723,7 @@ const userPseuds = await db.select().from(pseuds).where(eq(pseuds.userId, user.i
         name.textContent = key.name;
         const meta = document.createElement('span');
         meta.className = 'api-key-meta';
-        meta.textContent = `${key.keyPrefix}… • Created ${new Date(key.created_at + (key.created_at.includes('Z') ? '' : 'Z')).toLocaleDateString()}` + (key.last_used_at ? ` • Last used ${new Date(key.last_used_at + 'Z').toLocaleDateString()}` : '');
+        meta.textContent = `${key.keyPrefix}… • Created ${new Date(key.createdAt + (key.createdAt.includes('Z') ? '' : 'Z')).toLocaleDateString()}` + (key.lastUsedAt ? ` • Last used ${new Date(key.lastUsedAt + (key.lastUsedAt.includes('Z') ? '' : 'Z')).toLocaleDateString()}` : '');
         info.appendChild(name);
         info.appendChild(meta);
         const revokeBtn = document.createElement('button');
@@ -782,8 +782,9 @@ const userPseuds = await db.select().from(pseuds).where(eq(pseuds.userId, user.i
       loadApiKeys();
     } catch {
       keyError.textContent = 'Network error. Please try again.';
+    } finally {
+      createKeyBtn.removeAttribute('disabled');
     }
-    createKeyBtn.removeAttribute('disabled');
   });
 
   copyBtn?.addEventListener('click', () => {
