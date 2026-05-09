@@ -6,7 +6,7 @@ import CommentThread from '../../../components/CommentThread';
 import ReportButton from '../../../components/ReportButton';
 import { getDrizzle } from '../../../lib/db';
 import { works, chapters, creatorships, readings, sessions, users, pseuds as pseudsTable, tags, taggings, chapterReactions, comments, bookmarks, kudos, workRelations, serialWorks, series } from '../../../lib/schema';
-import { eq, and, isNull, isNotNull, desc, sql } from 'drizzle-orm';
+import { eq, and, ne, isNull, isNotNull, desc, sql } from 'drizzle-orm';
 import { markdownToHtml } from '../../../lib/markdown';
 
 const workId = Number(Astro.params.id);
@@ -295,6 +295,90 @@ for (const c of allComments) {
   }
 }
 const commentsJson = JSON.stringify(allComments);
+
+// Recommendations — kudos-based collaborative filtering with tag fallback
+let recommendations: any[] = [];
+let recMethod = 'recent';
+try {
+  // Strategy 1: Kudos overlap — "Readers who enjoyed this also enjoyed..."
+  const kudosOverlap = await db
+    .select({
+      id: works.id,
+      title: works.title,
+      slug: works.slug,
+      summary: works.summary,
+      wordCount: works.wordCount,
+      complete: works.complete,
+      publishedAt: works.publishedAt,
+      overlap: sql<number>`count(${kudos.id})`,
+    })
+    .from(kudos)
+    .innerJoin(
+      sql`(SELECT pseud_id FROM kudos WHERE work_id = ${workId}) AS src`,
+      sql`src.pseud_id = ${kudos.pseudId}`
+    )
+    .innerJoin(works, sql`${kudos.workId} = ${works.id}`)
+    .where(and(ne(works.id, workId), eq(works.draft, 0), sql`${works.publishedAt} IS NOT NULL`))
+    .groupBy(works.id, works.title, works.slug, works.summary, works.wordCount, works.complete, works.publishedAt)
+    .orderBy(desc(sql`overlap`))
+    .limit(5);
+
+  if (kudosOverlap.length >= 3) {
+    recommendations = kudosOverlap;
+    recMethod = 'kudos';
+  } else {
+    // Strategy 2: Tag-based similarity
+    const tagOverlap = await db
+      .select({
+        id: works.id,
+        title: works.title,
+        slug: works.slug,
+        summary: works.summary,
+        wordCount: works.wordCount,
+        complete: works.complete,
+        publishedAt: works.publishedAt,
+        overlap: sql<number>`count(${taggings.id})`,
+      })
+      .from(taggings)
+      .innerJoin(works, eq(taggings.workId, works.id))
+      .where(and(
+        ne(works.id, workId),
+        eq(works.draft, 0),
+        sql`${works.publishedAt} IS NOT NULL`,
+        sql`${taggings.tagId} IN (SELECT tag_id FROM taggings WHERE work_id = ${workId})`,
+      ))
+      .groupBy(works.id, works.title, works.slug, works.summary, works.wordCount, works.complete, works.publishedAt)
+      .orderBy(desc(sql`overlap`))
+      .limit(5);
+
+    if (tagOverlap.length > 0) {
+      recommendations = tagOverlap;
+      recMethod = 'tags';
+    }
+  }
+
+  // Enrich with authors
+  if (recommendations.length > 0) {
+    const recWorkIds = recommendations.map(r => r.id);
+    const recAuthorRows = await db
+      .select({ workId: creatorships.workId, pseudName: pseudsTable.name, pseudId: pseudsTable.id })
+      .from(creatorships)
+      .innerJoin(pseudsTable, eq(creatorships.pseudId, pseudsTable.id))
+      .where(sql`${creatorships.workId} IN (${sql.join(recWorkIds.map(id => sql`${id}`), sql`, `)})`);
+
+    const authorMap = new Map<number, { pseudName: string; pseudId: number }[]>();
+    for (const row of recAuthorRows) {
+      if (!authorMap.has(row.workId)) authorMap.set(row.workId, []);
+      authorMap.get(row.workId)!.push({ pseudName: row.pseudName, pseudId: row.pseudId });
+    }
+    recommendations = recommendations.map(r => ({
+      ...r,
+      authors: authorMap.get(r.id) || [],
+    }));
+  }
+} catch (e) {
+  console.error('Recommendations query failed:', e);
+}
 ---
 
 <Base title={`${work.title} — fanfiction.fyi`}>
@@ -350,6 +434,34 @@ const commentsJson = JSON.stringify(allComments);
         currentPseudId={userPseudId}
         currentPseudName={authUser ? (pseuds.find(p => p.user_id === authUser.id)?.name ?? null) : null}
       />
+
+      <!-- Recommendations -->
+      {recommendations.length > 0 && (
+        <section class="recommendations-section">
+          <h3 class="recommendations-heading">
+            {recMethod === 'kudos' ? '✨ Readers Also Enjoyed' : recMethod === 'tags' ? '🏷️ Similar Works' : '📖 More Works'}
+          </h3>
+          <div class="recommendations-grid">
+            {recommendations.map(rec => (
+              <a href={`/works/${rec.id}`} class="recommendation-card">
+                <div class="rec-card-body">
+                  <h4 class="rec-title">{rec.title}</h4>
+                  {rec.authors?.length > 0 && (
+                    <p class="rec-authors">by {rec.authors.map((a: any) => a.pseudName).join(', ')}</p>
+                  )}
+                  {rec.summary && (
+                    <p class="rec-summary">{rec.summary.length > 140 ? rec.summary.slice(0, 140) + '…' : rec.summary}</p>
+                  )}
+                  <div class="rec-meta">
+                    <span>{(rec.wordCount || 0).toLocaleString()} words</span>
+                    <span>{rec.complete ? '✓ Complete' : '✎ WIP'}</span>
+                  </div>
+                </div>
+              </a>
+            ))}
+          </div>
+        </section>
+      )}
     </div>
 
     <!-- Sticky sidebar on desktop -->
@@ -688,8 +800,69 @@ const commentsJson = JSON.stringify(allComments);
 
   /* ── Comments (moved to theme.css) ── */
 
+  /* ── Recommendations ── */
+  .recommendations-section {
+    margin-top: var(--space-8);
+  }
+  .recommendations-heading {
+    font: var(--md-sys-typescale-title-medium);
+    color: var(--md-sys-color-on-surface);
+    margin-bottom: var(--space-4);
+  }
+  .recommendations-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+    gap: var(--space-3);
+  }
+  .recommendation-card {
+    display: block;
+    background: var(--md-sys-color-surface-container);
+    border: 1px solid var(--md-sys-color-outline-variant);
+    border-radius: 12px;
+    padding: var(--space-4);
+    text-decoration: none;
+    color: var(--md-sys-color-on-surface);
+    transition: background-color 0.15s, box-shadow 0.15s;
+  }
+  .recommendation-card:hover {
+    background: var(--md-sys-color-surface-container-high);
+    box-shadow: 0 2px 8px rgba(0,0,0,0.12);
+  }
+  .rec-card-body {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+  }
+  .rec-title {
+    font: var(--md-sys-typescale-title-small);
+    color: var(--md-sys-color-on-surface);
+    margin: 0;
+    line-height: 1.3;
+  }
+  .rec-authors {
+    font: var(--md-sys-typescale-label-small);
+    color: var(--md-sys-color-on-surface-variant);
+    margin: 0;
+  }
+  .rec-summary {
+    font: var(--md-sys-typescale-body-small);
+    color: var(--md-sys-color-on-surface-variant);
+    margin: var(--space-1) 0;
+    line-height: 1.5;
+  }
+  .rec-meta {
+    display: flex;
+    gap: var(--space-2);
+    font: var(--md-sys-typescale-label-small);
+    color: var(--md-sys-color-outline);
+    margin-top: auto;
+  }
+
   @media (max-width: 1023px) {
     .work-layout { gap: var(--space-6); padding: var(--space-4); }
+    .recommendations-grid {
+      grid-template-columns: 1fr;
+    }
   }
 </style>
 
