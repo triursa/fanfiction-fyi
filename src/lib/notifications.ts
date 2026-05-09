@@ -2,7 +2,7 @@ import { getDrizzle } from './db';
 import { notifications, notificationPreferences } from './schema';
 import { eq, and } from 'drizzle-orm';
 
-type NotificationType = 'comment_reply' | 'kudos' | 'new_chapter' | 'collection_invite' | 'work_featured' | 'system';
+type NotificationType = 'comment_reply' | 'kudos' | 'new_chapter' | 'collection_invite' | 'work_featured' | 'system' | 'annotation_shared';
 
 export type { NotificationType };
 

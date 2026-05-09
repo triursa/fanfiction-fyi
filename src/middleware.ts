@@ -33,9 +33,9 @@ function isPublicPath(pathname: string): boolean {
   if (pathname.startsWith('/api/bugs/')) return true;
   // Public read-only API endpoints
   // /api/works: read endpoints (GET) are public, write endpoints use requireAuth internally
-  // Only auth-gated sub-routes needing middleware protection: /progress, /mine
+  // Only auth-gated sub-routes needing middleware protection: /progress, /mine, /annotations
   if (pathname.startsWith('/api/works')) {
-    if (pathname.includes('/progress') || pathname.includes('/mine')) return false;
+    if (pathname.includes('/progress') || pathname.includes('/mine') || pathname.includes('/annotations')) return false;
     return true;
   }
   if (pathname.startsWith('/api/pseuds')) return true;

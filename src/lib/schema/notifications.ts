@@ -7,7 +7,7 @@ export const notifications = sqliteTable('notifications', {
     .notNull()
     .references(() => users.id, { onDelete: 'cascade' }),
   type: text('type', {
-    enum: ['comment_reply', 'kudos', 'new_chapter', 'collection_invite', 'work_featured', 'system'],
+    enum: ['comment_reply', 'kudos', 'new_chapter', 'collection_invite', 'work_featured', 'system', 'annotation_shared'],
   }).notNull(),
   title: text('title').notNull(),
   body: text('body'),
@@ -24,7 +24,7 @@ export const notificationPreferences = sqliteTable('notification_preferences', {
     .notNull()
     .references(() => users.id, { onDelete: 'cascade' }),
   type: text('type', {
-    enum: ['comment_reply', 'kudos', 'new_chapter', 'collection_invite', 'work_featured', 'system'],
+    enum: ['comment_reply', 'kudos', 'new_chapter', 'collection_invite', 'work_featured', 'system', 'annotation_shared'],
   }).notNull(),
   enabled: integer('enabled', { mode: 'boolean' }).notNull().default(true),
 }, (table) => ({
