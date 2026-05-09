@@ -8,6 +8,7 @@ import { eq, sql } from 'drizzle-orm';
 
 const VALID_EMAIL_VISIBILITY = ['public', 'mutual', 'private'] as const;
 const VALID_READING_FONT_SIZE = ['small', 'default', 'large', 'xlarge'] as const;
+const VALID_READING_SKIN_OVERRIDE = ['default', 'typewriter', 'manuscript', 'terminal', 'parchment', 'author'] as const;
 
 /**
  * PUT /api/user/profile — update authenticated user's profile fields
@@ -73,6 +74,17 @@ export const PUT: APIRoute = async ({ locals, request }) => {
     updateValues.moodDisabled = (md === true || md === 1) ? 1 : 0;
   }
 
+  if ('reading_skin_override' in body) {
+    const skin = body.reading_skin_override as string;
+    if (!VALID_READING_SKIN_OVERRIDE.includes(skin as any)) {
+      return new Response(JSON.stringify({ error: 'Invalid reading_skin_override value' }), {
+        status: 400,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
+    updateValues.readingSkinOverride = skin;
+  }
+
   if ('avatar_url' in body) {
     updateValues.avatarUrl = typeof body.avatar_url === 'string' ? body.avatar_url : null;
   }
@@ -108,6 +120,7 @@ export const PUT: APIRoute = async ({ locals, request }) => {
         bio: updated!.bio,
         email_visibility: updated!.emailVisibility,
         reading_font_size: updated!.readingFontSize,
+        reading_skin_override: updated!.readingSkinOverride ?? 'author',
         mood_disabled: updated!.moodDisabled ?? 0,
       },
     }),

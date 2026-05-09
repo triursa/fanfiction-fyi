@@ -628,3 +628,182 @@ a.report-link:hover { text-decoration: underline; }
     grid-template-columns: repeat(2, 1fr);
   }
 }
+
+/* ─── Work Skins ─── */
+/* Applied via data-skin attribute on .reading-container */
+
+/* ── Default (Obsidian) ── */
+.reading-container[data-skin="default"] .reading-prose {
+  /* Inherits existing Obsidian theme — no overrides needed */
+}
+
+/* ── Typewriter ── */
+/* Monospace, narrow, high contrast — WCAG AA: #1a1a1a on #2d2d2d = 6.7:1 — but let's use darker bg, brighter text */
+.reading-container[data-skin="typewriter"] {
+  background: #1e1e1e;
+  color: #d4d4d4;
+}
+.reading-container[data-skin="typewriter"] .reading-prose {
+  font-family: 'Courier New', Courier, monospace;
+  line-height: 1.5;
+  max-width: 640px;
+  color: #d4d4d4;
+}
+.reading-container[data-skin="typewriter"] .reading-prose p { text-indent: 0; }
+.reading-container[data-skin="typewriter"] .reading-prose a { color: #8ecae6; }
+.reading-container[data-skin="typewriter"] .reading-prose a:hover { background: #8ecae6; color: #1e1e1e; }
+.reading-container[data-skin="typewriter"] .reading-work-title {
+  font-family: 'Courier New', Courier, monospace;
+  color: #d4d4d4;
+}
+.reading-container[data-skin="typewriter"] .reading-chapter-title {
+  font-family: 'Courier New', Courier, monospace;
+  color: #d4d4d4;
+}
+.reading-container[data-skin="typewriter"] .reading-work-author { color: #a0a0a0; }
+.reading-container[data-skin="typewriter"] .reading-work-stats { color: #808080; }
+.reading-container[data-skin="typewriter"] .reading-chapter-meta { color: #808080; }
+.reading-container[data-skin="typewriter"] .reading-chapter-number { color: #8ecae6; }
+.reading-container[data-skin="typewriter"] .reading-prose blockquote {
+  border-left-color: #8ecae6;
+  color: #a0a0a0;
+}
+.reading-container[data-skin="typewriter"] .reading-prose hr { color: #808080; }
+.reading-container[data-skin="typewriter"] .reading-prose h2,
+.reading-container[data-skin="typewriter"] .reading-prose h3 {
+  font-family: 'Courier New', Courier, monospace;
+  color: #d4d4d4;
+}
+.reading-container[data-skin="typewriter"] .reading-nav-link {
+  color: #8ecae6;
+  background: #333;
+}
+
+/* ── Manuscript ── */
+/* Serif, wide, generous line-height — WCAG AA: #2d2216 on #faf6f0 = 12.5:1 */
+.reading-container[data-skin="manuscript"] {
+  background: #faf6f0;
+  color: #2d2216;
+}
+.reading-container[data-skin="manuscript"] .reading-prose {
+  font-family: 'Georgia', 'Palatino Linotype', 'Book Antiqua', serif;
+  line-height: 1.9;
+  max-width: 780px;
+  color: #2d2216;
+  letter-spacing: 0.005em;
+}
+.reading-container[data-skin="manuscript"] .reading-prose p { text-indent: 0; }
+.reading-container[data-skin="manuscript"] .reading-prose a {
+  color: #7b5733;
+  text-decoration-color: #7b5733;
+}
+.reading-container[data-skin="manuscript"] .reading-prose a:hover { background: #e8dcc8; color: #5a3d20; border-radius: 2px; }
+.reading-container[data-skin="manuscript"] .reading-work-title {
+  font-family: 'Georgia', 'Palatino Linotype', serif;
+  color: #2d2216;
+}
+.reading-container[data-skin="manuscript"] .reading-chapter-title {
+  font-family: 'Georgia', 'Palatino Linotype', serif;
+  color: #2d2216;
+}
+.reading-container[data-skin="manuscript"] .reading-work-author { color: #5a4633; }
+.reading-container[data-skin="manuscript"] .reading-work-stats { color: #8a7b6b; }
+.reading-container[data-skin="manuscript"] .reading-chapter-meta { color: #8a7b6b; }
+.reading-container[data-skin="manuscript"] .reading-chapter-number { color: #7b5733; }
+.reading-container[data-skin="manuscript"] .reading-prose blockquote {
+  border-left-color: #7b5733;
+  color: #5a4633;
+}
+.reading-container[data-skin="manuscript"] .reading-prose hr { color: #8a7b6b; }
+.reading-container[data-skin="manuscript"] .reading-prose h2,
+.reading-container[data-skin="manuscript"] .reading-prose h3 {
+  font-family: 'Georgia', 'Palatino Linotype', serif;
+  color: #2d2216;
+}
+.reading-container[data-skin="manuscript"] .reading-nav-link {
+  color: #faf6f0;
+  background: #7b5733;
+}
+
+/* ── Terminal ── */
+/* Green-on-black — WCAG AA: #00ff41 on #0a0a0a = 11.3:1 */
+.reading-container[data-skin="terminal"] {
+  background: #0a0a0a;
+  color: #00ff41;
+}
+.reading-container[data-skin="terminal"] .reading-prose {
+  font-family: 'Fira Code', 'Courier New', monospace;
+  line-height: 1.6;
+  color: #00ff41;
+}
+.reading-container[data-skin="terminal"] .reading-prose p { text-indent: 0; }
+.reading-container[data-skin="terminal"] .reading-prose a { color: #00ddff; text-decoration-color: #00ddff; }
+.reading-container[data-skin="terminal"] .reading-prose a:hover { background: #00ddff; color: #0a0a0a; border-radius: 2px; }
+.reading-container[data-skin="terminal"] .reading-work-title {
+  font-family: 'Fira Code', 'Courier New', monospace;
+  color: #00ff41;
+}
+.reading-container[data-skin="terminal"] .reading-chapter-title {
+  font-family: 'Fira Code', 'Courier New', monospace;
+  color: #00ff41;
+}
+.reading-container[data-skin="terminal"] .reading-work-author { color: #00cc33; }
+.reading-container[data-skin="terminal"] .reading-work-stats { color: #009926; }
+.reading-container[data-skin="terminal"] .reading-chapter-meta { color: #009926; }
+.reading-container[data-skin="terminal"] .reading-chapter-number { color: #00ddff; }
+.reading-container[data-skin="terminal"] .reading-prose blockquote {
+  border-left-color: #00ddff;
+  color: #00cc33;
+}
+.reading-container[data-skin="terminal"] .reading-prose hr { color: #009926; }
+.reading-container[data-skin="terminal"] .reading-prose h2,
+.reading-container[data-skin="terminal"] .reading-prose h3 {
+  font-family: 'Fira Code', 'Courier New', monospace;
+  color: #00ff41;
+}
+.reading-container[data-skin="terminal"] .reading-prose img { display: none; }
+.reading-container[data-skin="terminal"] .reading-nav-link {
+  color: #0a0a0a;
+  background: #00ff41;
+}
+
+/* ── Parchment ── */
+/* Warm paper — WCAG AA: #3d3529 on #f5f0e8 = 10.3:1 */
+.reading-container[data-skin="parchment"] {
+  background: #f5f0e8;
+  color: #3d3529;
+}
+.reading-container[data-skin="parchment"] .reading-prose {
+  font-family: 'Georgia', 'Palatino Linotype', 'Book Antiqua', serif;
+  line-height: 1.85;
+  color: #3d3529;
+}
+.reading-container[data-skin="parchment"] .reading-prose p { text-indent: 0; }
+.reading-container[data-skin="parchment"] .reading-prose a { color: #8b6914; }
+.reading-container[data-skin="parchment"] .reading-prose a:hover { background: #e8dcc8; color: #6b4f0a; border-radius: 2px; }
+.reading-container[data-skin="parchment"] .reading-work-title {
+  font-family: 'Georgia', 'Palatino Linotype', serif;
+  color: #3d3529;
+}
+.reading-container[data-skin="parchment"] .reading-chapter-title {
+  font-family: 'Georgia', 'Palatino Linotype', serif;
+  color: #3d3529;
+}
+.reading-container[data-skin="parchment"] .reading-work-author { color: #5c4f3d; }
+.reading-container[data-skin="parchment"] .reading-work-stats { color: #7a6e5e; }
+.reading-container[data-skin="parchment"] .reading-chapter-meta { color: #7a6e5e; }
+.reading-container[data-skin="parchment"] .reading-chapter-number { color: #8b6914; }
+.reading-container[data-skin="parchment"] .reading-prose blockquote {
+  border-left-color: #8b6914;
+  color: #5c4f3d;
+}
+.reading-container[data-skin="parchment"] .reading-prose hr { color: #7a6e5e; }
+.reading-container[data-skin="parchment"] .reading-prose h2,
+.reading-container[data-skin="parchment"] .reading-prose h3 {
+  font-family: 'Georgia', 'Palatino Linotype', serif;
+  color: #3d3529;
+}
+.reading-container[data-skin="parchment"] .reading-nav-link {
+  color: #f5f0e8;
+  background: #8b6914;
+}

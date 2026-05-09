@@ -11,6 +11,7 @@ export const works = sqliteTable('works', {
   wordCount: integer('word_count').notNull().default(0),
   complete: integer('complete').notNull().default(0),
   publishedAt: text('published_at'),
+  workSkin: text('work_skin').notNull().default('default'),
   updatedAt: text('updated_at').notNull().default('(datetime(\'now\'))'),
   createdAt: text('created_at').notNull().default('(datetime(\'now\'))'),
 });

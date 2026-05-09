@@ -120,6 +120,17 @@ const RELATION_TYPES = [
               Mark as Complete
             </label>
           </div>
+          <div class="m3-form-field">
+            <label for="work_skin">Reading Skin</label>
+            <select id="work_skin" name="work_skin" class="m3-select">
+              <option value="default" selected={work.workSkin === 'default'}>Default Obsidian</option>
+              <option value="typewriter" selected={work.workSkin === 'typewriter'}>Typewriter</option>
+              <option value="manuscript" selected={work.workSkin === 'manuscript'}>Manuscript</option>
+              <option value="terminal" selected={work.workSkin === 'terminal'}>Terminal</option>
+              <option value="parchment" selected={work.workSkin === 'parchment'}>Parchment</option>
+            </select>
+            <span class="m3-hint">Choose the visual theme readers will see for this work.</span>
+          </div>
         </div>
       </div>
 
@@ -348,6 +359,7 @@ const RELATION_TYPES = [
     const rating = (document.getElementById('rating') as HTMLSelectElement).value;
     const category = (document.getElementById('category') as HTMLSelectElement).value;
     const warning = (document.getElementById('warning') as HTMLSelectElement).value;
+    const workSkin = (document.getElementById('work_skin') as HTMLSelectElement).value;
 
     // Gather tag data from hidden inputs created by TagChips
     const tagIds: number[] = [];
@@ -374,6 +386,7 @@ const RELATION_TYPES = [
           summary: summary || null,
           notes: notes || null,
           complete,
+          work_skin: workSkin,
           tag_ids: tagIds,
           tag_names: tagNames,
           rating: rating || null,

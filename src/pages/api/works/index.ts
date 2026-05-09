@@ -112,8 +112,12 @@ export const POST: APIRoute = async ({ request, locals }) => {
   let body: any;
   try { body = await request.json(); } catch { return new Response(JSON.stringify({ error: 'Invalid JSON' }), { status: 400, headers: { 'Content-Type': 'application/json' } }); }
 
-  const { title, summary, notes, pseud_id, chapter_title, chapter_content, chapter_images, draft, tag_ids, tag_names, rating, category, warning, skip_chapter } = body || {};
+  const { title, summary, notes, pseud_id, chapter_title, chapter_content, chapter_images, draft, tag_ids, tag_names, rating, category, warning, skip_chapter, work_skin } = body || {};
   if (!title) return new Response(JSON.stringify({ error: 'Title is required' }), { status: 400, headers: { 'Content-Type': 'application/json' } });
+
+  // Validate work_skin
+  const validSkins = ['default', 'typewriter', 'manuscript', 'terminal', 'parchment'];
+  const skin = validSkins.includes(work_skin) ? work_skin : 'default';
 
   const pseudId = pseud_id || auth.pseuds[0]?.id;
   if (!pseudId) return new Response(JSON.stringify({ error: 'No pseud available' }), { status: 400, headers: { 'Content-Type': 'application/json' } });
@@ -150,6 +154,7 @@ export const POST: APIRoute = async ({ request, locals }) => {
     wordCount: 0,
     complete: 0,
     publishedAt: isDraft ? null : sql`(datetime('now'))`,
+    workSkin: skin,
   });
 
   const workId = Number(workResult.meta?.last_row_id ?? workResult[0]?.meta?.last_row_id);

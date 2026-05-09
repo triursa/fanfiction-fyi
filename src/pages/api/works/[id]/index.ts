@@ -182,6 +182,12 @@ export const PUT: APIRoute = async ({ params, request, locals }) => {
   if (body.end_notes !== undefined) setValues.endNotes = body.end_notes;
   if (body.complete !== undefined) setValues.complete = body.complete ? 1 : 0;
   if (body.language !== undefined) setValues.language = body.language;
+  if (body.work_skin !== undefined) {
+    const validSkins = ['default', 'typewriter', 'manuscript', 'terminal', 'parchment'];
+    if (validSkins.includes(body.work_skin)) {
+      setValues.workSkin = body.work_skin;
+    }
+  }
   if (body.publish) {
     console.log('[WORK_PUT] Publishing work:', workId, 'body keys:', Object.keys(body).join(','));
     // Set published_at only if it's currently null (first publish)

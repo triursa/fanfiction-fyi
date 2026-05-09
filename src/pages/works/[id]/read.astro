@@ -45,12 +45,14 @@ if (sessionMatch) {
       id: users.id,
       theme: users.theme,
       readingFontSize: users.readingFontSize,
+      readingSkinOverride: users.readingSkinOverride,
       moodDisabled: users.moodDisabled,
     }).from(users).where(eq(users.id, session.userId)).get();
     if (authUser) {
       // Map to snake_case for template compatibility
       (authUser as any).reading_font_size = authUser.readingFontSize;
       (authUser as any).mood_disabled = authUser.moodDisabled;
+      (authUser as any).reading_skin_override = authUser.readingSkinOverride ?? 'author';
       const userPseud = await db.select({ id: pseudsTable.id }).from(pseudsTable)
         .where(eq(pseudsTable.userId, authUser.id))
         .orderBy(pseudsTable.id)
@@ -165,6 +167,10 @@ const authorNames = pseuds.map((p: any) => p.name).join(', ');
 
 // User font size preference
 const fontSizeClass = authUser?.reading_font_size || 'default';
+
+// Determine effective reading skin
+const userSkinOverride = (authUser as any)?.reading_skin_override || 'author';
+const effectiveSkin = userSkinOverride === 'author' ? (workRow.workSkin || 'default') : userSkinOverride;
 
 // Mood engine — map chapter mood to CSS custom properties
 const moodDisabled = authUser?.mood_disabled || false;
@@ -1147,7 +1153,7 @@ const moodCSS = (!moodDisabled && currentMood && MOOD_PALETTES[currentMood])
   {moodCSS && <style>{`:root { ${moodCSS} }`}</style>}
 
   <!-- Main Reading Area -->
-  <main class="reading-container" data-font-size={fontSizeClass} data-mood={moodDisabled ? 'off' : currentMood || 'none'}>
+  <main class="reading-container" data-font-size={fontSizeClass} data-mood={moodDisabled ? 'off' : currentMood || 'none'} data-skin={effectiveSkin}>
     <!-- Work Metadata -->
     <div class="reading-work-meta">
       <h1 class="reading-work-title">{work.title}</h1>
@@ -1211,6 +1217,7 @@ const moodCSS = (!moodDisabled && currentMood && MOOD_PALETTES[currentMood])
         reactionCounts={reactionCounts}
         myReactions={myReactions}
         fontSize={fontSizeClass}
+        skin={effectiveSkin}
         workTitle={work.title}
       />
     </section>

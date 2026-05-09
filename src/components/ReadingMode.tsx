@@ -24,6 +24,7 @@ interface ReadingModeProps {
   reactionCounts: Record<string, number>;
   myReactions: string[];
   fontSize: string;
+  skin?: string;
   workTitle: string;
 }
 
@@ -53,11 +54,20 @@ interface FocusSheetProps {
   workId: number;
   fontSize: string;
   moodDisabled: boolean;
+  skin?: string;
   onFontSizeChange: (size: string) => void;
   onMoodToggle: () => void;
   prevChapter: Chapter | null;
   nextChapter: Chapter | null;
 }
+
+const SKIN_LABELS: Record<string, string> = {
+  default: 'Default Obsidian',
+  typewriter: 'Typewriter',
+  manuscript: 'Manuscript',
+  terminal: 'Terminal',
+  parchment: 'Parchment',
+};
 
 function FocusSheet({
   open,
@@ -67,6 +77,7 @@ function FocusSheet({
   workId,
   fontSize,
   moodDisabled,
+  skin,
   onFontSizeChange,
   onMoodToggle,
   prevChapter,
@@ -220,6 +231,14 @@ function FocusSheet({
               {moodDisabled ? 'Off' : 'On'}
             </button>
           </div>
+
+          {/* Reading Skin indicator */}
+          {skin && skin !== 'default' && (
+            <div class="focus-sheet-setting-row">
+              <span class="focus-sheet-setting-label">Reading Skin</span>
+              <span class="focus-sheet-setting-label" style={{ color: 'var(--md-sys-color-primary)' }}>{SKIN_LABELS[skin] || skin}</span>
+            </div>
+          )}
         </div>
 
         {/* Navigation section */}
@@ -270,6 +289,7 @@ export default function ReadingMode({
   reactionCounts: initialReactionCounts,
   myReactions: initialMyReactions,
   fontSize: initialFontSize,
+  skin,
   workTitle,
 }: ReadingModeProps) {
   const [sheetOpen, setSheetOpen] = useState(false);
@@ -552,6 +572,7 @@ export default function ReadingMode({
         workId={workId}
         fontSize={currentFontSize}
         moodDisabled={moodDisabled}
+        skin={skin}
         onFontSizeChange={handleFontSizeChange}
         onMoodToggle={handleMoodToggle}
         prevChapter={prevChapter}

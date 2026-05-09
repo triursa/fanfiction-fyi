@@ -30,6 +30,7 @@ export const users = sqliteTable('users', {
   })
     .notNull()
     .default('default'),
+  readingSkinOverride: text('reading_skin_override').default('author'),
   moodDisabled: integer('mood_disabled').default(0),
   approved: integer('approved').notNull().default(1),
 });

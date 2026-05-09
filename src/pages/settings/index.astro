@@ -133,6 +133,17 @@ const userPseuds = await db.select().from(pseuds).where(eq(pseuds.userId, user.i
             <input type="checkbox" name="mood_disabled" value="1" checked={user.moodDisabled === 1} />
             Disable mood indicators
           </label>
+          <label class="form-label">
+            Reading Skin
+            <select name="reading_skin_override" class="form-input">
+              <option value="author" selected={(user.readingSkinOverride ?? 'author') === 'author'}>Use author's skin</option>
+              <option value="default" selected={user.readingSkinOverride === 'default'}>Default Obsidian</option>
+              <option value="typewriter" selected={user.readingSkinOverride === 'typewriter'}>Typewriter</option>
+              <option value="manuscript" selected={user.readingSkinOverride === 'manuscript'}>Manuscript</option>
+              <option value="terminal" selected={user.readingSkinOverride === 'terminal'}>Terminal</option>
+              <option value="parchment" selected={user.readingSkinOverride === 'parchment'}>Parchment</option>
+            </select>
+          </label>
           <button type="submit" class="btn-primary">Save Preferences</button>
           <p class="form-error" id="prefs-error"></p>
           <p class="form-success" id="prefs-success"></p>
@@ -633,6 +644,7 @@ const userPseuds = await db.select().from(pseuds).where(eq(pseuds.userId, user.i
       email_visibility: formData.get('email_visibility'),
       reading_font_size: formData.get('reading_font_size'),
       mood_disabled: formData.get('mood_disabled') ? 1 : 0,
+      reading_skin_override: formData.get('reading_skin_override'),
     };
 
     try {
