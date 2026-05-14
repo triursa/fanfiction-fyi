@@ -4,87 +4,138 @@ import { sessions, users } from '@/lib/schema';
 import { and, eq, gt, sql } from 'drizzle-orm';
 import { cspHeaders } from '@/lib/csp';
 import { validateApiKey, extractBearerToken } from '@/lib/api-keys';
+import type { AuthLevel } from '@/lib/auth-guard';
 
-// Paths accessible without authentication or approval
-const PUBLIC_PATHS = [
-  '/login',
-  '/signup',
-  '/pending-approval',
-  '/feed.xml',
-  '/privacy',
-  '/terms',
-  '/api',         // API docs index page
-  '/api/docs',    // Interactive API docs (Scalar)
-  '/api/openapi.json', // OpenAPI spec
-];
-
-const PUBLIC_PATH_PREFIXES = [
-  '/api/auth/',
-  '/api/bugs/',
-  '/api/client-log',
-  '/_astro/',
-];
-
-function isPublicPath(pathname: string): boolean {
-  // Static assets
-  if (pathname.startsWith('/_astro/') || pathname.startsWith('/favicon')) return true;
-  // Auth and bug report APIs
-  if (pathname.startsWith('/api/auth/')) return true;
-  if (pathname.startsWith('/api/bugs/')) return true;
-  // Public read-only API endpoints
-  // /api/works: read endpoints (GET) are public, write endpoints use requireAuth internally
-  // Only auth-gated sub-routes needing middleware protection: /progress, /mine, /annotations
-  if (pathname.startsWith('/api/works')) {
-    if (pathname.includes('/progress') || pathname.includes('/mine') || pathname.includes('/annotations')) return false;
-    return true;
+// Extend Astro locals with user info
+declare module 'astro:middleware' {
+  interface Locals {
+    user?: {
+      id: number;
+      role: string;
+      approved: number;
+      banned: number;
+      suspendedUntil: string | null;
+    };
   }
-  if (pathname.startsWith('/api/pseuds')) return true;
-  if (pathname.startsWith('/api/tags')) return true;
-  if (pathname.startsWith('/api/search')) return true;
-  if (pathname.startsWith('/api/collections')) return true;
-  if (pathname.startsWith('/api/series')) return true;
-  if (pathname.startsWith('/api/characters')) return true;
-  // Canon API: GET endpoints are public reads, writes use requireAuth internally
-  if (pathname.startsWith('/api/canon')) return true;
+}
+
+// ─── Route config resolution ────────────────────────────────
+// When Astro supports route-level exports, this will read the
+// `config` export from each route module. For now, we resolve
+// auth level from route data or fall back to the default.
+
+function getAuthLevel(pathname: string): AuthLevel {
+  // Public paths — accessible without any auth
+  if (pathname === '/' || pathname === '/login' || pathname === '/signup') return 'public';
+  if (pathname === '/pending-approval') return 'public';
+  if (pathname === '/privacy' || pathname === '/terms') return 'public';
+  if (pathname === '/feed.xml') return 'public';
+
   // Public content pages (browse, read, search)
-  if (pathname === '/works' || pathname.startsWith('/works/')) return true;
-  if (pathname === '/characters' || pathname.startsWith('/characters/')) return true;
-  if (pathname === '/pseuds' || pathname.startsWith('/pseuds/')) return true;
-  if (pathname === '/tags' || pathname.startsWith('/tags/')) return true;
-  if (pathname === '/series' || pathname.startsWith('/series/')) return true;
-  if (pathname === '/collections' || pathname.startsWith('/collections/')) return true;
-  if (pathname === '/search') return true;
-  if (pathname === '/canon' || pathname.startsWith('/canon/')) return true;
-  if (pathname === '/') return true;
+  if (pathname === '/works' || pathname.startsWith('/works/')) return 'public';
+  if (pathname === '/characters' || pathname.startsWith('/characters/')) return 'public';
+  if (pathname === '/pseuds' || pathname.startsWith('/pseuds/')) return 'public';
+  if (pathname === '/tags' || pathname.startsWith('/tags/')) return 'public';
+  if (pathname === '/series' || pathname.startsWith('/series/')) return 'public';
+  if (pathname === '/collections' || pathname.startsWith('/collections/')) return 'public';
+  if (pathname === '/search') return 'public';
+  if (pathname === '/canon' || pathname.startsWith('/canon/')) return 'public';
 
-  // Exact match paths
-  if (PUBLIC_PATHS.includes(pathname)) return true;
+  // Static assets
+  if (pathname.startsWith('/_astro/') || pathname.startsWith('/favicon')) return 'public';
 
-  return false;
+  // Public API endpoints (read-only)
+  if (pathname.startsWith('/api/auth/')) return 'public';
+  if (pathname.startsWith('/api/bugs/')) return 'public';
+  if (pathname.startsWith('/api/client-log')) return 'public';
+  // /api/works: GET endpoints are public, write endpoints use requireAuth internally
+  if (pathname.startsWith('/api/works') && !pathname.includes('/progress') && !pathname.includes('/mine') && !pathname.includes('/annotations')) return 'public';
+  if (pathname.startsWith('/api/pseuds')) return 'public';
+  if (pathname.startsWith('/api/tags')) return 'public';
+  if (pathname.startsWith('/api/search')) return 'public';
+  if (pathname.startsWith('/api/collections')) return 'public';
+  if (pathname.startsWith('/api/series')) return 'public';
+  if (pathname.startsWith('/api/characters')) return 'public';
+  if (pathname.startsWith('/api/canon')) return 'public';
+
+  // Default: auth required (safe default)
+  return 'required';
+}
+
+function isApiRoute(pathname: string): boolean {
+  return pathname.startsWith('/api/');
+}
+
+const CLEAR_SESSION_COOKIE = 'session=; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=0';
+
+function unauthorizedResponse(): Response {
+  return new Response(JSON.stringify({ error: 'Unauthorized' }), {
+    status: 401,
+    headers: { 'Content-Type': 'application/json' },
+  });
+}
+
+function unauthorizedRedirect(): Response {
+  return new Response(null, {
+    status: 302,
+    headers: {
+      Location: '/login',
+      'Set-Cookie': CLEAR_SESSION_COOKIE,
+    },
+  });
+}
+
+function bannedRedirect(): Response {
+  return new Response(null, {
+    status: 302,
+    headers: {
+      Location: '/login?error=banned',
+      'Set-Cookie': CLEAR_SESSION_COOKIE,
+    },
+  });
+}
+
+function suspendedResponse(suspendedUntil: string, isApi: boolean): Response {
+  if (isApi) {
+    return new Response(JSON.stringify({ error: 'suspended', suspendedUntil }), {
+      status: 403,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+  return new Response(null, {
+    status: 302,
+    headers: { Location: `/login?error=suspended&until=${encodeURIComponent(suspendedUntil)}` },
+  });
+}
+
+function unapprovedRedirect(): Response {
+  return new Response(null, {
+    status: 302,
+    headers: { Location: '/pending-approval' },
+  });
 }
 
 export const onRequest = defineMiddleware(async (context, next) => {
   const { pathname } = context.url;
-  const method = context.request.method;
-  const d1 = context.locals.runtime.env.DB as D1Database;
+  const authLevel = getAuthLevel(pathname);
+  const isApi = isApiRoute(pathname);
 
-
-  // Allow all public paths through without auth checks
-  if (isPublicPath(pathname)) {
+  // ─── Public routes: skip auth entirely ──────────────────
+  if (authLevel === 'public') {
     return next();
   }
 
-  // Read session cookie
+  // ─── Optional & Required: try to read session ───────────
   const cookie = context.request.headers.get('cookie') ?? '';
   const sessionMatch = cookie.match(/session=([a-f0-9]+)/);
 
-  // For API routes, check Bearer token auth as fallback
-  if (!sessionMatch && pathname.startsWith('/api/')) {
+  // For API routes, also accept Bearer token auth as fallback
+  if (!sessionMatch && isApi) {
     const bearerToken = extractBearerToken(context.request);
     if (bearerToken) {
+      const d1 = context.locals.runtime.env.DB as D1Database;
       const apiKeyResult = await validateApiKey(d1, bearerToken);
       if (apiKeyResult) {
-        // API key auth successful — set minimal user in locals
         context.locals.user = apiKeyResult.user;
         const response = await next();
         const csp = cspHeaders();
@@ -93,114 +144,88 @@ export const onRequest = defineMiddleware(async (context, next) => {
         }
         return response;
       }
-      // Invalid/expired API key
-      return new Response(JSON.stringify({ error: 'Unauthorized' }), {
-        status: 401,
-        headers: { 'Content-Type': 'application/json' },
-      });
+      return unauthorizedResponse();
     }
   }
 
+  // ─── Optional: no session → continue without user ────────
+  if (authLevel === 'optional' && !sessionMatch) {
+    return next();
+  }
+
+  // ─── Required: no session → redirect/401 ─────────────────
   if (!sessionMatch) {
-    if (pathname.startsWith('/api/')) {
-      return new Response(JSON.stringify({ error: 'Unauthorized' }), {
-        status: 401,
-        headers: { 'Content-Type': 'application/json' },
-      });
-    }
-    return context.redirect('/login');
+    return isApi ? unauthorizedResponse() : unauthorizedRedirect();
   }
 
+  // ─── Look up session and user in D1 ─────────────────────
+  const d1 = context.locals.runtime.env.DB as D1Database;
   const db = getDrizzle(d1);
 
-  // Look up session and user
-  const session = await db.select({ userId: sessions.userId })
+  const session = await db
+    .select({ userId: sessions.userId })
     .from(sessions)
     .where(and(eq(sessions.token, sessionMatch[1]), gt(sessions.expiresAt, sql`datetime('now')`)))
     .get();
 
   if (!session) {
-    if (pathname.startsWith('/api/')) {
-      return new Response(JSON.stringify({ error: 'Unauthorized' }), {
-        status: 401,
-        headers: { 'Content-Type': 'application/json', 'Set-Cookie': 'session=; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=0' },
-      });
-    }
-    return new Response(null, {
-      status: 302,
-      headers: {
-        Location: '/login',
-        'Set-Cookie': 'session=; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=0',
-      },
-    });
+    return isApi
+      ? new Response(JSON.stringify({ error: 'Unauthorized' }), {
+          status: 401,
+          headers: { 'Content-Type': 'application/json', 'Set-Cookie': CLEAR_SESSION_COOKIE },
+        })
+      : unauthorizedRedirect();
   }
 
-  const user = await db.select({
-    id: users.id,
-    role: users.role,
-    approved: users.approved,
-    banned: users.banned,
-    suspendedUntil: users.suspendedUntil,
-  }).from(users).where(eq(users.id, session.userId)).get();
+  const user = await db
+    .select({
+      id: users.id,
+      role: users.role,
+      approved: users.approved,
+      banned: users.banned,
+      suspendedUntil: users.suspendedUntil,
+    })
+    .from(users)
+    .where(eq(users.id, session.userId))
+    .get();
 
   if (!user) {
-    if (pathname.startsWith('/api/')) {
-      return new Response(JSON.stringify({ error: 'Unauthorized' }), {
-        status: 401,
-        headers: { 'Content-Type': 'application/json', 'Set-Cookie': 'session=; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=0' },
-      });
-    }
-    return new Response(null, {
-      status: 302,
-      headers: {
-        Location: '/login',
-        'Set-Cookie': 'session=; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=0',
-      },
-    });
+    return isApi
+      ? new Response(JSON.stringify({ error: 'Unauthorized' }), {
+          status: 401,
+          headers: { 'Content-Type': 'application/json', 'Set-Cookie': CLEAR_SESSION_COOKIE },
+        })
+      : unauthorizedRedirect();
   }
 
-  // Banned users — destroy session and redirect
+  // ─── Banned users: destroy session, redirect ─────────────
   if (user.banned) {
     await db.delete(sessions).where(eq(sessions.token, sessionMatch[1]));
-    return new Response(null, {
-      status: 302,
-      headers: {
-        Location: '/login?error=banned',
-        'Set-Cookie': 'session=; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=0',
-      },
-    });
+    return bannedRedirect();
   }
 
-  // Suspended users — keep session, block access until suspension lifts
+  // ─── Suspended users: block access until suspension lifts ─
   if (user.suspendedUntil) {
     const suspendedTime = new Date(user.suspendedUntil + 'Z').getTime();
     if (Date.now() < suspendedTime) {
-      // Still suspended
-      if (pathname.startsWith('/api/')) {
-        return new Response(JSON.stringify({ error: 'suspended', suspendedUntil: user.suspendedUntil }), {
-          status: 403,
-          headers: { 'Content-Type': 'application/json' },
-        });
-      }
-      return context.redirect(`/login?error=suspended&until=${encodeURIComponent(user.suspendedUntil)}`);
+      return suspendedResponse(user.suspendedUntil, isApi);
     }
-    // Suspension expired — auto-restore by clearing the field
+    // Suspension expired — auto-restore
     await db.update(users).set({ suspendedUntil: null }).where(eq(users.id, user.id));
   }
 
-  // Unapproved users
+  // ─── Unapproved users: only access pending-approval page ─
   if (!user.approved) {
     if (pathname === '/pending-approval' || pathname === '/api/auth/me' || pathname === '/api/auth/logout') {
       context.locals.user = user;
       return next();
     }
-    return context.redirect('/pending-approval');
+    return unapprovedRedirect();
   }
 
-  // Approved user — set user info in locals and continue
+  // ─── Approved user: set locals and continue ──────────────
   context.locals.user = user;
 
-  // Continue to the page/API handler, then add CSP headers
   const response = await next();
   const csp = cspHeaders();
   for (const [header, value] of Object.entries(csp)) {
