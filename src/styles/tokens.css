@@ -1,0 +1,232 @@
+/* ═══════════════════════════════════════════════════════════════════
+   fanfiction.fyi v2 — M3 Design Tokens
+   
+   This file defines ALL design tokens as CSS custom properties.
+   It is the single source of truth for colors, typography, spacing,
+   shapes, motion, elevation, breakpoints, and work-skin overrides.
+   
+   HOW TO USE:
+   - Import in global.css (which the layout loads)
+   - Reference tokens via var(--md-sys-color-primary), etc.
+   - Theme switching overrides these tokens at :root via JS
+   - Work skins override tokens at .reading-container[data-skin]
+   
+   NAMING CONVENTIONS (Material Design 3):
+   - --md-sys-color-*         Color roles
+   - --md-sys-typescale-*      Typography presets (weight size/line-height family)
+   - --md-sys-elevation-*      Box-shadow elevation levels
+   - --md-sys-shape-corner-*   Border-radius tokens
+   - --md-sys-motion-*         Easing & duration tokens
+   - --space-*                 4px-grid spacing scale
+   - --breakpoint-*            Responsive breakpoint tokens (for reference)
+   - --font-*                  Font family stacks
+   ═══════════════════════════════════════════════════════════════════ */
+
+:root {
+  /* ─── Color Tokens ───
+     Seed: #7B8FA8 | Palette: Obsidian (dark baseline)
+     Other themes (ember, forest, aurora, midnight, paper) override these
+     at :root via JS — see themes.ts and Base.astro */
+  
+  /* Primary */
+  --md-sys-color-primary: #B0C4D8;
+  --md-sys-color-on-primary: #1C2F3F;
+  --md-sys-color-primary-container: #374A5C;
+  --md-sys-color-on-primary-container: #D3E4F6;
+
+  /* Secondary */
+  --md-sys-color-secondary: #A3B8CC;
+  --md-sys-color-on-secondary: #0D1F30;
+  --md-sys-color-secondary-container: #2A3E52;
+  --md-sys-color-on-secondary-container: #C2D6EB;
+
+  /* Tertiary */
+  --md-sys-color-tertiary: #8FA8BF;
+  --md-sys-color-on-tertiary: #182A3C;
+  --md-sys-color-tertiary-container: #354A5E;
+  --md-sys-color-on-tertiary-container: #B8D1E9;
+
+  /* Error */
+  --md-sys-color-error: #FFB4AB;
+  --md-sys-color-on-error: #690005;
+  --md-sys-color-error-container: #93000A;
+  --md-sys-color-on-error-container: #FFDAD6;
+
+  /* Surface */
+  --md-sys-color-surface: #111418;
+  --md-sys-color-on-surface: #E1E2E6;
+  --md-sys-color-surface-variant: #42474E;
+  --md-sys-color-on-surface-variant: #C2C7CE;
+  --md-sys-color-surface-dim: #111418;
+  --md-sys-color-surface-bright: #373940;
+  --md-sys-color-surface-container-lowest: #0C0F13;
+  --md-sys-color-surface-container-low: #191C20;
+  --md-sys-color-surface-container: #1D2024;
+  --md-sys-color-surface-container-high: #282A2F;
+  --md-sys-color-surface-container-highest: #33353A;
+
+  /* Outline */
+  --md-sys-color-outline: #8C9199;
+  --md-sys-color-outline-variant: #42474E;
+
+  /* Inverse */
+  --md-sys-color-inverse-surface: #E1E2E6;
+  --md-sys-color-inverse-on-surface: #2E3035;
+  --md-sys-color-inverse-primary: #516375;
+
+  /* ─── Typography Tokens ───
+     Format: weight size/line-height family */
+  --md-sys-typescale-display-large: 500 3.5625rem/4rem 'Inter', sans-serif;
+  --md-sys-typescale-headline-large: 400 2rem/2.5rem 'Inter', sans-serif;
+  --md-sys-typescale-headline-medium: 400 1.75rem/2.25rem 'Inter', sans-serif;
+  --md-sys-typescale-title-large: 500 1.375rem/1.75rem 'Inter', sans-serif;
+  --md-sys-typescale-title-medium: 500 1rem/1.5rem 'Inter', sans-serif;
+  --md-sys-typescale-body-large: 400 1rem/1.5rem 'Inter', sans-serif;
+  --md-sys-typescale-body-medium: 400 0.875rem/1.25rem 'Inter', sans-serif;
+  --md-sys-typescale-body-small: 400 0.75rem/1rem 'Inter', sans-serif;
+  --md-sys-typescale-label-large: 500 0.875rem/1.25rem 'Inter', sans-serif;
+
+  /* ─── Elevation Tokens ─── */
+  --md-sys-elevation-0: none;
+  --md-sys-elevation-1: 0 1px 3px 1px rgba(0,0,0,0.15), 0 1px 2px rgba(0,0,0,0.3);
+  --md-sys-elevation-2: 0 2px 6px 2px rgba(0,0,0,0.15), 0 1px 2px rgba(0,0,0,0.3);
+  --md-sys-elevation-3: 0 4px 8px 3px rgba(0,0,0,0.15), 0 1px 3px rgba(0,0,0,0.3);
+
+  /* ─── Shape Tokens (border radius) ─── */
+  --md-sys-shape-corner-none: 0;
+  --md-sys-shape-corner-extra-small: 4px;
+  --md-sys-shape-corner-small: 8px;
+  --md-sys-shape-corner-medium: 12px;
+  --md-sys-shape-corner-large: 16px;
+  --md-sys-shape-corner-extra-large: 28px;
+  --md-sys-shape-corner-full: 9999px;
+
+  /* ─── Motion Tokens ─── */
+  --md-sys-motion-easing-standard: cubic-bezier(0.2, 0, 0, 1);
+  --md-sys-motion-easing-emphasized: cubic-bezier(0.2, 0, 0, 1);
+  --md-sys-motion-duration-short1: 50ms;
+  --md-sys-motion-duration-short2: 100ms;
+  --md-sys-motion-duration-short3: 150ms;
+  --md-sys-motion-duration-short4: 200ms;
+  --md-sys-motion-duration-medium1: 250ms;
+  --md-sys-motion-duration-medium2: 300ms;
+  --md-sys-motion-duration-medium3: 350ms;
+  --md-sys-motion-duration-medium4: 400ms;
+  --md-sys-motion-duration-long1: 450ms;
+  --md-sys-motion-duration-long2: 500ms;
+
+  /* ─── Spacing Tokens (4px grid) ─── */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-10: 40px;
+  --space-12: 48px;
+  --space-16: 64px;
+
+  /* ─── Layout Tokens ─── */
+  --reading-width: 65ch;
+  --font-mono: 'JetBrains Mono', monospace;
+
+  /* ─── Breakpoint Tokens (for reference — CSS can't use custom properties in @media)
+     These are here for JS-based breakpoint logic and documentation purposes.
+     In CSS, use the raw pixel values in @media queries. ─── */
+  --breakpoint-mobile: 599px;    /* Mobile: 0–599px */
+  --breakpoint-tablet: 839px;    /* Tablet: 600–839px */
+  --breakpoint-desktop: 840px;   /* Desktop: 840px+ */
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+   WORK SKIN TOKENS
+   
+   Work skins override typography and color tokens at the reading
+   container level, changing the feel of the prose without altering
+   the app chrome (nav, footer, etc.).
+   
+   Apply via data attribute: <div class="reading-container" data-skin="typewriter">
+   Default is implicit (inherits from :root — no data-skin needed).
+   ═══════════════════════════════════════════════════════════════════ */
+
+/* ── Skin: default ──
+   No overrides needed — inherits all tokens from :root.
+   The default skin uses Inter for UI and Lora/Georgia for headings,
+   with standard dark obsidian colors. */
+
+/* ── Skin: typewriter ──
+   Courier-based, monospaced, spare. Feels like a manuscript typed
+   on an old IBM Selectric — equal-width letters, no frills. */
+.reading-container[data-skin="typewriter"] {
+  --md-sys-typescale-display-large: 500 3.5625rem/4rem 'Courier New', 'Courier', monospace;
+  --md-sys-typescale-headline-large: 400 2rem/2.5rem 'Courier New', 'Courier', monospace;
+  --md-sys-typescale-headline-medium: 400 1.75rem/2.25rem 'Courier New', 'Courier', monospace;
+  --md-sys-typescale-title-large: 500 1.375rem/1.75rem 'Courier New', 'Courier', monospace;
+  --md-sys-typescale-title-medium: 500 1rem/1.5rem 'Courier New', 'Courier', monospace;
+  --md-sys-typescale-body-large: 400 1rem/1.75 'Courier New', 'Courier', monospace;
+  --md-sys-typescale-body-medium: 400 0.875rem/1.5 'Courier New', 'Courier', monospace;
+  --md-sys-typescale-body-small: 400 0.75rem/1.25 'Courier New', 'Courier', monospace;
+  --md-sys-typescale-label-large: 500 0.875rem/1.25rem 'Courier New', 'Courier', monospace;
+  --reading-font: 'Courier New', 'Courier', monospace;
+  --reading-bg: #141414;
+  --reading-fg: #C8C8C8;
+}
+
+/* ── Skin: manuscript ──
+   Serif-heavy, editorial. Lora for body, large italic titles.
+   Designed to feel like reading a printed manuscript. */
+.reading-container[data-skin="manuscript"] {
+  --md-sys-typescale-display-large: 500 3.5625rem/4rem 'Lora', 'Georgia', serif;
+  --md-sys-typescale-headline-large: 400 2rem/2.5rem 'Lora', 'Georgia', serif;
+  --md-sys-typescale-headline-medium: 400 1.75rem/2.25rem 'Lora', 'Georgia', serif;
+  --md-sys-typescale-title-large: 500 1.375rem/1.75rem 'Lora', 'Georgia', serif;
+  --md-sys-typescale-title-medium: 500 1rem/1.5rem 'Lora', 'Georgia', serif;
+  --md-sys-typescale-body-large: 400 1rem/1.75 'Lora', 'Georgia', serif;
+  --md-sys-typescale-body-medium: 400 0.875rem/1.5 'Lora', 'Georgia', serif;
+  --md-sys-typescale-body-small: 400 0.75rem/1.25 'Lora', 'Georgia', serif;
+  --md-sys-typescale-label-large: 500 0.875rem/1.25rem 'Lora', 'Georgia', serif;
+  --reading-font: 'Lora', 'Georgia', serif;
+  --reading-bg: #F5F0E8;
+  --reading-fg: #2C2416;
+}
+
+/* ── Skin: terminal ──
+   Hardcore hacker aesthetic. Green-on-black, monospaced, no
+   softness. The story is data; data is the story. */
+.reading-container[data-skin="terminal"] {
+  --md-sys-typescale-display-large: 500 3.5625rem/4rem 'JetBrains Mono', 'Fira Code', monospace;
+  --md-sys-typescale-headline-large: 400 2rem/2.5rem 'JetBrains Mono', 'Fira Code', monospace;
+  --md-sys-typescale-headline-medium: 400 1.75rem/2.25rem 'JetBrains Mono', 'Fira Code', monospace;
+  --md-sys-typescale-title-large: 500 1.375rem/1.75rem 'JetBrains Mono', 'Fira Code', monospace;
+  --md-sys-typescale-title-medium: 500 1rem/1.5rem 'JetBrains Mono', 'Fira Code', monospace;
+  --md-sys-typescale-body-large: 400 1rem/1.75 'JetBrains Mono', 'Fira Code', monospace;
+  --md-sys-typescale-body-medium: 400 0.875rem/1.5 'JetBrains Mono', 'Fira Code', monospace;
+  --md-sys-typescale-body-small: 400 0.75rem/1.25 'JetBrains Mono', 'Fira Code', monospace;
+  --md-sys-typescale-label-large: 500 0.875rem/1.25rem 'JetBrains Mono', 'Fira Code', monospace;
+  --reading-font: 'JetBrains Mono', 'Fira Code', monospace;
+  --reading-bg: #0A0A0A;
+  --reading-fg: #33FF33;
+  --md-sys-color-surface: #0A0A0A;
+  --md-sys-color-on-surface: #33FF33;
+  --md-sys-color-primary: #33FF33;
+  --md-sys-color-outline: #1A6B1A;
+}
+
+/* ── Skin: parchment ──
+   Warm, cream-toned. Feels like reading by candlelight in an
+   archive. Sepia-tinted surface, soft contrast. */
+.reading-container[data-skin="parchment"] {
+  --md-sys-typescale-display-large: 500 3.5625rem/4rem 'Lora', 'Georgia', serif;
+  --md-sys-typescale-headline-large: 400 2rem/2.5rem 'Lora', 'Georgia', serif;
+  --md-sys-typescale-headline-medium: 400 1.75rem/2.25rem 'Lora', 'Georgia', serif;
+  --md-sys-typescale-title-large: 500 1.375rem/1.75rem 'Lora', 'Georgia', serif;
+  --md-sys-typescale-title-medium: 500 1rem/1.5rem 'Lora', 'Georgia', serif;
+  --md-sys-typescale-body-large: 400 1rem/1.75 'Lora', 'Georgia', serif;
+  --md-sys-typescale-body-medium: 400 0.875rem/1.5 'Lora', 'Georgia', serif;
+  --md-sys-typescale-body-small: 400 0.75rem/1.25 'Lora', 'Georgia', serif;
+  --md-sys-typescale-label-large: 500 0.875rem/1.25rem 'Lora', 'Georgia', serif;
+  --reading-font: 'Lora', 'Georgia', serif;
+  --reading-bg: #EDE4D3;
+  --reading-fg: #3B3021;
+}
