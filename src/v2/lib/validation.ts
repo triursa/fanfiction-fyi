@@ -124,6 +124,29 @@ export const createCollectionSchema = z.object({
   title: z.string().min(1, 'Title is required').max(200),
   description: z.string().max(5000).optional(),
   privacy: z.enum(['open', 'moderated', 'closed', 'private', 'public', 'unrevealed']).default('open'),
+  pseudId: z.number().int().positive('Pseud ID is required'),
+});
+
+export const updateCollectionSchema = z.object({
+  title: z.string().min(1).max(200).optional(),
+  description: z.string().max(5000).optional(),
+  privacy: z.enum(['open', 'moderated', 'closed', 'private', 'public', 'unrevealed']).optional(),
+});
+
+export const addCollectionItemSchema = z.object({
+  collectionId: z.number().int().positive('Collection ID is required'),
+  workId: z.number().int().positive('Work ID is required'),
+});
+
+export const removeCollectionItemSchema = z.object({
+  collectionId: z.number().int().positive('Collection ID is required'),
+  workId: z.number().int().positive('Work ID is required'),
+});
+
+export const browseCollectionsSchema = z.object({
+  privacy: z.enum(['open', 'moderated', 'closed', 'private', 'public', 'unrevealed']).optional(),
+  page: z.coerce.number().int().positive().default(1),
+  limit: z.coerce.number().int().positive().max(100).default(20),
 });
 
 // ─── Series ────────────────────────────────────────────────────────
@@ -132,6 +155,34 @@ export const createSeriesSchema = z.object({
   title: z.string().min(1, 'Title is required').max(500),
   description: z.string().max(5000).optional(),
   pseudId: z.number().int().positive('Pseud ID is required'),
+});
+
+export const updateSeriesSchema = z.object({
+  title: z.string().min(1, 'Title is required').max(500).optional(),
+  description: z.string().max(5000).optional(),
+  complete: z.boolean().optional(),
+});
+
+export const browseSeriesSchema = z.object({
+  complete: z.coerce.boolean().optional(),
+  page: z.coerce.number().int().positive().default(1),
+  limit: z.coerce.number().int().positive().max(100).default(20),
+});
+
+export const addSeriesWorkSchema = z.object({
+  workId: z.number().int().positive('Work ID is required'),
+  position: z.number().int().positive().optional(),
+});
+
+export const removeSeriesWorkSchema = z.object({
+  workId: z.number().int().positive('Work ID is required'),
+});
+
+export const reorderSeriesWorksSchema = z.object({
+  positions: z.array(z.object({
+    workId: z.number().int().positive('Work ID is required'),
+    position: z.number().int().positive('Position is required'),
+  })).min(1, 'Must provide at least one position entry'),
 });
 
 // ─── Pagination ────────────────────────────────────────────────────
@@ -157,6 +208,15 @@ export const changePasswordSchema = z.object({
   newPassword: z.string().min(8, 'New password must be at least 8 characters'),
 });
 
+// ─── Reports ────────────────────────────────────────────────────────
+
+export const createReportSchema = z.object({
+  targetType: z.enum(['work', 'comment'], 'Target type must be "work" or "comment"'),
+  targetId: z.number().int().positive('Target ID must be a positive integer'),
+  reason: z.enum(['harassment', 'spam', 'copyright', 'graphic', 'other'], 'Invalid report reason'),
+  details: z.string().max(5000, 'Details too long (max 5000 chars)').optional(),
+});
+
 // ─── Admin ────────────────────────────────────────────────────────
 
 export const createInviteCodeSchema = z.object({
@@ -175,6 +235,90 @@ export const suspendUserSchema = z.object({
 export const resolveReportSchema = z.object({
   status: z.enum(['resolved', 'dismissed']),
   resolution: z.string().max(5000).optional(),
+});
+
+// ─── Canon ────────────────────────────────────────────────────────
+
+export const createLoreEntrySchema = z.object({
+  title: z.string().min(1, 'Title is required').max(200, 'Title too long'),
+  content: z.string().min(1, 'Content is required'),
+  category: z.string().min(1, 'Category is required'),
+  workId: z.number().int().positive().optional(),
+  pseudId: z.number().int().positive(),
+});
+
+export const updateLoreEntrySchema = createLoreEntrySchema.partial();
+
+export const browseLoreSchema = z.object({
+  page: z.coerce.number().int().positive().default(1),
+  limit: z.coerce.number().int().positive().max(100).default(20),
+  category: z.string().optional(),
+  workId: z.coerce.number().int().positive().optional(),
+});
+
+export const createLocationSchema = z.object({
+  name: z.string().min(1, 'Name is required').max(200, 'Name too long'),
+  description: z.string().optional(),
+  type: z.enum(['city', 'country', 'region', 'continent', 'other']),
+  parentId: z.number().int().positive().optional(),
+  pseudId: z.number().int().positive(),
+});
+
+export const updateLocationSchema = createLocationSchema.partial();
+
+export const browseLocationSchema = z.object({
+  page: z.coerce.number().int().positive().default(1),
+  limit: z.coerce.number().int().positive().max(100).default(20),
+  type: z.enum(['city', 'country', 'region', 'continent', 'other']).optional(),
+});
+
+// ─── Characters & Groups ──────────────────────────────────────────
+
+export const createCharacterSchema = z.object({
+  name: z.string().min(1, 'Name is required').max(200, 'Name too long'),
+  description: z.string().max(5000, 'Description too long').optional(),
+  groupId: z.number().int().positive().optional(),
+  pseudId: z.number().int().positive('Pseud ID is required'),
+});
+
+export const updateCharacterSchema = z.object({
+  name: z.string().min(1).max(200).optional(),
+  description: z.string().max(5000).optional(),
+  groupId: z.number().int().positive().nullable().optional(),
+});
+
+export const browseCharactersSchema = z.object({
+  page: z.coerce.number().int().positive().default(1),
+  limit: z.coerce.number().int().positive().max(100).default(20),
+  groupId: z.coerce.number().int().positive().optional(),
+});
+
+export const createCharacterGroupSchema = z.object({
+  name: z.string().min(1, 'Name is required').max(200, 'Name too long'),
+  description: z.string().max(5000, 'Description too long').optional(),
+  pseudId: z.number().int().positive('Pseud ID is required'),
+});
+
+export const updateCharacterGroupSchema = z.object({
+  name: z.string().min(1).max(200).optional(),
+  description: z.string().max(5000).optional(),
+});
+
+export const browseCharacterGroupsSchema = z.object({
+  page: z.coerce.number().int().positive().default(1),
+  limit: z.coerce.number().int().positive().max(100).default(20),
+});
+
+export const createAppearanceSchema = z.object({
+  characterId: z.number().int().positive('Character ID is required'),
+  workId: z.number().int().positive('Work ID is required'),
+  role: z.enum(['protagonist', 'antagonist', 'supporting', 'minor', 'other']).default('supporting'),
+  notes: z.string().max(2000).optional(),
+});
+
+export const removeAppearanceSchema = z.object({
+  characterId: z.number().int().positive('Character ID is required'),
+  workId: z.number().int().positive('Work ID is required'),
 });
 
 // ─── Helper ───────────────────────────────────────────────────────

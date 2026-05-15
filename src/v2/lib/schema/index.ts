@@ -9,3 +9,5 @@ export * from './notifications';
 export * from './api-keys';
 export * from './annotations';
 export * from './search';
+export * from './canon';
+export * from './characters';

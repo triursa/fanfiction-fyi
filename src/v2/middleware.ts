@@ -58,6 +58,8 @@ function getAuthLevel(pathname: string, request: Request): AuthLevel {
   if (pathname === '/tags' || pathname.startsWith('/tags/')) return 'public';
   if (pathname === '/series' || pathname.startsWith('/series/')) return 'public';
   if (pathname === '/collections' || pathname.startsWith('/collections/')) return 'public';
+  if (pathname === '/canon' || pathname.startsWith('/canon/')) return 'public';
+  if (pathname === '/characters' || pathname.startsWith('/characters/')) return 'public';
   if (pathname === '/search') return 'public';
 
   // Static assets
@@ -74,6 +76,11 @@ function getAuthLevel(pathname: string, request: Request): AuthLevel {
   if (pathname.startsWith('/api/search')) return 'public';
   if (pathname.startsWith('/api/collections') && request.method === 'GET') return 'public';
   if (pathname.startsWith('/api/series') && request.method === 'GET') return 'public';
+  if (pathname.startsWith('/api/canon') && request.method === 'GET') return 'public';
+  if (pathname.startsWith('/api/kudos') && request.method === 'GET') return 'public';
+  if (pathname.startsWith('/api/readings') && request.method === 'GET') return 'public';
+  if (pathname.startsWith('/api/bookmarks') && request.method === 'GET') return 'public';
+  if (pathname.startsWith('/api/comments') && request.method === 'GET') return 'public';
   if (pathname.match(/^\/api\/works\/\d+\/chapters$/) && request.method === 'GET') return 'public';
   if (pathname.match(/^\/api\/works\/\d+\/chapters\/\d+$/) && request.method === 'GET') return 'public';
   if (pathname.match(/^\/api\/works\/\d+\/kudos$/) && request.method === 'GET') return 'public';
