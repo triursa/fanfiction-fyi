@@ -1,29 +1,51 @@
+/**
+ * Admin Tags API
+ * GET  /api/admin/tags — list tags (pagination, type/search filters)
+ * POST /api/admin/tags — create a new tag
+ * Auth: required, founder/admin only
+ */
 import type { APIRoute } from 'astro';
 import type { D1Database } from '@cloudflare/workers-types';
+import { requireAuth } from '@/v2/lib/auth';
 import { getDb } from '@/v2/lib/db';
-import { requireAuth, checkApproved } from '@/v2/lib/auth';
-import { validateBody, validateQuery, createTagSchema, tagBrowseSchema } from '@/v2/lib/validation';
 import { tags } from '@/v2/lib/schema/index';
-import { eq, and, like, count, sql } from 'drizzle-orm';
+import { validateBody, createTagSchema } from '@/v2/lib/validation';
+import { eq, and, like, count, sql, desc } from 'drizzle-orm';
 
-export const config = { auth: 'optional' as const };
+// ─── Admin role check ──────────────────────────────────────────────
+function requireAdmin(user: { role: string }): void {
+  if (!['founder', 'admin'].includes(user.role)) {
+    throw new Response(JSON.stringify({ error: 'Forbidden: admin access required' }), {
+      status: 403,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+}
 
-// ─── GET /api/tags — List/browse tags ──────────────────────────────
+const TAG_TYPES = ['fandom', 'character', 'relationship', 'freeform', 'rating', 'warning', 'category'] as const;
 
+// ─── GET /api/admin/tags ────────────────────────────────────────────
 export const GET: APIRoute = async ({ request, url, locals }) => {
   const d1 = locals.runtime.env.DB as D1Database;
+  const auth = await requireAuth(d1, request);
+  requireAdmin(auth.user);
+
   const db = getDb(d1);
 
-  // Parse and validate query params
-  const query = validateQuery(url, tagBrowseSchema);
+  // Query params
+  const page = Math.max(1, Number(url.searchParams.get('page')) || 1);
+  const limit = Math.min(100, Math.max(1, Number(url.searchParams.get('limit')) || 20));
+  const offset = (page - 1) * limit;
+  const typeFilter = url.searchParams.get('type') || '';
+  const search = url.searchParams.get('search') || '';
 
   // Build conditions
   const conditions = [];
-  if (query.type) {
-    conditions.push(eq(tags.type, query.type));
+  if (typeFilter && TAG_TYPES.includes(typeFilter as any)) {
+    conditions.push(eq(tags.type, typeFilter));
   }
-  if (query.q) {
-    conditions.push(like(tags.name, `${query.q}%`));
+  if (search) {
+    conditions.push(like(tags.name, `%${search}%`));
   }
 
   const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
@@ -39,30 +61,23 @@ export const GET: APIRoute = async ({ request, url, locals }) => {
     .select()
     .from(tags)
     .where(whereClause)
-    .orderBy(tags.name)
-    .limit(query.limit)
-    .offset((query.page - 1) * query.limit);
+    .orderBy(desc(tags.createdAt))
+    .limit(limit)
+    .offset(offset);
 
-  return new Response(JSON.stringify({
-    data: tagRows,
-    total,
-    page: query.page,
-    limit: query.limit,
-  }), {
+  return new Response(JSON.stringify({ data: tagRows, total, page, limit }), {
     status: 200,
     headers: { 'Content-Type': 'application/json' },
   });
 };
 
-// ─── POST /api/tags — Create a tag ─────────────────────────────────
-
+// ─── POST /api/admin/tags ───────────────────────────────────────────
 export const POST: APIRoute = async ({ request, locals }) => {
   const d1 = locals.runtime.env.DB as D1Database;
-  const db = getDb(d1);
-
-  // Require auth
   const auth = await requireAuth(d1, request);
-  checkApproved(auth);
+  requireAdmin(auth.user);
+
+  const db = getDb(d1);
 
   // Validate body
   const [data, error] = await validateBody(request, createTagSchema);

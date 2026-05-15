@@ -57,6 +57,28 @@ const readingTime = work.wordCount ? Math.max(1, Math.round(work.wordCount / 250
 const pubDate = work.publishedAt ? new Date(work.publishedAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : null;
 const updateDate = work.updatedAt ? new Date(work.updatedAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : null;
 const user = Astro.locals.user;
+
+// Fetch recommendations (non-fatal)
+let recommendations: any[] = [];
+let recMethod: string | null = null;
+if (work) {
+  try {
+    const recRes = await fetch(new URL(`/api/works/${workId}/recommendations`, Astro.url));
+    if (recRes.ok) {
+      const recJson = await recRes.json();
+      recommendations = recJson.recommendations ?? [];
+      recMethod = recJson.method ?? null;
+    }
+  } catch {
+    // Non-fatal — show work without recommendations
+  }
+}
+
+const MATCH_LABELS: Record<string, string> = {
+  kudos: 'Readers Also Liked',
+  tags: 'Similar Tags',
+  recent: 'Popular',
+};
 ---
 
 <Base title={`${work.title} — fanfiction.fyi`} description={work.summary || `Read ${work.title} on fanfiction.fyi`}>
@@ -213,6 +235,38 @@ const user = Astro.locals.user;
           )}
         </aside>
       </div>
+    )}
+
+    {/* ─── Recommendations ─────────────────────────────────── */}
+    {work && recommendations.length > 0 && (
+      <section class="recommendations">
+        <h2 class="recommendations-heading">You Might Also Like</h2>
+        <div class="recommendations-grid">
+          {recommendations.map((rec: any) => (
+            <a href={`/works/${rec.id}`} class="rec-card">
+              <div class="rec-card-header">
+                <h3 class="rec-card-title">{rec.title}</h3>
+                <span class={`rec-card-badge rec-badge-${rec.matchMethod}`}>
+                  {MATCH_LABELS[rec.matchMethod] ?? rec.matchMethod}
+                </span>
+              </div>
+              <p class="rec-card-author">
+                by {rec.authors?.map((a: any) => a.pseudName).join(', ') || 'Unknown'}
+              </p>
+              {rec.summary && (
+                <p class="rec-card-summary">{rec.summary}</p>
+              )}
+              <div class="rec-card-meta">
+                <span>{rec.wordCount?.toLocaleString() ?? '0'} words</span>
+                {rec.complete ? <span>· Complete</span> : <span>· WIP</span>}
+                {rec.fandoms?.length > 0 && (
+                  <span> · {rec.fandoms.slice(0, 2).map((f: any) => f.name).join(', ')}</span>
+                )}
+              </div>
+            </a>
+          ))}
+        </div>
+      </section>
     )}
   </section>
 </Base>
@@ -497,6 +551,110 @@ const user = Astro.locals.user;
   .error-msg {
     color: var(--md-sys-color-error);
     font: var(--md-sys-typescale-body-large);
+  }
+
+  /* ─── Recommendations ──────────────────────────────────── */
+  .recommendations {
+    margin-top: var(--space-8);
+    padding-top: var(--space-8);
+    border-top: 1px solid var(--md-sys-color-outline-variant);
+  }
+
+  .recommendations-heading {
+    font: var(--md-sys-typescale-headline-small);
+    color: var(--md-sys-color-on-surface);
+    margin: 0 0 var(--space-6) 0;
+  }
+
+  .recommendations-grid {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: var(--space-4);
+  }
+
+  @media (min-width: 768px) {
+    .recommendations-grid {
+      grid-template-columns: repeat(3, 1fr);
+    }
+  }
+
+  .rec-card {
+    display: flex;
+    flex-direction: column;
+    background: var(--md-sys-color-surface-container);
+    border: 1px solid var(--md-sys-color-outline-variant);
+    border-radius: var(--md-sys-shape-corner-large);
+    padding: var(--space-4);
+    text-decoration: none;
+    color: var(--md-sys-color-on-surface);
+    transition: background var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard),
+                box-shadow var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard);
+  }
+
+  .rec-card:hover {
+    background: var(--md-sys-color-surface-container-high);
+    box-shadow: var(--md-sys-elevation-level1);
+  }
+
+  .rec-card-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: var(--space-2);
+    margin-bottom: var(--space-1);
+  }
+
+  .rec-card-title {
+    font: var(--md-sys-typescale-title-medium);
+    color: var(--md-sys-color-on-surface);
+    margin: 0;
+    flex: 1;
+    min-width: 0;
+  }
+
+  .rec-card-badge {
+    font: var(--md-sys-typescale-label-small);
+    border-radius: var(--md-sys-shape-corner-full);
+    padding: 2px 8px;
+    white-space: nowrap;
+    flex-shrink: 0;
+  }
+
+  .rec-badge-kudos {
+    background: var(--md-sys-color-tertiary-container);
+    color: var(--md-sys-color-on-tertiary-container);
+  }
+
+  .rec-badge-tags {
+    background: var(--md-sys-color-secondary-container);
+    color: var(--md-sys-color-on-secondary-container);
+  }
+
+  .rec-badge-recent {
+    background: var(--md-sys-color-primary-container);
+    color: var(--md-sys-color-on-primary-container);
+  }
+
+  .rec-card-author {
+    font: var(--md-sys-typescale-body-small);
+    color: var(--md-sys-color-on-surface-variant);
+    margin: 0 0 var(--space-2) 0;
+  }
+
+  .rec-card-summary {
+    font: var(--md-sys-typescale-body-small);
+    color: var(--md-sys-color-on-surface-variant);
+    margin: 0 0 var(--space-2) 0;
+    display: -webkit-box;
+    -webkit-line-clamp: 3;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+
+  .rec-card-meta {
+    font: var(--md-sys-typescale-label-small);
+    color: var(--md-sys-color-on-surface-variant);
+    margin-top: auto;
   }
 
   .empty-msg {

@@ -7,6 +7,10 @@ export const tags = sqliteTable('tags', {
   id: integer('id').primaryKey({ autoIncrement: true }),
   name: text('name').notNull().unique(),
   type: text('type', { enum: ['fandom', 'character', 'relationship', 'freeform', 'rating', 'warning', 'category'] }).notNull(),
+  description: text('description'),
+  canonical: integer('canonical').notNull().default(0),
+  createdAt: text('created_at').notNull().default("(datetime('now'))"),
+  updatedAt: text('updated_at').notNull().default("(datetime('now'))"),
 });
 
 export const taggings = sqliteTable('taggings', {

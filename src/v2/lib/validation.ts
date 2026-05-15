@@ -64,6 +64,8 @@ export const reorderChaptersSchema = z.object({
 export const createTagSchema = z.object({
   name: z.string().min(1, 'Tag name is required').max(200, 'Tag name too long'),
   type: z.enum(['fandom', 'character', 'relationship', 'freeform', 'rating', 'warning', 'category']),
+  description: z.string().max(2000, 'Description too long').optional(),
+  canonical: z.boolean().default(false),
 });
 
 export const tagBrowseSchema = z.object({

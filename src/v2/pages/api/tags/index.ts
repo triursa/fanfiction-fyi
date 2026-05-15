@@ -95,7 +95,12 @@ export const POST: APIRoute = async ({ request, locals }) => {
   // Create the tag
   const [newTag] = await db
     .insert(tags)
-    .values({ name: data.name, type: data.type })
+    .values({
+      name: data.name,
+      type: data.type,
+      description: data.description ?? null,
+      canonical: data.canonical ? 1 : 0,
+    })
     .returning();
 
   return new Response(JSON.stringify({ data: newTag }), {

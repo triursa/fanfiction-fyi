@@ -1,0 +1,432 @@
+---
+/**
+ * Admin Content Moderation Page — Auth: required, mod+ only
+ * Tab toggle: Comments | Published Works
+ * Comments section: table with pseud name, work title (link), content (truncated), date, delete button
+ * Published Works section: table with title (link), author pseud(s), word count, published date, unpublish button
+ * Pagination, confirmation dialogs, toast notifications.
+ */
+export const prerender = false;
+import Base from '@/v2/layouts/Base.astro';
+import type { D1Database } from '@cloudflare/workers-types';
+
+const user = Astro.locals.user;
+
+// Auth check: mod+ only
+if (!user || !['founder', 'admin', 'mod'].includes(user.role)) {
+  return Astro.redirect('/login');
+}
+
+const d1 = locals.runtime.env.DB as D1Database;
+
+// Parse query params
+const url = new URL(Astro.request.url);
+const section = url.searchParams.get('section') || 'comments';
+const page = Math.max(1, Number(url.searchParams.get('page')) || 1);
+
+let data: any[] = [];
+let total = 0;
+let limit = section === 'works' ? 25 : 50;
+const totalPages = Math.ceil(total / limit);
+
+// Fetch comments with pseud name and work title via raw D1
+if (section === 'comments') {
+  limit = Math.min(200, Math.max(1, Number(url.searchParams.get('limit')) || 50));
+  const offset = (page - 1) * limit;
+
+  const countResult = await d1.prepare(`SELECT COUNT(*) as total FROM comments`).first();
+  total = (countResult?.total as number) || 0;
+
+  const { results } = await d1.prepare(`
+    SELECT c.id, c.content, c.created_at, c.updated_at,
+           c.work_id, c.chapter_id, c.parent_id,
+           p.name AS pseud_name,
+           w.title AS work_title
+    FROM comments c
+    JOIN pseuds p ON p.id = c.pseud_id
+    JOIN works w ON w.id = c.work_id
+    ORDER BY c.created_at DESC
+    LIMIT ? OFFSET ?
+  `).bind(limit, offset).all();
+  data = results as any[];
+} else {
+  // Published works with author pseud(s)
+  limit = Math.min(100, Math.max(1, Number(url.searchParams.get('limit')) || 25));
+  const offset = (page - 1) * limit;
+
+  const countResult = await d1.prepare(
+    `SELECT COUNT(*) as total FROM works WHERE draft = 0`
+  ).first();
+  total = (countResult?.total as number) || 0;
+
+  const { results } = await d1.prepare(`
+    SELECT w.id, w.title, w.word_count, w.published_at, w.created_at,
+           GROUP_CONCAT(p.name, ', ') AS author_names
+    FROM works w
+    LEFT JOIN creatorships c ON c.work_id = w.id
+    LEFT JOIN pseuds p ON p.id = c.pseud_id
+    WHERE w.draft = 0
+    GROUP BY w.id
+    ORDER BY w.published_at DESC
+    LIMIT ? OFFSET ?
+  `).bind(limit, offset).all();
+  data = results as any[];
+}
+
+const computedTotalPages = Math.ceil(total / limit);
+
+function truncate(s: string | null, len: number): string {
+  if (!s) return '—';
+  return s.length > len ? s.slice(0, len) + '…' : s;
+}
+---
+
+<Base title="Admin: Content — fanfiction.fyi" description="Content moderation">
+  <section class="admin-page">
+    <h1 class="page-title">Content Moderation</h1>
+
+    <nav class="admin-nav" aria-label="Admin sections">
+      <a href="/admin/users" class="admin-nav-link">Users</a>
+      <a href="/admin/invite-codes" class="admin-nav-link">Invite Codes</a>
+      <a href="/admin/reports" class="admin-nav-link">Reports</a>
+      <a href="/admin/audit" class="admin-nav-link">Audit Log</a>
+      <a href="/admin/tags" class="admin-nav-link">Tags</a>
+      <a href="/admin/content" class="admin-nav-link admin-nav-link--active">Content</a>
+    </nav>
+
+    <div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+    <!-- ── Section Toggle ────────────────────────────────── -->
+    <div class="tab-toggle">
+      <a href="/admin/content?section=comments"
+         class={`tab-btn ${section === 'comments' ? 'tab-btn--active' : ''}`}>
+        Comments
+      </a>
+      <a href="/admin/content?section=works"
+         class={`tab-btn ${section === 'works' ? 'tab-btn--active' : ''}`}>
+        Published Works
+      </a>
+    </div>
+
+    {section === 'comments' ? (
+      <!-- ── Comments Table ──────────────────────────────────── -->
+      <div class="card">
+        <div class="table-wrapper">
+          <table class="admin-table">
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th>Author</th>
+                <th>Work</th>
+                <th>Content</th>
+                <th>Date</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {data.map((c: any) => (
+                <tr data-comment-id={c.id}>
+                  <td>{c.id}</td>
+                  <td>{c.pseud_name || '—'}</td>
+                  <td>
+                    <a href={`/works/${c.work_id}`} class="work-link">{truncate(c.work_title, 50)}</a>
+                  </td>
+                  <td class="content-cell" title={c.content}>{truncate(c.content, 100)}</td>
+                  <td class="date-cell">{new Date(c.created_at).toLocaleDateString()}</td>
+                  <td class="actions-cell">
+                    <button class="btn-sm btn-danger" data-action="delete-comment" data-id={c.id}>Delete</button>
+                  </td>
+                </tr>
+              ))}
+              {data.length === 0 && (
+                <tr><td colspan="6" class="empty-state">No comments found.</td></tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+
+        {computedTotalPages > 1 && (
+          <nav class="pagination" aria-label="Pagination">
+            {page > 1 && <a href={`?section=comments&page=${page - 1}`} class="btn-sm">Previous</a>}
+            <span class="pagination-info">Page {page} of {computedTotalPages}</span>
+            {page < computedTotalPages && <a href={`?section=comments&page=${page + 1}`} class="btn-sm">Next</a>}
+          </nav>
+        )}
+      </div>
+    ) : (
+      <!-- ── Published Works Table ─────────────────────────────── -->
+      <div class="card">
+        <div class="table-wrapper">
+          <table class="admin-table">
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th>Title</th>
+                <th>Author(s)</th>
+                <th>Words</th>
+                <th>Published</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {data.map((w: any) => (
+                <tr data-work-id={w.id}>
+                  <td>{w.id}</td>
+                  <td>
+                    <a href={`/works/${w.id}`} class="work-link">{truncate(w.title, 60)}</a>
+                  </td>
+                  <td>{w.author_names || '—'}</td>
+                  <td>{w.word_count?.toLocaleString() || 0}</td>
+                  <td class="date-cell">{w.published_at ? new Date(w.published_at).toLocaleDateString() : '—'}</td>
+                  <td class="actions-cell">
+                    <button class="btn-sm btn-warning" data-action="unpublish-work" data-id={w.id}>Unpublish</button>
+                  </td>
+                </tr>
+              ))}
+              {data.length === 0 && (
+                <tr><td colspan="6" class="empty-state">No published works found.</td></tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+
+        {computedTotalPages > 1 && (
+          <nav class="pagination" aria-label="Pagination">
+            {page > 1 && <a href={`?section=works&page=${page - 1}`} class="btn-sm">Previous</a>}
+            <span class="pagination-info">Page {page} of {computedTotalPages}</span>
+            {page < computedTotalPages && <a href={`?section=works&page=${page + 1}`} class="btn-sm">Next</a>}
+          </nav>
+        )}
+      </div>
+    )}
+  </section>
+</Base>
+
+<script>
+  function showToast(message: string, type: 'success' | 'error' = 'success') {
+    const toast = document.getElementById('toast')!;
+    toast.textContent = message;
+    toast.className = `toast toast--${type} toast--show`;
+    setTimeout(() => { toast.className = 'toast'; }, 3000);
+  }
+
+  async function deleteComment(id: number) {
+    try {
+      const res = await fetch(`/api/admin/content?type=comment&id=${id}`, {
+        method: 'DELETE',
+      });
+      if (res.ok) {
+        showToast('Comment deleted.');
+        setTimeout(() => window.location.reload(), 800);
+      } else {
+        const data = await res.json();
+        showToast(data.error || 'Failed to delete comment.', 'error');
+      }
+    } catch {
+      showToast('Network error.', 'error');
+    }
+  }
+
+  async function unpublishWork(id: number) {
+    try {
+      const res = await fetch(`/api/admin/content?type=work&id=${id}`, {
+        method: 'DELETE',
+      });
+      if (res.ok) {
+        showToast('Work unpublished.');
+        setTimeout(() => window.location.reload(), 800);
+      } else {
+        const data = await res.json();
+        showToast(data.error || 'Failed to unpublish work.', 'error');
+      }
+    } catch {
+      showToast('Network error.', 'error');
+    }
+  }
+
+  // Delete comment buttons
+  document.querySelectorAll('[data-action="delete-comment"]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const id = Number((btn as HTMLElement).dataset.id);
+      if (confirm(`Delete comment #${id}? This cannot be undone.`)) {
+        deleteComment(id);
+      }
+    });
+  });
+
+  // Unpublish work buttons
+  document.querySelectorAll('[data-action="unpublish-work"]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const id = Number((btn as HTMLElement).dataset.id);
+      if (confirm(`Unpublish work #${id}? It will be set to draft status.`)) {
+        unpublishWork(id);
+      }
+    });
+  });
+</script>
+
+<style is:global>
+  .admin-page {
+    max-width: 80rem;
+    margin: 0 auto;
+    padding: var(--space-8) var(--space-4);
+  }
+
+  .page-title {
+    font: var(--md-sys-typescale-headline-medium);
+    margin: 0 0 var(--space-4) 0;
+  }
+
+  .admin-nav {
+    display: flex;
+    gap: var(--space-2);
+    margin-bottom: var(--space-6);
+    border-bottom: 1px solid var(--md-sys-color-outline-variant);
+    padding-bottom: var(--space-2);
+  }
+
+  .admin-nav-link {
+    font: var(--md-sys-typescale-label-large);
+    color: var(--md-sys-color-on-surface-variant);
+    text-decoration: none;
+    padding: var(--space-1) var(--space-3);
+    border-radius: var(--md-sys-shape-corner-small);
+    transition: background var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard);
+  }
+  .admin-nav-link:hover { background: var(--md-sys-color-surface-container); }
+  .admin-nav-link--active {
+    color: var(--md-sys-color-primary);
+    background: var(--md-sys-color-primary-container);
+    font-weight: 600;
+  }
+
+  .tab-toggle {
+    display: flex;
+    gap: var(--space-2);
+    margin-bottom: var(--space-6);
+  }
+
+  .tab-btn {
+    font: var(--md-sys-typescale-label-large);
+    color: var(--md-sys-color-on-surface-variant);
+    text-decoration: none;
+    padding: var(--space-2) var(--space-6);
+    border: 1px solid var(--md-sys-color-outline-variant);
+    border-radius: var(--md-sys-shape-corner-small);
+    transition: background var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard),
+                color var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard);
+  }
+  .tab-btn:hover {
+    background: var(--md-sys-color-surface-container);
+  }
+  .tab-btn--active {
+    color: var(--md-sys-color-on-primary);
+    background: var(--md-sys-color-primary);
+    border-color: var(--md-sys-color-primary);
+  }
+
+  .card {
+    background: var(--md-sys-color-surface-container);
+    border: 1px solid var(--md-sys-color-outline-variant);
+    border-radius: var(--md-sys-shape-corner-large);
+    padding: var(--space-6);
+  }
+
+  .table-wrapper {
+    overflow-x: auto;
+  }
+
+  .admin-table {
+    width: 100%;
+    border-collapse: collapse;
+    font: var(--md-sys-typescale-body-medium);
+  }
+
+  .admin-table th {
+    font: var(--md-sys-typescale-label-large);
+    color: var(--md-sys-color-on-surface-variant);
+    text-align: left;
+    padding: var(--space-3) var(--space-4);
+    border-bottom: 2px solid var(--md-sys-color-outline-variant);
+  }
+
+  .admin-table td {
+    padding: var(--space-3) var(--space-4);
+    border-bottom: 1px solid var(--md-sys-color-outline-variant);
+    vertical-align: middle;
+  }
+
+  .content-cell {
+    max-width: 300px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .work-link {
+    color: var(--md-sys-color-primary);
+    text-decoration: none;
+  }
+  .work-link:hover {
+    text-decoration: underline;
+  }
+
+  .date-cell {
+    white-space: nowrap;
+    color: var(--md-sys-color-on-surface-variant);
+  }
+
+  .actions-cell {
+    display: flex;
+    gap: var(--space-2);
+    flex-wrap: wrap;
+  }
+
+  .btn-sm {
+    font: var(--md-sys-typescale-body-small);
+    padding: var(--space-1) var(--space-3);
+    border-radius: var(--md-sys-shape-corner-small);
+    border: none;
+    cursor: pointer;
+    transition: opacity var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard);
+  }
+  .btn-sm:hover { opacity: 0.88; }
+  .btn-danger { background: #ffcdd2; color: #b71c1c; }
+  .btn-warning { background: #fff9c4; color: #e65100; }
+
+  .empty-state {
+    text-align: center;
+    padding: var(--space-8);
+    color: var(--md-sys-color-on-surface-variant);
+  }
+
+  .pagination {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: var(--space-4);
+    margin-top: var(--space-6);
+  }
+
+  .pagination-info {
+    font: var(--md-sys-typescale-body-medium);
+    color: var(--md-sys-color-on-surface-variant);
+  }
+
+  .toast {
+    position: fixed;
+    bottom: var(--space-8);
+    left: 50%;
+    transform: translateX(-50%) translateY(100px);
+    border-radius: var(--md-sys-shape-corner-small);
+    padding: var(--space-3) var(--space-6);
+    font: var(--md-sys-typescale-body-medium);
+    z-index: 1000;
+    opacity: 0;
+    transition: transform 0.3s var(--md-sys-motion-easing-standard), opacity 0.3s var(--md-sys-motion-easing-standard);
+    pointer-events: none;
+  }
+  .toast--show { transform: translateX(-50%) translateY(0); opacity: 1; }
+  .toast--success { background: var(--md-sys-color-primary-container); color: var(--md-sys-color-on-primary-container); }
+  .toast--error { background: var(--md-sys-color-error); color: var(--md-sys-color-on-error); }
+</style>

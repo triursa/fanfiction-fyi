@@ -1,0 +1,593 @@
+---
+/**
+ * Admin Tags Management Page — Auth: required, founder/admin only
+ * Table of tags with columns: name, type (badge), canonical (yes/no), description (truncated), created.
+ * Filter chips for tag types, search input, "New Tag" modal/inline form.
+ * Pagination.
+ */
+export const prerender = false;
+import Base from '@/v2/layouts/Base.astro';
+import type { D1Database } from '@cloudflare/workers-types';
+import { getDb } from '@/v2/lib/db';
+import { tags } from '@/v2/lib/schema/index';
+import { desc, eq, and, like, count, sql } from 'drizzle-orm';
+
+const user = Astro.locals.user;
+
+// Auth check: admin+ only
+if (!user || !['founder', 'admin'].includes(user.role)) {
+  return Astro.redirect('/login');
+}
+
+const d1 = locals.runtime.env.DB as D1Database;
+const db = getDb(d1);
+
+// Parse query params
+const url = new URL(Astro.request.url);
+const page = Math.max(1, Number(url.searchParams.get('page')) || 1);
+const limit = 20;
+const offset = (page - 1) * limit;
+const typeFilter = url.searchParams.get('type') || '';
+const searchFilter = url.searchParams.get('search') || '';
+
+// Build query conditions
+const conditions = [];
+const TAG_TYPES = ['fandom', 'character', 'relationship', 'freeform', 'rating', 'warning', 'category'] as const;
+
+if (typeFilter && TAG_TYPES.includes(typeFilter as any)) {
+  conditions.push(eq(tags.type, typeFilter));
+}
+if (searchFilter) {
+  conditions.push(like(tags.name, `%${searchFilter}%`));
+}
+
+const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
+
+// Count total
+const [{ total }] = await db.select({ total: count() }).from(tags).where(whereClause);
+const totalPages = Math.ceil(total / limit);
+
+// Fetch tags
+const tagRows = await db
+  .select()
+  .from(tags)
+  .where(whereClause)
+  .orderBy(desc(tags.createdAt))
+  .limit(limit)
+  .offset(offset);
+
+// Type badge colors
+const typeColors: Record<string, { bg: string; text: string }> = {
+  fandom: { bg: '#e8eaf6', text: '#283593' },
+  character: { bg: '#fce4ec', text: '#880e4f' },
+  relationship: { bg: '#f3e5f5', text: '#6a1b9a' },
+  freeform: { bg: '#e0f2f1', text: '#00695c' },
+  rating: { bg: '#fff3e0', text: '#e65100' },
+  warning: { bg: '#ffebee', text: '#c62828' },
+  category: { bg: '#e8f5e9', text: '#2e7d32' },
+};
+
+function truncate(s: string | null, len: number): string {
+  if (!s) return '—';
+  return s.length > len ? s.slice(0, len) + '…' : s;
+}
+
+// Build pagination query string
+const filterParams: string[] = [];
+if (typeFilter) filterParams.push(`type=${encodeURIComponent(typeFilter)}`);
+if (searchFilter) filterParams.push(`search=${encodeURIComponent(searchFilter)}`);
+const filterQs = filterParams.length > 0 ? '&' + filterParams.join('&') : '';
+---
+
+<Base title="Admin: Tags — fanfiction.fyi" description="Manage tags">
+  <section class="admin-page">
+    <h1 class="page-title">Tag Management</h1>
+
+    <nav class="admin-nav" aria-label="Admin sections">
+      <a href="/admin/users" class="admin-nav-link">Users</a>
+      <a href="/admin/invite-codes" class="admin-nav-link">Invite Codes</a>
+      <a href="/admin/reports" class="admin-nav-link">Reports</a>
+      <a href="/admin/audit" class="admin-nav-link">Audit Log</a>
+      <a href="/admin/tags" class="admin-nav-link admin-nav-link--active">Tags</a>
+      <a href="/admin/content" class="admin-nav-link">Content</a>
+    </nav>
+
+    <div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+    <!-- ── Type Filter Chips ──────────────────────────────────────── -->
+    <div class="filter-bar">
+      <div class="chip-group">
+        <a href={`/admin/tags${searchFilter ? `?search=${encodeURIComponent(searchFilter)}` : ''}`}
+           class={`chip ${!typeFilter ? 'chip-active' : ''}`}>All</a>
+        {TAG_TYPES.map(t => (
+          <a href={`/admin/tags?type=${t}${searchFilter ? `&search=${encodeURIComponent(searchFilter)}` : ''}`}
+             class={`chip ${typeFilter === t ? 'chip-active' : ''}`}
+             style={typeFilter === t ? `background: ${typeColors[t]?.bg}; color: ${typeColors[t]?.text};` : ''}>
+            {t.charAt(0).toUpperCase() + t.slice(1)}
+          </a>
+        ))}
+      </div>
+
+      <div class="filter-actions">
+        <form method="GET" class="search-form">
+          {typeFilter && <input type="hidden" name="type" value={typeFilter} />}
+          <div class="form-field search-field">
+            <input
+              type="text"
+              name="search"
+              id="tag-search"
+              placeholder="Search tags by name…"
+              value={searchFilter}
+              class="input"
+            />
+          </div>
+          <button type="submit" class="btn-filled">Search</button>
+        </form>
+        <button class="btn-filled btn-new-tag" id="new-tag-btn">+ New Tag</button>
+      </div>
+    </div>
+
+    <!-- ── New Tag Form (hidden by default) ─────────────────────────── -->
+    <div id="new-tag-form" class="new-tag-form card" style="display:none;">
+      <h2 class="form-title">Create New Tag</h2>
+      <form id="create-tag-form" class="create-form">
+        <div class="form-row">
+          <div class="form-field form-field--grow">
+            <label for="tag-name">Name *</label>
+            <input type="text" id="tag-name" name="name" required maxlength="200" class="input" placeholder="Tag name" />
+          </div>
+          <div class="form-field">
+            <label for="tag-type">Type *</label>
+            <select id="tag-type" name="type" required class="select">
+              {TAG_TYPES.map(t => <option value={t}>{t.charAt(0).toUpperCase() + t.slice(1)}</option>)}
+            </select>
+          </div>
+        </div>
+        <div class="form-field">
+          <label for="tag-description">Description</label>
+          <input type="text" id="tag-description" name="description" maxlength="2000" class="input" placeholder="Optional description" />
+        </div>
+        <div class="form-field form-field--inline">
+          <input type="checkbox" id="tag-canonical" name="canonical" value="true" />
+          <label for="tag-canonical">Canonical (official/standardized tag)</label>
+        </div>
+        <div class="form-actions">
+          <button type="submit" class="btn-filled">Create Tag</button>
+          <button type="button" id="cancel-tag-btn" class="btn-outlined">Cancel</button>
+        </div>
+      </form>
+    </div>
+
+    <!-- ── Tags Table ──────────────────────────────────────────────── -->
+    <div class="card">
+      <div class="table-wrapper">
+        <table class="admin-table">
+          <thead>
+            <tr>
+              <th>Name</th>
+              <th>Type</th>
+              <th>Canonical</th>
+              <th>Description</th>
+              <th>Created</th>
+            </tr>
+          </thead>
+          <tbody>
+            {tagRows.map(tag => (
+              <tr>
+                <td class="name-cell">{tag.name}</td>
+                <td>
+                  <span class="badge badge-type" style={`background: ${typeColors[tag.type]?.bg || 'var(--md-sys-color-surface-container-highest)'}; color: ${typeColors[tag.type]?.text || 'var(--md-sys-color-on-surface-variant)'};`}>
+                    {tag.type}
+                  </span>
+                </td>
+                <td>
+                  {tag.canonical ? (
+                    <span class="badge badge-success">Yes</span>
+                  ) : (
+                    <span class="badge badge-muted">No</span>
+                  )}
+                </td>
+                <td class="desc-cell">{truncate(tag.description, 60)}</td>
+                <td class="date-cell">{tag.createdAt ? new Date(tag.createdAt).toLocaleDateString() : '—'}</td>
+              </tr>
+            ))}
+            {tagRows.length === 0 && (
+              <tr><td colspan="5" class="empty-state">No tags found.</td></tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+
+      <!-- ── Pagination ─────────────────────────────────────────────── -->
+      {totalPages > 1 && (
+        <nav class="pagination" aria-label="Pagination">
+          {page > 1 && <a href={`?page=${page - 1}${filterQs}`} class="btn-sm">Previous</a>}
+          <span class="pagination-info">Page {page} of {totalPages}</span>
+          {page < totalPages && <a href={`?page=${page + 1}${filterQs}`} class="btn-sm">Next</a>}
+        </nav>
+      )}
+    </div>
+  </section>
+</Base>
+
+<script define:vars={{ typeFilter, searchFilter }}>
+  function showToast(message, type = 'success') {
+    const toast = document.getElementById('toast');
+    toast.textContent = message;
+    toast.className = `toast toast--${type} toast--show`;
+    setTimeout(() => { toast.className = 'toast'; }, 3000);
+  }
+
+  // Toggle new tag form
+  const newTagBtn = document.getElementById('new-tag-btn');
+  const newTagForm = document.getElementById('new-tag-form');
+  const cancelTagBtn = document.getElementById('cancel-tag-btn');
+
+  newTagBtn.addEventListener('click', () => {
+    newTagForm.style.display = newTagForm.style.display === 'none' ? 'block' : 'none';
+    if (newTagForm.style.display === 'block') {
+      document.getElementById('tag-name').focus();
+    }
+  });
+
+  cancelTagBtn.addEventListener('click', () => {
+    newTagForm.style.display = 'none';
+  });
+
+  // Create tag form submission
+  document.getElementById('create-tag-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const form = e.target;
+    const body = {
+      name: form.name.value.trim(),
+      type: form.type.value,
+      description: form.description.value.trim() || undefined,
+      canonical: form.canonical.checked,
+    };
+
+    if (!body.name) {
+      showToast('Tag name is required.', 'error');
+      return;
+    }
+
+    try {
+      const res = await fetch('/api/admin/tags', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      const data = await res.json();
+      if (res.ok || res.status === 201) {
+        showToast('Tag created successfully.');
+        // Rebuild URL preserving current filters
+        const params = new URLSearchParams();
+        if (typeFilter) params.set('type', typeFilter);
+        if (searchFilter) params.set('search', searchFilter);
+        const qs = params.toString();
+        window.location.href = `/admin/tags${qs ? '?' + qs : ''}`;
+      } else {
+        showToast(data.error || 'Failed to create tag.', 'error');
+      }
+    } catch (err) {
+      showToast('Network error.', 'error');
+    }
+  });
+</script>
+
+<style is:global>
+  .admin-page {
+    max-width: 72rem;
+    margin: 0 auto;
+    padding: var(--space-8) var(--space-4);
+  }
+
+  .page-title {
+    font: var(--md-sys-typescale-headline-medium);
+    margin: 0 0 var(--space-4) 0;
+  }
+
+  .admin-nav {
+    display: flex;
+    gap: var(--space-2);
+    margin-bottom: var(--space-6);
+    border-bottom: 1px solid var(--md-sys-color-outline-variant);
+    padding-bottom: var(--space-2);
+  }
+
+  .admin-nav-link {
+    font: var(--md-sys-typescale-label-large);
+    color: var(--md-sys-color-on-surface-variant);
+    text-decoration: none;
+    padding: var(--space-1) var(--space-3);
+    border-radius: var(--md-sys-shape-corner-small);
+    transition: background var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard);
+  }
+  .admin-nav-link:hover { background: var(--md-sys-color-surface-container); }
+  .admin-nav-link--active {
+    color: var(--md-sys-color-primary);
+    background: var(--md-sys-color-primary-container);
+    font-weight: 600;
+  }
+
+  .filter-bar {
+    margin-bottom: var(--space-6);
+  }
+
+  .chip-group {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-2);
+    margin-bottom: var(--space-4);
+  }
+
+  .chip {
+    display: inline-flex;
+    align-items: center;
+    font: var(--md-sys-typescale-label-large);
+    color: var(--md-sys-color-on-surface-variant);
+    background: var(--md-sys-color-surface-container);
+    padding: var(--space-1) var(--space-3);
+    border-radius: var(--md-sys-shape-corner-small);
+    text-decoration: none;
+    border: 1px solid var(--md-sys-color-outline-variant);
+    transition: background var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard),
+                color var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard);
+  }
+  .chip:hover { background: var(--md-sys-color-surface-container-high); }
+  .chip-active {
+    background: var(--md-sys-color-primary-container);
+    color: var(--md-sys-color-on-primary-container);
+    border-color: var(--md-sys-color-primary);
+    font-weight: 600;
+  }
+
+  .filter-actions {
+    display: flex;
+    gap: var(--space-4);
+    align-items: flex-end;
+    flex-wrap: wrap;
+  }
+
+  .search-form {
+    display: flex;
+    gap: var(--space-2);
+    align-items: flex-end;
+  }
+
+  .search-field {
+    flex: 1;
+    min-width: 200px;
+  }
+
+  .form-field {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+  }
+
+  .form-field label {
+    font: var(--md-sys-typescale-body-small);
+    color: var(--md-sys-color-on-surface-variant);
+  }
+
+  .form-field--inline {
+    flex-direction: row;
+    align-items: center;
+    gap: var(--space-2);
+  }
+
+  .form-field--inline label {
+    font: var(--md-sys-typescale-body-medium);
+  }
+
+  .form-field--grow {
+    flex: 2;
+  }
+
+  .input {
+    font: var(--md-sys-typescale-body-medium);
+    color: var(--md-sys-color-on-surface);
+    background-color: var(--md-sys-color-surface);
+    border: 1px solid var(--md-sys-color-outline-variant);
+    border-radius: var(--md-sys-shape-corner-small);
+    padding: var(--space-1) var(--space-3);
+  }
+
+  .input:focus {
+    outline: 2px solid var(--md-sys-color-primary);
+    outline-offset: -1px;
+  }
+
+  .new-tag-form {
+    margin-bottom: var(--space-6);
+  }
+
+  .form-title {
+    font: var(--md-sys-typescale-title-medium);
+    margin: 0 0 var(--space-4) 0;
+    color: var(--md-sys-color-on-surface);
+  }
+
+  .create-form {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-4);
+  }
+
+  .form-row {
+    display: flex;
+    gap: var(--space-4);
+    flex-wrap: wrap;
+  }
+
+  .form-actions {
+    display: flex;
+    gap: var(--space-3);
+  }
+
+  .card {
+    background: var(--md-sys-color-surface-container);
+    border: 1px solid var(--md-sys-color-outline-variant);
+    border-radius: var(--md-sys-shape-corner-large);
+    padding: var(--space-6);
+  }
+
+  .table-wrapper {
+    overflow-x: auto;
+  }
+
+  .admin-table {
+    width: 100%;
+    border-collapse: collapse;
+    font: var(--md-sys-typescale-body-medium);
+  }
+
+  .admin-table th {
+    font: var(--md-sys-typescale-label-large);
+    color: var(--md-sys-color-on-surface-variant);
+    text-align: left;
+    padding: var(--space-3) var(--space-4);
+    border-bottom: 2px solid var(--md-sys-color-outline-variant);
+  }
+
+  .admin-table td {
+    padding: var(--space-3) var(--space-4);
+    border-bottom: 1px solid var(--md-sys-color-outline-variant);
+    vertical-align: middle;
+  }
+
+  .name-cell {
+    font: var(--md-sys-typescale-body-medium);
+    max-width: 250px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .desc-cell {
+    max-width: 300px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--md-sys-color-on-surface-variant);
+  }
+
+  .date-cell {
+    white-space: nowrap;
+    color: var(--md-sys-color-on-surface-variant);
+  }
+
+  .badge {
+    display: inline-block;
+    font: var(--md-sys-typescale-body-small);
+    padding: var(--space-1) var(--space-2);
+    border-radius: var(--md-sys-shape-corner-small);
+    white-space: nowrap;
+  }
+  .badge-success { background: #c8e6c9; color: #1b5e20; }
+  .badge-error { background: #ffcdd2; color: #b71c1c; }
+  .badge-warning { background: #fff9c4; color: #e65100; }
+  .badge-muted { background: var(--md-sys-color-surface-container-highest); color: var(--md-sys-color-on-surface-variant); }
+  .badge-type {
+    font: var(--md-sys-typescale-label-small);
+    padding: var(--space-0) var(--space-2);
+    border-radius: var(--md-sys-shape-corner-full);
+  }
+
+  .btn-filled {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font: var(--md-sys-typescale-label-large);
+    color: var(--md-sys-color-on-primary);
+    background: var(--md-sys-color-primary);
+    border: none;
+    border-radius: var(--md-sys-shape-corner-full);
+    padding: var(--space-3) var(--space-8);
+    cursor: pointer;
+    transition: opacity var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard);
+  }
+  .btn-filled:hover { opacity: 0.88; }
+
+  .btn-outlined {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font: var(--md-sys-typescale-label-large);
+    color: var(--md-sys-color-primary);
+    background: transparent;
+    border: 1px solid var(--md-sys-color-outline);
+    border-radius: var(--md-sys-shape-corner-full);
+    padding: var(--space-3) var(--space-8);
+    cursor: pointer;
+    transition: background var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard);
+  }
+  .btn-outlined:hover { background: var(--md-sys-color-surface-container); }
+
+  .btn-new-tag {
+    white-space: nowrap;
+  }
+
+  .btn-sm {
+    font: var(--md-sys-typescale-body-small);
+    padding: var(--space-1) var(--space-3);
+    border-radius: var(--md-sys-shape-corner-small);
+    border: none;
+    cursor: pointer;
+    transition: opacity var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard);
+    text-decoration: none;
+    background: var(--md-sys-color-secondary-container);
+    color: var(--md-sys-color-on-secondary-container);
+  }
+  .btn-sm:hover { opacity: 0.88; }
+
+  .select {
+    appearance: none;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%2349454f' d='M6 8L1 3h10z'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right var(--space-2) center;
+    padding-right: var(--space-8);
+    font: var(--md-sys-typescale-body-medium);
+    color: var(--md-sys-color-on-surface);
+    background-color: var(--md-sys-color-surface);
+    border: 1px solid var(--md-sys-color-outline-variant);
+    border-radius: var(--md-sys-shape-corner-small);
+    padding: var(--space-1) var(--space-3);
+  }
+
+  .empty-state {
+    text-align: center;
+    padding: var(--space-8);
+    color: var(--md-sys-color-on-surface-variant);
+  }
+
+  .pagination {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: var(--space-4);
+    margin-top: var(--space-6);
+  }
+
+  .pagination-info {
+    font: var(--md-sys-typescale-body-medium);
+    color: var(--md-sys-color-on-surface-variant);
+  }
+
+  .toast {
+    position: fixed;
+    bottom: var(--space-8);
+    left: 50%;
+    transform: translateX(-50%) translateY(100px);
+    border-radius: var(--md-sys-shape-corner-small);
+    padding: var(--space-3) var(--space-6);
+    font: var(--md-sys-typescale-body-medium);
+    z-index: 1000;
+    opacity: 0;
+    transition: transform 0.3s var(--md-sys-motion-easing-standard), opacity 0.3s var(--md-sys-motion-easing-standard);
+    pointer-events: none;
+  }
+  .toast--show { transform: translateX(-50%) translateY(0); opacity: 1; }
+  .toast--success { background: var(--md-sys-color-primary-container); color: var(--md-sys-color-on-primary-container); }
+  .toast--error { background: var(--md-sys-color-error); color: var(--md-sys-color-on-error); }
+</style>
