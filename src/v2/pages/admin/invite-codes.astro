@@ -1,0 +1,409 @@
+---
+/**
+ * Admin Invite Codes Page — Auth: required, admin+ only
+ * List codes with their status (used/unused). Create new code button.
+ */
+export const prerender = false;
+import Base from '../../layouts/Base.astro';
+import type { D1Database } from '@cloudflare/workers-types';
+import { getDb } from '../../lib/db';
+import { inviteCodes, users } from '../../lib/schema/index';
+import { desc, count, sql, eq } from 'drizzle-orm';
+
+const user = Astro.locals.user;
+
+// Auth check: admin+ only
+if (!user || !['founder', 'admin'].includes(user.role)) {
+  return Astro.redirect('/login');
+}
+
+const d1 = locals.runtime.env.DB as D1Database;
+const db = getDb(d1);
+
+const url = new URL(Astro.request.url);
+const page = Math.max(1, Number(url.searchParams.get('page')) || 1);
+const limit = 20;
+
+const [{ total }] = await db.select({ total: count() }).from(inviteCodes);
+const totalPages = Math.ceil(total / limit);
+
+const codes = await db
+  .select({
+    id: inviteCodes.id,
+    code: inviteCodes.code,
+    createdById: inviteCodes.createdById,
+    usedBy: inviteCodes.usedBy,
+    createdAt: inviteCodes.createdAt,
+    usedAt: inviteCodes.usedAt,
+  })
+  .from(inviteCodes)
+  .orderBy(desc(inviteCodes.createdAt))
+  .limit(limit)
+  .offset((page - 1) * limit);
+
+// Resolve creator emails
+const creatorIds = [...new Set(codes.map(c => c.createdById).filter(Boolean))] as number[];
+let creatorMap: Record<number, string> = {};
+if (creatorIds.length > 0) {
+  const creatorRows = await db
+    .select({ id: users.id, email: users.email })
+    .from(users)
+    .where(sql`${users.id} IN (${sql.join(creatorIds.map(id => sql`${id}`), sql`, `)})`);
+  for (const c of creatorRows) {
+    creatorMap[c.id] = c.email;
+  }
+}
+
+// Resolve usedBy emails
+const usedByIds = [...new Set(codes.map(c => c.usedBy).filter(Boolean))] as number[];
+let usedByMap: Record<number, string> = {};
+if (usedByIds.length > 0) {
+  const usedByRows = await db
+    .select({ id: users.id, email: users.email })
+    .from(users)
+    .where(sql`${users.id} IN (${sql.join(usedByIds.map(id => sql`${id}`), sql`, `)})`);
+  for (const u of usedByRows) {
+    usedByMap[u.id] = u.email;
+  }
+}
+
+const enrichedCodes = codes.map(c => ({
+  ...c,
+  createdByEmail: c.createdById ? creatorMap[c.createdById] || '—' : 'System',
+  usedByEmail: c.usedBy ? usedByMap[c.usedBy] || '—' : null,
+  status: c.usedBy ? 'used' : 'unused',
+}));
+---
+
+<Base title="Admin: Invite Codes — fanfiction.fyi" description="Manage invite codes">
+  <section class="admin-page">
+    <div class="header-row">
+      <h1 class="page-title">Invite Codes</h1>
+
+    <nav class="admin-nav" aria-label="Admin sections">
+      <a href="/admin/users" class="admin-nav-link">Users</a>
+      <a href="/admin/invite-codes" class="admin-nav-link admin-nav-link--active">Invite Codes</a>
+      <a href="/admin/reports" class="admin-nav-link">Reports</a>
+    </nav>
+      <div class="create-section">
+        <label for="code-count">Count:</label>
+        <input type="number" id="code-count" min="1" max="50" value="1" class="input-sm" />
+        <button id="create-btn" class="btn-filled">Create Code(s)</button>
+      </div>
+    </div>
+
+    <div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+    <!-- ── New Codes Display ───────────────────────────────── -->
+    <div id="new-codes" class="new-codes" style="display:none;">
+      <h2 class="card-heading">New Codes Generated</h2>
+      <div id="new-codes-list" class="code-list"></div>
+    </div>
+
+    <!-- ── Codes Table ──────────────────────────────────────── -->
+    <div class="card">
+      <div class="table-wrapper">
+        <table class="admin-table">
+          <thead>
+            <tr>
+              <th>Code</th>
+              <th>Status</th>
+              <th>Created By</th>
+              <th>Used By</th>
+              <th>Created</th>
+              <th>Used</th>
+            </tr>
+          </thead>
+          <tbody>
+            {enrichedCodes.map(c => (
+              <tr>
+                <td class="code-cell">{c.code}</td>
+                <td>
+                  {c.status === 'unused' ? (
+                    <span class="badge badge-success">Unused</span>
+                  ) : (
+                    <span class="badge badge-muted">Used</span>
+                  )}
+                </td>
+                <td>{c.createdByEmail}</td>
+                <td>{c.usedByEmail || '—'}</td>
+                <td class="date-cell">{new Date(c.createdAt).toLocaleDateString()}</td>
+                <td class="date-cell">{c.usedAt ? new Date(c.usedAt).toLocaleDateString() : '—'}</td>
+              </tr>
+            ))}
+            {enrichedCodes.length === 0 && (
+              <tr><td colspan="6" class="empty-state">No invite codes found.</td></tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+
+      <!-- ── Pagination ──────────────────────────────────── -->
+      {totalPages > 1 && (
+        <nav class="pagination" aria-label="Pagination">
+          {page > 1 && <a href={`?page=${page - 1}`} class="btn-sm">Previous</a>}
+          <span class="pagination-info">Page {page} of {totalPages}</span>
+          {page < totalPages && <a href={`?page=${page + 1}`} class="btn-sm">Next</a>}
+        </nav>
+      )}
+    </div>
+  </section>
+</Base>
+
+<script>
+  function showToast(message: string, type: 'success' | 'error' = 'success') {
+    const toast = document.getElementById('toast')!;
+    toast.textContent = message;
+    toast.className = `toast toast--${type} toast--show`;
+    setTimeout(() => { toast.className = 'toast'; }, 3000);
+  }
+
+  const createBtn = document.getElementById('create-btn')!;
+  const codeCount = document.getElementById('code-count') as HTMLInputElement;
+  const newCodesDiv = document.getElementById('new-codes')!;
+  const newCodesList = document.getElementById('new-codes-list')!;
+
+  createBtn.addEventListener('click', async () => {
+    const count = Number(codeCount.value) || 1;
+    try {
+      const res = await fetch('/api/admin/invite-codes', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ count }),
+      });
+      if (res.ok) {
+        const result = await res.json();
+        const codes: { id: number; code: string }[] = result.data;
+        showToast(`Created ${codes.length} invite code${codes.length > 1 ? 's' : ''}!`);
+        // Show new codes
+        newCodesDiv.style.display = 'block';
+        newCodesList.innerHTML = codes.map(c =>
+          `<div class="code-item"><code class="invite-code">${c.code}</code><button class="btn-sm copy-btn" data-code="${c.code}">Copy</button></div>`
+        ).join('');
+        // Attach copy handlers
+        document.querySelectorAll('.copy-btn').forEach(btn => {
+          btn.addEventListener('click', () => {
+            const code = (btn as HTMLElement).dataset.code!;
+            navigator.clipboard.writeText(code).then(() => showToast('Copied to clipboard!'));
+          });
+        });
+      } else {
+        const data = await res.json();
+        showToast(data.error || 'Failed to create codes.', 'error');
+      }
+    } catch {
+      showToast('Network error.', 'error');
+    }
+  });
+</script>
+
+<style is:global>
+  .admin-page {
+    max-width: 72rem;
+    margin: 0 auto;
+    padding: var(--space-8) var(--space-4);
+  }
+
+  .header-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: var(--space-4);
+    flex-wrap: wrap;
+    gap: var(--space-4);
+  }
+
+  .page-title {
+    font: var(--md-sys-typescale-headline-medium);
+    margin: 0;
+  }
+
+  .admin-nav {
+    display: flex;
+    gap: var(--space-2);
+    margin-bottom: var(--space-6);
+    border-bottom: 1px solid var(--md-sys-color-outline-variant);
+    padding-bottom: var(--space-2);
+  }
+
+  .admin-nav-link {
+    font: var(--md-sys-typescale-label-large);
+    color: var(--md-sys-color-on-surface-variant);
+    text-decoration: none;
+    padding: var(--space-1) var(--space-3);
+    border-radius: var(--md-sys-shape-corner-small);
+    transition: background var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard);
+  }
+  .admin-nav-link:hover { background: var(--md-sys-color-surface-container); }
+  .admin-nav-link--active {
+    color: var(--md-sys-color-primary);
+    background: var(--md-sys-color-primary-container);
+    font-weight: 600;
+  }
+
+  .create-section {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+  }
+
+  .create-section label {
+    font: var(--md-sys-typescale-label-large);
+    color: var(--md-sys-color-on-surface-variant);
+  }
+
+  .input-sm {
+    width: 60px;
+    font: var(--md-sys-typescale-body-medium);
+    color: var(--md-sys-color-on-surface);
+    background: var(--md-sys-color-surface);
+    border: 1px solid var(--md-sys-color-outline-variant);
+    border-radius: var(--md-sys-shape-corner-small);
+    padding: var(--space-1) var(--space-2);
+    text-align: center;
+  }
+
+  .btn-filled {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font: var(--md-sys-typescale-label-large);
+    color: var(--md-sys-color-on-primary);
+    background: var(--md-sys-color-primary);
+    border: none;
+    border-radius: var(--md-sys-shape-corner-full);
+    padding: var(--space-3) var(--space-6);
+    cursor: pointer;
+    transition: opacity var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard);
+  }
+  .btn-filled:hover { opacity: 0.88; }
+
+  .btn-sm {
+    font: var(--md-sys-typescale-body-small);
+    padding: var(--space-1) var(--space-3);
+    border-radius: var(--md-sys-shape-corner-small);
+    border: none;
+    cursor: pointer;
+    background: var(--md-sys-color-surface-container-highest);
+    color: var(--md-sys-color-on-surface-variant);
+  }
+  .btn-sm:hover { opacity: 0.88; }
+
+  .card {
+    background: var(--md-sys-color-surface-container);
+    border: 1px solid var(--md-sys-color-outline-variant);
+    border-radius: var(--md-sys-shape-corner-large);
+    padding: var(--space-6);
+    margin-bottom: var(--space-6);
+  }
+
+  .card-heading {
+    font: var(--md-sys-typescale-title-large);
+    margin: 0 0 var(--space-4) 0;
+  }
+
+  .new-codes {
+    margin-bottom: var(--space-6);
+  }
+
+  .code-list {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+  }
+
+  .code-item {
+    display: flex;
+    align-items: center;
+    gap: var(--space-4);
+  }
+
+  .invite-code {
+    font: var(--md-sys-typescale-body-large);
+    background: var(--md-sys-color-surface);
+    border: 1px solid var(--md-sys-color-outline-variant);
+    border-radius: var(--md-sys-shape-corner-small);
+    padding: var(--space-2) var(--space-4);
+    letter-spacing: 0.05em;
+  }
+
+  .table-wrapper {
+    overflow-x: auto;
+  }
+
+  .admin-table {
+    width: 100%;
+    border-collapse: collapse;
+    font: var(--md-sys-typescale-body-medium);
+  }
+
+  .admin-table th {
+    font: var(--md-sys-typescale-label-large);
+    color: var(--md-sys-color-on-surface-variant);
+    text-align: left;
+    padding: var(--space-3) var(--space-4);
+    border-bottom: 2px solid var(--md-sys-color-outline-variant);
+  }
+
+  .admin-table td {
+    padding: var(--space-3) var(--space-4);
+    border-bottom: 1px solid var(--md-sys-color-outline-variant);
+    vertical-align: middle;
+  }
+
+  .code-cell {
+    font-family: 'SF Mono', 'Fira Code', monospace;
+    letter-spacing: 0.05em;
+  }
+
+  .date-cell {
+    white-space: nowrap;
+    color: var(--md-sys-color-on-surface-variant);
+  }
+
+  .badge {
+    display: inline-block;
+    font: var(--md-sys-typescale-body-small);
+    padding: var(--space-1) var(--space-2);
+    border-radius: var(--md-sys-shape-corner-small);
+    white-space: nowrap;
+  }
+  .badge-success { background: #c8e6c9; color: #1b5e20; }
+  .badge-muted { background: var(--md-sys-color-surface-container-highest); color: var(--md-sys-color-on-surface-variant); }
+
+  .empty-state {
+    text-align: center;
+    padding: var(--space-8);
+    color: var(--md-sys-color-on-surface-variant);
+  }
+
+  .pagination {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: var(--space-4);
+    margin-top: var(--space-6);
+  }
+
+  .pagination-info {
+    font: var(--md-sys-typescale-body-medium);
+    color: var(--md-sys-color-on-surface-variant);
+  }
+
+  .toast {
+    position: fixed;
+    bottom: var(--space-8);
+    left: 50%;
+    transform: translateX(-50%) translateY(100px);
+    border-radius: var(--md-sys-shape-corner-small);
+    padding: var(--space-3) var(--space-6);
+    font: var(--md-sys-typescale-body-medium);
+    z-index: 1000;
+    opacity: 0;
+    transition: transform 0.3s var(--md-sys-motion-easing-standard), opacity 0.3s var(--md-sys-motion-easing-standard);
+    pointer-events: none;
+  }
+  .toast--show { transform: translateX(-50%) translateY(0); opacity: 1; }
+  .toast--success { background: var(--md-sys-color-primary-container); color: var(--md-sys-color-on-primary-container); }
+  .toast--error { background: var(--md-sys-color-error); color: var(--md-sys-color-on-error); }
+</style>

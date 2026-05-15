@@ -1,0 +1,188 @@
+---
+/**
+ * Pseud Profile Page — Public
+ * Shows pseud name, description, theme color, banner area, and list of works.
+ */
+export const prerender = false;
+export const config = { auth: 'public' };
+import Base from '../../../layouts/Base.astro';
+import WorkCard from '../../../components/WorkCard.astro';
+
+const pseudId = Number(Astro.params.id);
+if (!pseudId || isNaN(pseudId)) {
+  return Astro.redirect('/pseuds');
+}
+
+let pseud: any = null;
+let pseudWorks: any[] = [];
+let errorMsg: string | null = null;
+
+try {
+  const res = await fetch(new URL(`/api/pseuds/${pseudId}`, Astro.url));
+  if (res.ok) {
+    const json = await res.json();
+    pseud = json.data;
+    pseudWorks = pseud.works || [];
+  } else if (res.status === 404) {
+    return Astro.redirect('/pseuds');
+  } else {
+    errorMsg = 'Failed to load pseud profile.';
+  }
+} catch {
+  errorMsg = 'Network error loading pseud profile.';
+}
+
+const bannerColor = pseud?.themeColor || 'var(--md-sys-color-primary)';
+const displayName = pseud?.name || 'Pseud';
+const description = pseud?.description;
+---
+
+<Base title={`${displayName} — fanfiction.fyi`} description={description || `Profile for ${displayName} on fanfiction.fyi`}>
+  <section class="pseud-page">
+    {errorMsg && <div class="error-banner" role="alert">{errorMsg}</div>}
+
+    {pseud && (
+      <>
+        <!-- ── Banner ─────────────────────────────────────── -->
+        <div class="pseud-banner" style={`background: ${bannerColor}`}></div>
+
+        <!-- ── Profile Info ────────────────────────────────── -->
+        <div class="pseud-info">
+          <h1 class="pseud-name">{pseud.name}</h1>
+          {pseud.isDefault && <span class="badge">Default Pseud</span>}
+          {description && <p class="pseud-bio">{description}</p>}
+          <p class="pseud-meta">Joined {new Date(pseud.createdAt).toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}</p>
+        </div>
+
+        <!-- ── Works Section ──────────────────────────────── -->
+        <div class="pseud-works">
+          <h2 class="section-heading">Works {pseudWorks.length > 0 && <span class="count-badge">{pseudWorks.length}</span>}</h2>
+
+          {pseudWorks.length === 0 ? (
+            <p class="empty-msg">No published works yet.</p>
+          ) : (
+            <div class="works-grid">
+              {pseudWorks.map((w: any) => (
+                <WorkCard work={{
+                  id: w.id,
+                  title: w.title,
+                  summary: w.summary,
+                  wordCount: w.wordCount,
+                  complete: w.complete,
+                  updatedAt: w.updatedAt,
+                  authors: [{ pseudId: pseud.id, name: pseud.name, role: 'author' }],
+                  tags: [],
+                  chapterCount: undefined,
+                  kudosCount: undefined,
+                }} />
+              ))}
+            </div>
+          )}
+        </div>
+      </>
+    )}
+  </section>
+</Base>
+
+<style is:global>
+  .pseud-page {
+    max-width: 72rem;
+    margin: 0 auto;
+    padding-bottom: var(--space-8);
+  }
+
+  .error-banner {
+    background: var(--md-sys-color-error);
+    color: var(--md-sys-color-on-error);
+    border-radius: var(--md-sys-shape-corner-small);
+    padding: var(--space-3) var(--space-4);
+    margin: var(--space-4);
+    font: var(--md-sys-typescale-body-medium);
+  }
+
+  /* ── Banner ─────────────────────────────────────────────── */
+  .pseud-banner {
+    width: 100%;
+    height: 180px;
+    border-radius: 0;
+    position: relative;
+  }
+
+  /* ── Info ───────────────────────────────────────────────── */
+  .pseud-info {
+    max-width: 72rem;
+    margin: 0 auto;
+    padding: var(--space-6) var(--space-4) var(--space-0);
+  }
+
+  .pseud-name {
+    font: var(--md-sys-typescale-headline-medium);
+    margin: 0;
+    color: var(--md-sys-color-on-surface);
+  }
+
+  .badge {
+    font: var(--md-sys-typescale-body-small);
+    background: var(--md-sys-color-primary-container);
+    color: var(--md-sys-color-on-primary-container);
+    border-radius: var(--md-sys-shape-corner-full);
+    padding: 2px 10px;
+    margin-left: var(--space-2);
+    vertical-align: middle;
+  }
+
+  .pseud-bio {
+    font: var(--md-sys-typescale-body-large);
+    color: var(--md-sys-color-on-surface-variant);
+    margin: var(--space-2) 0 0 0;
+    line-height: 1.6;
+  }
+
+  .pseud-meta {
+    font: var(--md-sys-typescale-body-small);
+    color: var(--md-sys-color-on-surface-variant);
+    margin: var(--space-2) 0 0 0;
+  }
+
+  /* ── Works ──────────────────────────────────────────────── */
+  .pseud-works {
+    padding: var(--space-8) var(--space-4) 0;
+  }
+
+  .section-heading {
+    font: var(--md-sys-typescale-label-large);
+    color: var(--md-sys-color-on-surface-variant);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    font-size: 0.85rem;
+    margin: 0 0 var(--space-4) 0;
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+  }
+
+  .count-badge {
+    background: var(--md-sys-color-primary-container);
+    color: var(--md-sys-color-on-primary-container);
+    border-radius: var(--md-sys-shape-corner-full);
+    padding: 2px 8px;
+    font-size: 0.75rem;
+  }
+
+  .works-grid {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: var(--space-4);
+  }
+
+  @media (min-width: 640px) {
+    .works-grid {
+      grid-template-columns: repeat(2, 1fr);
+    }
+  }
+
+  .empty-msg {
+    color: var(--md-sys-color-on-surface-variant);
+    font: var(--md-sys-typescale-body-large);
+  }
+</style>

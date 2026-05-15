@@ -32,6 +32,9 @@ const user = Astro.locals.user;
       <div class="app-bar-actions">
         {user ? (
           <>
+            {['founder', 'admin', 'mod'].includes(user.role) && (
+              <a href="/admin/reports" class="nav-link nav-link--admin">Admin</a>
+            )}
             <a href="/studio" class="nav-link">My Works</a>
             <a href="/settings" class="nav-link">Settings</a>
             <form method="POST" action="/api/auth/logout" style="display:inline">
@@ -154,6 +157,14 @@ const user = Astro.locals.user;
     transition: background var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard);
   }
   .nav-link:hover { background: var(--md-sys-color-surface-container); }
+
+  .nav-link--admin {
+    font-weight: 700;
+    background: var(--md-sys-color-error);
+    color: var(--md-sys-color-on-error);
+    border-radius: var(--md-sys-shape-corner-full);
+  }
+  .nav-link--admin:hover { opacity: 0.88; background: var(--md-sys-color-error); color: var(--md-sys-color-on-error); }
 
   .nav-link-btn {
     font: var(--md-sys-typescale-label-large);

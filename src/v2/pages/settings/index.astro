@@ -1,0 +1,413 @@
+---
+/**
+ * User Settings Page — Auth: required
+ * Sections: Profile, Theme, Reading Preferences, Change Password
+ * PUTs to /api/user/profile, POST to /api/user/password
+ */
+export const prerender = false;
+import Base from '../../layouts/Base.astro';
+
+const user = Astro.locals.user;
+
+// Fetch current profile from the API
+let profile: any = null;
+let profileError: string | null = null;
+
+try {
+  const res = await fetch(new URL('/api/user/profile', Astro.url), {
+    headers: { cookie: Astro.request.headers.get('cookie') || '' },
+  });
+  if (res.ok) {
+    const json = await res.json();
+    profile = json.data;
+  } else {
+    profileError = 'Failed to load profile.';
+  }
+} catch {
+  profileError = 'Network error loading profile.';
+}
+
+const themeOptions = ['light', 'dark', 'system'];
+const fontSizeOptions = [
+  { value: 'small', label: 'Small' },
+  { value: 'default', label: 'Default' },
+  { value: 'large', label: 'Large' },
+  { value: 'xlarge', label: 'Extra Large' },
+];
+const skinOptions = [
+  { value: 'author', label: "Author's Choice (default)" },
+  { value: 'default', label: 'Default' },
+  { value: 'typewriter', label: 'Typewriter' },
+  { value: 'manuscript', label: 'Manuscript' },
+  { value: 'terminal', label: 'Terminal' },
+  { value: 'parchment', label: 'Parchment' },
+];
+---
+
+<Base title="Settings — fanfiction.fyi" description="Manage your account settings">
+  <section class="settings-page">
+    <h1 class="page-title">Settings</h1>
+
+    {profileError && <div class="error-banner" role="alert">{profileError}</div>}
+
+    <div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+    {profile && (
+      <>
+        <!-- ── Profile Section ──────────────────────────────── -->
+        <div class="card">
+          <h2 class="card-heading">Profile</h2>
+          <form id="profile-form" class="settings-form">
+            <div class="form-field">
+              <label for="displayName">Display Name</label>
+              <input type="text" id="displayName" name="displayName" value={profile.displayName || ''} maxlength="50" />
+            </div>
+            <div class="form-field">
+              <label for="bio">Bio</label>
+              <textarea id="bio" name="bio" rows="4" maxlength="2000" class="textarea">{profile.bio || ''}</textarea>
+            </div>
+            <div class="form-field">
+              <label for="emailVisibility">Email Visibility</label>
+              <select id="emailVisibility" name="emailVisibility" class="select">
+                <option value="public" selected={profile.emailVisibility === 'public'}>Public</option>
+                <option value="mutual" selected={profile.emailVisibility === 'mutual'}>Mutuals only</option>
+                <option value="private" selected={profile.emailVisibility === 'private'}>Private</option>
+              </select>
+            </div>
+            <button type="submit" class="btn-filled">Save Profile</button>
+          </form>
+        </div>
+
+        <!-- ── Theme Section ────────────────────────────────── -->
+        <div class="card">
+          <h2 class="card-heading">Theme</h2>
+          <form id="theme-form" class="settings-form">
+            <div class="form-field">
+              <label for="theme">Appearance</label>
+              <select id="theme" name="theme" class="select">
+                {themeOptions.map(opt => (
+                  <option value={opt} selected={profile.theme === opt}>{opt.charAt(0).toUpperCase() + opt.slice(1)}</option>
+                ))}
+              </select>
+            </div>
+            <button type="submit" class="btn-filled">Save Theme</button>
+          </form>
+        </div>
+
+        <!-- ── Reading Preferences Section ───────────────────── -->
+        <div class="card">
+          <h2 class="card-heading">Reading Preferences</h2>
+          <form id="reading-form" class="settings-form">
+            <div class="form-field">
+              <label for="readingFontSize">Font Size</label>
+              <select id="readingFontSize" name="readingFontSize" class="select">
+                {fontSizeOptions.map(opt => (
+                  <option value={opt.value} selected={profile.readingFontSize === opt.value}>{opt.label}</option>
+                ))}
+              </select>
+            </div>
+            <div class="form-field">
+              <label for="readingSkinOverride">Reading Skin Override</label>
+              <select id="readingSkinOverride" name="readingSkinOverride" class="select">
+                {skinOptions.map(opt => (
+                  <option value={opt.value} selected={profile.readingSkinOverride === opt.value}>{opt.label}</option>
+                ))}
+              </select>
+            </div>
+            <button type="submit" class="btn-filled">Save Preferences</button>
+          </form>
+        </div>
+
+        <!-- ── Change Password Section ──────────────────────── -->
+        <div class="card">
+          <h2 class="card-heading">Change Password</h2>
+          <form id="password-form" class="settings-form">
+            <div class="form-field">
+              <label for="currentPassword">Current Password</label>
+              <input type="password" id="currentPassword" name="currentPassword" required autocomplete="current-password" />
+            </div>
+            <div class="form-field">
+              <label for="newPassword">New Password</label>
+              <input type="password" id="newPassword" name="newPassword" required minlength="8" autocomplete="new-password" />
+            </div>
+            <div class="form-field">
+              <label for="confirmPassword">Confirm New Password</label>
+              <input type="password" id="confirmPassword" name="confirmPassword" required minlength="8" autocomplete="new-password" />
+            </div>
+            <div id="password-error" class="form-error" role="alert"></div>
+            <button type="submit" class="btn-filled">Change Password</button>
+          </form>
+        </div>
+      </>
+    )}
+  </section>
+</Base>
+
+<script>
+  // ─── Toast helper ──────────────────────────────────────────────────
+  function showToast(message: string, type: 'success' | 'error' = 'success') {
+    const toast = document.getElementById('toast')!;
+    toast.textContent = message;
+    toast.className = `toast toast--${type} toast--show`;
+    setTimeout(() => {
+      toast.className = 'toast';
+    }, 3000);
+  }
+
+  // ─── Profile form ─────────────────────────────────────────────────
+  const profileForm = document.getElementById('profile-form') as HTMLFormElement | null;
+  if (profileForm) {
+    profileForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const body = {
+        displayName: (document.getElementById('displayName') as HTMLInputElement).value,
+        bio: (document.getElementById('bio') as HTMLTextAreaElement).value,
+        emailVisibility: (document.getElementById('emailVisibility') as HTMLSelectElement).value,
+      };
+      try {
+        const res = await fetch('/api/user/profile', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        });
+        if (res.ok) {
+          showToast('Profile saved!');
+        } else {
+          const data = await res.json();
+          showToast(data.error || 'Failed to save profile.', 'error');
+        }
+      } catch {
+        showToast('Network error.', 'error');
+      }
+    });
+  }
+
+  // ─── Theme form ───────────────────────────────────────────────────
+  const themeForm = document.getElementById('theme-form') as HTMLFormElement | null;
+  if (themeForm) {
+    themeForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const body = {
+        theme: (document.getElementById('theme') as HTMLSelectElement).value,
+      };
+      try {
+        const res = await fetch('/api/user/profile', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        });
+        if (res.ok) {
+          showToast('Theme saved!');
+        } else {
+          showToast('Failed to save theme.', 'error');
+        }
+      } catch {
+        showToast('Network error.', 'error');
+      }
+    });
+  }
+
+  // ─── Reading preferences form ─────────────────────────────────────
+  const readingForm = document.getElementById('reading-form') as HTMLFormElement | null;
+  if (readingForm) {
+    readingForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const body = {
+        readingFontSize: (document.getElementById('readingFontSize') as HTMLSelectElement).value,
+        readingSkinOverride: (document.getElementById('readingSkinOverride') as HTMLSelectElement).value,
+      };
+      try {
+        const res = await fetch('/api/user/profile', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        });
+        if (res.ok) {
+          showToast('Reading preferences saved!');
+        } else {
+          showToast('Failed to save preferences.', 'error');
+        }
+      } catch {
+        showToast('Network error.', 'error');
+      }
+    });
+  }
+
+  // ─── Password form ────────────────────────────────────────────────
+  const passwordForm = document.getElementById('password-form') as HTMLFormElement | null;
+  const passwordError = document.getElementById('password-error');
+  if (passwordForm) {
+    passwordForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      if (passwordError) passwordError.textContent = '';
+
+      const currentPassword = (document.getElementById('currentPassword') as HTMLInputElement).value;
+      const newPassword = (document.getElementById('newPassword') as HTMLInputElement).value;
+      const confirmPassword = (document.getElementById('confirmPassword') as HTMLInputElement).value;
+
+      if (newPassword !== confirmPassword) {
+        if (passwordError) passwordError.textContent = 'New passwords do not match.';
+        return;
+      }
+      if (newPassword.length < 8) {
+        if (passwordError) passwordError.textContent = 'New password must be at least 8 characters.';
+        return;
+      }
+
+      try {
+        const res = await fetch('/api/user/password', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ currentPassword, newPassword }),
+        });
+        if (res.ok) {
+          showToast('Password changed!');
+          passwordForm.reset();
+        } else {
+          const data = await res.json();
+          showToast(data.error || 'Failed to change password.', 'error');
+          if (passwordError) passwordError.textContent = data.error || '';
+        }
+      } catch {
+        showToast('Network error.', 'error');
+      }
+    });
+  }
+</script>
+
+<style is:global>
+  .settings-page {
+    max-width: 48rem;
+    margin: 0 auto;
+    padding: var(--space-8) var(--space-4);
+  }
+
+  .page-title {
+    font: var(--md-sys-typescale-headline-medium);
+    margin: 0 0 var(--space-8) 0;
+  }
+
+  .error-banner {
+    background: var(--md-sys-color-error);
+    color: var(--md-sys-color-on-error);
+    border-radius: var(--md-sys-shape-corner-small);
+    padding: var(--space-3) var(--space-4);
+    margin-bottom: var(--space-6);
+    font: var(--md-sys-typescale-body-medium);
+  }
+
+  /* ─── Toast ──────────────────────────────────────────────── */
+  .toast {
+    position: fixed;
+    bottom: var(--space-8);
+    left: 50%;
+    transform: translateX(-50%) translateY(100px);
+    border-radius: var(--md-sys-shape-corner-small);
+    padding: var(--space-3) var(--space-6);
+    font: var(--md-sys-typescale-body-medium);
+    z-index: 1000;
+    opacity: 0;
+    transition: transform 0.3s var(--md-sys-motion-easing-standard), opacity 0.3s var(--md-sys-motion-easing-standard);
+    pointer-events: none;
+  }
+  .toast--show {
+    transform: translateX(-50%) translateY(0);
+    opacity: 1;
+  }
+  .toast--success {
+    background: var(--md-sys-color-primary-container);
+    color: var(--md-sys-color-on-primary-container);
+  }
+  .toast--error {
+    background: var(--md-sys-color-error);
+    color: var(--md-sys-color-on-error);
+  }
+
+  /* ─── Card ───────────────────────────────────────────────── */
+  .card {
+    background: var(--md-sys-color-surface-container);
+    border: 1px solid var(--md-sys-color-outline-variant);
+    border-radius: var(--md-sys-shape-corner-large);
+    padding: var(--space-6);
+    margin-bottom: var(--space-6);
+  }
+
+  .card-heading {
+    font: var(--md-sys-typescale-title-large);
+    margin: 0 0 var(--space-4) 0;
+    color: var(--md-sys-color-on-surface);
+  }
+
+  /* ─── Form ───────────────────────────────────────────────── */
+  .settings-form {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-4);
+  }
+
+  .form-field {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+  }
+
+  .form-field label {
+    font: var(--md-sys-typescale-label-large);
+    color: var(--md-sys-color-on-surface-variant);
+  }
+
+  .form-field input,
+  .form-field .select,
+  .form-field .textarea {
+    font: var(--md-sys-typescale-body-large);
+    color: var(--md-sys-color-on-surface);
+    background: var(--md-sys-color-surface);
+    border: 1px solid var(--md-sys-color-outline-variant);
+    border-radius: var(--md-sys-shape-corner-small);
+    padding: var(--space-3) var(--space-4);
+    outline: none;
+    transition: border-color var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard);
+  }
+
+  .form-field input:focus,
+  .form-field .select:focus,
+  .form-field .textarea:focus {
+    border-color: var(--md-sys-color-primary);
+  }
+
+  .textarea {
+    resize: vertical;
+    min-height: 5rem;
+    font-family: inherit;
+  }
+
+  .select {
+    appearance: none;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%2349454f' d='M6 8L1 3h10z'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right var(--space-4) center;
+    padding-right: var(--space-12);
+  }
+
+  .form-error {
+    font: var(--md-sys-typescale-body-small);
+    color: var(--md-sys-color-error);
+    min-height: 1.2em;
+  }
+
+  .btn-filled {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font: var(--md-sys-typescale-label-large);
+    color: var(--md-sys-color-on-primary);
+    background: var(--md-sys-color-primary);
+    border: none;
+    border-radius: var(--md-sys-shape-corner-full);
+    padding: var(--space-3) var(--space-8);
+    cursor: pointer;
+    transition: opacity var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard);
+  }
+  .btn-filled:hover { opacity: 0.88; }
+  .btn-filled:disabled { opacity: 0.5; cursor: not-allowed; }
+</style>

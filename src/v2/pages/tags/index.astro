@@ -1,0 +1,260 @@
+---
+/**
+ * Tag Browse Page — Public
+ * Fetches tags from /api/tags, groups by type, links to search.
+ */
+export const prerender = false;
+export const config = { auth: 'public' };
+import Base from '../../layouts/Base.astro';
+
+type TagType = 'fandom' | 'character' | 'relationship' | 'rating' | 'warning' | 'category' | 'freeform';
+
+const tagTypes: { type: TagType; label: string }[] = [
+  { type: 'fandom', label: 'Fandoms' },
+  { type: 'character', label: 'Characters' },
+  { type: 'relationship', label: 'Relationships' },
+  { type: 'rating', label: 'Ratings' },
+  { type: 'warning', label: 'Warnings' },
+  { type: 'category', label: 'Categories' },
+  { type: 'freeform', label: 'Freeform Tags' },
+];
+
+// Read type filter from URL
+const activeType = Astro.url.searchParams.get('type') || '';
+const searchQuery = Astro.url.searchParams.get('q') || '';
+
+// Fetch tags from API
+let tagsByType: Record<string, any[]> = {};
+let totalTags = 0;
+let errorMsg: string | null = null;
+
+try {
+  const params = new URLSearchParams({ limit: '100' });
+  if (activeType) params.set('type', activeType);
+  if (searchQuery) params.set('q', searchQuery);
+
+  const res = await fetch(new URL(`/api/tags?${params.toString()}`, Astro.url));
+  if (res.ok) {
+    const json = await res.json();
+    const allTags = json.data || [];
+    totalTags = json.total || 0;
+
+    // Group by type
+    for (const tag of allTags) {
+      if (!tagsByType[tag.type]) tagsByType[tag.type] = [];
+      tagsByType[tag.type].push(tag);
+    }
+  } else {
+    errorMsg = 'Failed to load tags.';
+  }
+} catch {
+  errorMsg = 'Network error loading tags.';
+}
+
+function tagSearchUrl(tag: any): string {
+  // Map tag type to the search param name
+  const typeToParam: Record<string, string> = {
+    fandom: 'fandom',
+    character: 'character',
+    relationship: 'relationship',
+    rating: 'rating',
+    warning: 'warning',
+    category: 'category',
+    freeform: 'q',
+  };
+  const param = typeToParam[tag.type] || 'q';
+  return `/search?${param}=${encodeURIComponent(tag.name)}`;
+}
+---
+
+<Base title="Browse Tags — fanfiction.fyi" description="Browse tags by type on fanfiction.fyi">
+  <section class="tags-page">
+    <h1 class="page-title">Browse Tags</h1>
+
+    {errorMsg && <div class="error-banner" role="alert">{errorMsg}</div>}
+
+    <!-- ── Search + Type Filter ──────────────────────────────── -->
+    <div class="filter-bar">
+      <form method="GET" class="filter-form">
+        <div class="search-row">
+          <input
+            type="text"
+            name="q"
+            class="search-input"
+            placeholder="Search tags…"
+            value={searchQuery}
+            aria-label="Search tags"
+          />
+          <button type="submit" class="btn-filled btn-sm">Search</button>
+        </div>
+        <div class="type-chips" id="type-chips">
+          <button type="submit" name="type" value="" class:list={['type-chip', !activeType && 'type-chip--active']}>All</button>
+          {tagTypes.map(tt => (
+            <button type="submit" name="type" value={tt.type} class:list={['type-chip', activeType === tt.type && 'type-chip--active']}>{tt.label}</button>
+          ))}
+        </div>
+      </form>
+    </div>
+
+    {totalTags > 0 && (
+      <p class="results-meta">{totalTags} tag{totalTags !== 1 ? 's' : ''} found</p>
+    )}
+
+    <!-- ── Tag Groups ────────────────────────────────────────── -->
+    {(!activeType ? tagTypes : tagTypes.filter(tt => tt.type === activeType)).map(tt => {
+      const group = tagsByType[tt.type];
+      if (!group || group.length === 0) return null;
+      return (
+        <div class="tag-group">
+          <h2 class="tag-group-heading">{tt.label}</h2>
+          <div class="tag-grid">
+            {group.map((tag: any) => (
+              <a href={tagSearchUrl(tag)} class="tag-pill">{tag.name}</a>
+            ))}
+          </div>
+        </div>
+      );
+    })}
+
+    {Object.keys(tagsByType).length === 0 && !errorMsg && (
+      <p class="empty-msg">No tags found. Try a different search or filter.</p>
+    )}
+  </section>
+</Base>
+
+<style is:global>
+  .tags-page {
+    max-width: 72rem;
+    margin: 0 auto;
+    padding: var(--space-8) var(--space-4);
+  }
+
+  .page-title {
+    font: var(--md-sys-typescale-headline-medium);
+    margin: 0 0 var(--space-6) 0;
+  }
+
+  .error-banner {
+    background: var(--md-sys-color-error);
+    color: var(--md-sys-color-on-error);
+    border-radius: var(--md-sys-shape-corner-small);
+    padding: var(--space-3) var(--space-4);
+    margin-bottom: var(--space-6);
+    font: var(--md-sys-typescale-body-medium);
+  }
+
+  /* ── Filter Bar ──────────────────────────────────────────── */
+  .filter-bar {
+    margin-bottom: var(--space-6);
+  }
+
+  .filter-form {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-3);
+  }
+
+  .search-row {
+    display: flex;
+    gap: var(--space-2);
+  }
+
+  .search-input {
+    flex: 1;
+    font: var(--md-sys-typescale-body-large);
+    color: var(--md-sys-color-on-surface);
+    background: var(--md-sys-color-surface-container);
+    border: 1px solid var(--md-sys-color-outline-variant);
+    border-radius: var(--md-sys-shape-corner-small);
+    padding: var(--space-3) var(--space-4);
+    outline: none;
+    transition: border-color var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard);
+  }
+  .search-input:focus { border-color: var(--md-sys-color-primary); }
+
+  .type-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-2);
+  }
+
+  .type-chip {
+    font: var(--md-sys-typescale-label-large);
+    color: var(--md-sys-color-on-surface-variant);
+    background: var(--md-sys-color-surface-container);
+    border: 1px solid var(--md-sys-color-outline-variant);
+    border-radius: var(--md-sys-shape-corner-full);
+    padding: var(--space-2) var(--space-4);
+    cursor: pointer;
+    text-decoration: none;
+    transition: background var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard),
+                border-color var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard);
+  }
+  .type-chip:hover {
+    background: var(--md-sys-color-surface-container-high);
+  }
+  .type-chip--active {
+    background: var(--md-sys-color-primary);
+    color: var(--md-sys-color-on-primary);
+    border-color: var(--md-sys-color-primary);
+  }
+
+  .btn-sm {
+    padding: var(--space-2) var(--space-6);
+  }
+
+  .results-meta {
+    font: var(--md-sys-typescale-body-medium);
+    color: var(--md-sys-color-on-surface-variant);
+    margin: 0 0 var(--space-4) 0;
+  }
+
+  /* ── Tag Groups ─────────────────────────────────────────── */
+  .tag-group {
+    margin-bottom: var(--space-8);
+  }
+
+  .tag-group-heading {
+    font: var(--md-sys-typescale-title-large);
+    color: var(--md-sys-color-on-surface);
+    margin: 0 0 var(--space-4) 0;
+    font-size: 1.1rem;
+  }
+
+  .tag-grid {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-2);
+  }
+
+  .tag-pill {
+    font: var(--md-sys-typescale-body-medium);
+    color: var(--md-sys-color-on-primary-container);
+    background: var(--md-sys-color-primary-container);
+    border-radius: var(--md-sys-shape-corner-full);
+    padding: var(--space-2) var(--space-4);
+    text-decoration: none;
+    transition: opacity var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard);
+  }
+  .tag-pill:hover { opacity: 0.85; }
+
+  .empty-msg {
+    color: var(--md-sys-color-on-surface-variant);
+    font: var(--md-sys-typescale-body-large);
+  }
+
+  .btn-filled {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font: var(--md-sys-typescale-label-large);
+    color: var(--md-sys-color-on-primary);
+    background: var(--md-sys-color-primary);
+    border: none;
+    border-radius: var(--md-sys-shape-corner-full);
+    padding: var(--space-3) var(--space-8);
+    cursor: pointer;
+    transition: opacity var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard);
+  }
+  .btn-filled:hover { opacity: 0.88; }
+</style>
