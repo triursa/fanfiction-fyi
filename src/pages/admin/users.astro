@@ -1,345 +1,291 @@
 ---
+/**
+ * Admin User Management Page — Auth: required, admin+ only
+ * Table of users with columns: email, displayName, role, approved, banned, created.
+ * Actions: approve, ban/suspend, change role.
+ */
 export const prerender = false;
-import Base from '@/layouts/Base.astro';
-import { getDrizzle } from '@/lib/db';
-import { UserRole, ROLE_LEVEL } from '@/lib/types';
-import { users, sessions } from '@/lib/schema';
-import { eq, and, gt, sql } from 'drizzle-orm';
+import Base from '@/v2/layouts/Base.astro';
+import type { D1Database } from '@cloudflare/workers-types';
+import { getDb } from '@/v2/lib/db';
+import { users } from '@/v2/lib/schema/index';
+import { desc } from 'drizzle-orm';
 
-// Auth gate: admin+ required
-const cookie = Astro.request.headers.get('cookie') ?? '';
-const sessionMatch = cookie.match(/session=([a-f0-9]+)/);
-if (!sessionMatch) return Astro.redirect('/login');
+const user = Astro.locals.user;
 
-const d1 = Astro.locals.runtime.env.DB as D1Database;
-const db = getDrizzle(d1);
-const session = await db.select({ userId: sessions.userId }).from(sessions).where(and(eq(sessions.token, sessionMatch[1]), gt(sessions.expiresAt, sql`datetime('now')`))).get();
-if (!session) return Astro.redirect('/login');
-
-const currentUser = await db.select({ id: users.id, email: users.email, role: users.role }).from(users).where(eq(users.id, session.userId)).get();
-if (!currentUser) return Astro.redirect('/login');
-
-const userLevel = ROLE_LEVEL[currentUser.role as UserRole] ?? 0;
-if (userLevel < ROLE_LEVEL[UserRole.Admin]) return Astro.redirect('/');
-
-const allUsers = await db.select({
-  id: users.id,
-  email: users.email,
-  role: users.role,
-  createdAt: users.createdAt,
-  googleId: users.googleId,
-  banned: users.banned,
-  approved: users.approved,
-  suspendedUntil: users.suspendedUntil,
-}).from(users).orderBy(sql`CASE WHEN ${users.approved} = 0 THEN 0 ELSE 1 END, ${users.id}`);
-
-const allRoles: UserRole[] = [UserRole.Admin, UserRole.Mod, UserRole.User];
-
-// Helper: is a suspension currently active?
-function isSuspended(suspendedUntil: string | null): boolean {
-  if (!suspendedUntil) return false;
-  return Date.now() < new Date(suspendedUntil + 'Z').getTime();
+// Auth check: admin+ only
+if (!user || !['founder', 'admin'].includes(user.role)) {
+  return Astro.redirect('/login');
 }
+
+const d1 = locals.runtime.env.DB as D1Database;
+const db = getDb(d1);
+
+// Fetch users for server-side render (initial page)
+const url = new URL(Astro.request.url);
+const page = Math.max(1, Number(url.searchParams.get('page')) || 1);
+const limit = 20;
+const roleFilter = url.searchParams.get('role') || '';
+const approvedFilter = url.searchParams.get('approved') || '';
+
+// Build query conditions
+import { eq, and } from 'drizzle-orm';
+
+const conditions = [];
+if (roleFilter && ['founder', 'admin', 'mod', 'user'].includes(roleFilter)) {
+  conditions.push(eq(users.role, roleFilter));
+}
+if (approvedFilter === '0') {
+  conditions.push(eq(users.approved, 0));
+} else if (approvedFilter === '1') {
+  conditions.push(eq(users.approved, 1));
+}
+const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
+
+import { count } from 'drizzle-orm';
+
+const [{ total }] = await db.select({ total: count() }).from(users).where(whereClause);
+const totalPages = Math.ceil(total / limit);
+
+const userRows = await db
+  .select({
+    id: users.id,
+    email: users.email,
+    displayName: users.displayName,
+    role: users.role,
+    approved: users.approved,
+    banned: users.banned,
+    suspendedUntil: users.suspendedUntil,
+    createdAt: users.createdAt,
+  })
+  .from(users)
+  .where(whereClause)
+  .orderBy(desc(users.createdAt))
+  .limit(limit)
+  .offset((page - 1) * limit);
+
+const roleOptions = ['user', 'mod', 'admin', 'founder'];
 ---
 
-<Base title="User Management — Admin">
-  <h1 class="admin-heading">User Management</h1>
+<Base title="Admin: Users — fanfiction.fyi" description="Manage users">
+  <section class="admin-page">
+    <h1 class="page-title">User Management</h1>
 
-  <div class="table-wrap">
-    <table class="admin-table">
-      <thead>
-        <tr>
-          <th>ID</th>
-          <th>Email</th>
-          <th>Role</th>
-          <th>Google</th>
-          <th>Status</th>
-          <th>Created</th>
-          <th>Actions</th>
-        </tr>
-      </thead>
-      <tbody>
-        {allUsers.map(u => (
-          <tr class:row-banned={u.banned === 1} class:row-suspended={!u.banned && isSuspended(u.suspendedUntil)} class:row-pending={u.approved === 0 && u.banned === 0 && !isSuspended(u.suspendedUntil)}>
-            <td>{u.id}</td>
-            <td>{u.email}</td>
-            <td>
-              {u.role === 'founder' ? (
-                <span class="badge badge-founder">founder</span>
-              ) : (
-                <select class="role-select" data-user-id={u.id} data-current-role={u.role}>
-                  {allRoles.map(r => (
-                    <option value={r} selected={u.role === r}>{r}</option>
-                  ))}
-                </select>
-              )}
-            </td>
-            <td>{u.googleId ? '✓' : '—'}</td>
-            <td>
-              {u.banned ? (
-                <span class="badge badge-banned">Banned</span>
-              ) : isSuspended(u.suspendedUntil) ? (
-                <span class="badge badge-suspended">Suspended</span>
-              ) : u.approved ? (
-                <span class="badge badge-approved">Approved</span>
-              ) : (
-                <span class="badge badge-pending">Pending</span>
-              )}
-            </td>
-            <td>{new Date(u.createdAt).toLocaleDateString()}</td>
-            <td class="actions-cell">
-              {u.role !== 'founder' && (
-                <>
-                  {u.approved === 0 && !u.banned && !isSuspended(u.suspendedUntil) && (
-                    <button
-                      class="btn-approve"
-                      data-user-id={u.id}
-                      data-approved="0"
-                    >
-                      Approve
-                    </button>
-                  )}
-                  {u.approved === 1 && !u.banned && !isSuspended(u.suspendedUntil) && (
-                    <button
-                      class="btn-reject"
-                      data-user-id={u.id}
-                      data-approved="1"
-                    >
-                      Revoke
-                    </button>
-                  )}
-                  {u.banned ? (
-                    <button
-                      class="btn-activate"
-                      data-user-id={u.id}
-                      data-banned={u.banned}
-                    >
-                      Unban
-                    </button>
-                  ) : isSuspended(u.suspendedUntil) ? (
-                    <button
-                      class="btn-activate"
-                      data-user-id={u.id}
-                      data-action="unsuspend"
-                    >
-                      Lift Suspension
-                    </button>
-                  ) : (
-                    <button
-                      class="btn-suspend"
-                      data-user-id={u.id}
-                      data-action="suspend"
-                    >
-                      Suspend
-                    </button>
-                  )}
-                </>
-              )}
-            </td>
-          </tr>
-        ))}
-      </tbody>
-    </table>
-  </div>
+    <nav class="admin-nav" aria-label="Admin sections">
+      <a href="/admin/users" class="admin-nav-link admin-nav-link--active">Users</a>
+      <a href="/admin/invite-codes" class="admin-nav-link">Invite Codes</a>
+      <a href="/admin/reports" class="admin-nav-link">Reports</a>
+    </nav>
 
-  <div id="toast" class="toast hidden"></div>
+    <div id="toast" class="toast" role="status" aria-live="polite"></div>
 
-  <div id="suspend-dialog" class="suspend-dialog hidden">
-    <div class="suspend-dialog-content">
-      <h3>Suspend User</h3>
-      <div class="form-field">
-        <label for="suspend-duration">Duration</label>
-        <select id="suspend-duration">
-          <option value="1">1 hour</option>
-          <option value="6">6 hours</option>
-          <option value="12">12 hours</option>
-          <option value="24" selected>24 hours</option>
-          <option value="72">72 hours (3 days)</option>
-          <option value="168">168 hours (1 week)</option>
-        </select>
-      </div>
-      <div class="form-field">
-        <label for="suspend-reason">Reason (optional)</label>
-        <input type="text" id="suspend-reason" placeholder="Reason for suspension" />
-      </div>
-      <div class="suspend-dialog-actions">
-        <button id="suspend-confirm" class="btn-suspend-confirm">Confirm</button>
-        <button id="suspend-cancel" class="btn-suspend-cancel">Cancel</button>
-      </div>
+    <!-- ── Filters ────────────────────────────────────────── -->
+    <div class="filter-bar">
+      <form method="GET" class="filter-form">
+        <div class="form-field">
+          <label for="role-filter">Role</label>
+          <select id="role-filter" name="role" class="select">
+            <option value="">All roles</option>
+            {roleOptions.map(r => <option value={r} selected={roleFilter === r}>{r.charAt(0).toUpperCase() + r.slice(1)}</option>)}
+          </select>
+        </div>
+        <div class="form-field">
+          <label for="approved-filter">Approval</label>
+          <select id="approved-filter" name="approved" class="select">
+            <option value="">All</option>
+            <option value="1" selected={approvedFilter === '1'}>Approved</option>
+            <option value="0" selected={approvedFilter === '0'}>Unapproved</option>
+          </select>
+        </div>
+        <button type="submit" class="btn-filled">Filter</button>
+      </form>
     </div>
-  </div>
+
+    <!-- ── Users Table ──────────────────────────────────────── -->
+    <div class="card">
+      <div class="table-wrapper">
+        <table class="admin-table">
+          <thead>
+            <tr>
+              <th>Email</th>
+              <th>Display Name</th>
+              <th>Role</th>
+              <th>Status</th>
+              <th>Created</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {userRows.map(u => (
+              <tr data-user-id={u.id} data-email={u.email}>
+                <td class="email-cell">{u.email}</td>
+                <td>{u.displayName || '—'}</td>
+                <td>
+                  <select class="role-select select" data-user-id={u.id}>
+                    {roleOptions.map(r => <option value={r} selected={u.role === r}>{r}</option>)}
+                  </select>
+                </td>
+                <td>
+                  {u.banned ? (
+                    <span class="badge badge-error">Banned</span>
+                  ) : u.suspendedUntil && new Date(u.suspendedUntil) > new Date() ? (
+                    <span class="badge badge-warning">Suspended until {new Date(u.suspendedUntil).toLocaleDateString()}</span>
+                  ) : !u.approved ? (
+                    <span class="badge badge-muted">Unapproved</span>
+                  ) : (
+                    <span class="badge badge-success">Active</span>
+                  )}
+                </td>
+                <td class="date-cell">{new Date(u.createdAt).toLocaleDateString()}</td>
+                <td class="actions-cell">
+                  {!u.approved && (
+                    <button class="btn-sm btn-success" data-action="approve" data-user-id={u.id}>Approve</button>
+                  )}
+                  {!u.banned ? (
+                    <button class="btn-sm btn-warning" data-action="ban" data-user-id={u.id}>Ban</button>
+                  ) : (
+                    <button class="btn-sm btn-muted" data-action="unban" data-user-id={u.id}>Unban</button>
+                  )}
+                </td>
+              </tr>
+            ))}
+            {userRows.length === 0 && (
+              <tr><td colspan="6" class="empty-state">No users found.</td></tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+
+      <!-- ── Pagination ─────────────────────────────────────── -->
+      {totalPages > 1 && (
+        <nav class="pagination" aria-label="Pagination">
+          {page > 1 && <a href={`?page=${page - 1}${roleFilter ? `&role=${roleFilter}` : ''}${approvedFilter ? `&approved=${approvedFilter}` : ''}`} class="btn-sm">Previous</a>}
+          <span class="pagination-info">Page {page} of {totalPages}</span>
+          {page < totalPages && <a href={`?page=${page + 1}${roleFilter ? `&role=${roleFilter}` : ''}${approvedFilter ? `&approved=${approvedFilter}` : ''}`} class="btn-sm">Next</a>}
+        </nav>
+      )}
+    </div>
+  </section>
 </Base>
 
 <script>
-  // Role change handler
-  document.querySelectorAll('.role-select').forEach(sel => {
-    sel.addEventListener('change', async (e) => {
-      const select = e.target;
-      const userId = select.dataset.userId;
-      const role = select.value;
-      try {
-        const res = await fetch(`/api/admin/users/${userId}/role`, {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ role }),
-        });
-        if (!res.ok) {
-          const err = await res.json();
-          showToast(err.error || 'Failed to update role', true);
-          select.value = select.dataset.currentRole;
-        } else {
-          select.dataset.currentRole = role;
-          showToast('Role updated');
-        }
-      } catch {
-        showToast('Network error', true);
-        select.value = select.dataset.currentRole;
-      }
-    });
-  });
+  function showToast(message: string, type: 'success' | 'error' = 'success') {
+    const toast = document.getElementById('toast')!;
+    toast.textContent = message;
+    toast.className = `toast toast--${type} toast--show`;
+    setTimeout(() => { toast.className = 'toast'; }, 3000);
+  }
 
-  // Ban/activate handler
-  document.querySelectorAll('.btn-ban, .btn-activate').forEach(btn => {
-    btn.addEventListener('click', async (e) => {
-      const button = e.target as HTMLButtonElement;
-      const userId = button.dataset.userId;
-      const currentlyBanned = button.dataset.banned === '1';
-      const newBanned = currentlyBanned ? 0 : 1;
-      try {
-        const res = await fetch(`/api/admin/users/${userId}/role`, {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ banned: newBanned }),
-        });
-        if (!res.ok) {
-          const err = await res.json();
-          showToast(err.error || 'Failed to update status', true);
-        } else {
-          // Reload to reflect all status changes
-          window.location.reload();
-        }
-      } catch {
-        showToast('Network error', true);
-      }
-    });
-  });
-
-  // Approve/revoke handler
-  document.querySelectorAll('.btn-approve, .btn-reject').forEach(btn => {
-    btn.addEventListener('click', async (e) => {
-      const button = e.target as HTMLButtonElement;
-      const userId = button.dataset.userId;
-      const currentlyApproved = button.dataset.approved === '1';
-      const newApproved = currentlyApproved ? 0 : 1;
-      try {
-        const res = await fetch(`/api/admin/users/${userId}/role`, {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ approved: newApproved }),
-        });
-        if (!res.ok) {
-          const err = await res.json();
-          showToast(err.error || 'Failed to update approval', true);
-        } else {
-          // Reload to reflect all status changes
-          window.location.reload();
-        }
-      } catch {
-        showToast('Network error', true);
-      }
-    });
-  });
-
-  // Unsuspend handler
-  document.querySelectorAll('[data-action="unsuspend"]').forEach(btn => {
-    btn.addEventListener('click', async (e) => {
-      const button = e.target as HTMLButtonElement;
-      const userId = button.dataset.userId;
-      try {
-        const res = await fetch(`/api/admin/users/${userId}/unsuspend`, {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-        });
-        if (!res.ok) {
-          const err = await res.json();
-          showToast(err.error || 'Failed to lift suspension', true);
-        } else {
-          window.location.reload();
-        }
-      } catch {
-        showToast('Network error', true);
-      }
-    });
-  });
-
-  // Suspend handler — opens dialog
-  let pendingSuspendUserId: string | null = null;
-  const suspendDialog = document.getElementById('suspend-dialog')!;
-  const suspendDuration = document.getElementById('suspend-duration') as HTMLSelectElement;
-  const suspendReason = document.getElementById('suspend-reason') as HTMLInputElement;
-  const suspendConfirm = document.getElementById('suspend-confirm') as HTMLButtonElement;
-  const suspendCancel = document.getElementById('suspend-cancel') as HTMLButtonElement;
-
-  document.querySelectorAll('[data-action="suspend"]').forEach(btn => {
-    btn.addEventListener('click', (e) => {
-      const button = e.target as HTMLButtonElement;
-      pendingSuspendUserId = button.dataset.userId!;
-      suspendDuration.value = '24';
-      suspendReason.value = '';
-      suspendDialog.classList.remove('hidden');
-    });
-  });
-
-  suspendCancel.addEventListener('click', () => {
-    suspendDialog.classList.add('hidden');
-    pendingSuspendUserId = null;
-  });
-
-  suspendConfirm.addEventListener('click', async () => {
-    if (!pendingSuspendUserId) return;
-    const duration = Number(suspendDuration.value);
-    const body: Record<string, any> = { duration };
-    const reason = suspendReason.value.trim();
-    if (reason) body.reason = reason;
-
-    suspendConfirm.disabled = true;
+  async function adminAction(userId: number, action: string, extra?: Record<string, string>) {
+    const body: any = { userId, action, ...extra };
     try {
-      const res = await fetch(`/api/admin/users/${pendingSuspendUserId}/suspend`, {
-        method: 'PUT',
+      const res = await fetch('/api/admin/users', {
+        method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
       });
-      if (!res.ok) {
-        const err = await res.json();
-        showToast(err.error || 'Failed to suspend user', true);
+      if (res.ok) {
+        showToast('Action completed successfully.');
+        setTimeout(() => window.location.reload(), 800);
       } else {
-        window.location.reload();
+        const data = await res.json();
+        showToast(data.error || 'Action failed.', 'error');
       }
     } catch {
-      showToast('Network error', true);
-    } finally {
-      suspendConfirm.disabled = false;
-      suspendDialog.classList.add('hidden');
-      pendingSuspendUserId = null;
+      showToast('Network error.', 'error');
     }
+  }
+
+  // Action buttons
+  document.querySelectorAll('[data-action]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const userId = Number((btn as HTMLElement).dataset.userId);
+      const action = (btn as HTMLElement).dataset.action!;
+      if (action === 'suspend') {
+        const until = prompt('Suspend until (ISO date, e.g. 2026-12-31T00:00:00Z):');
+        if (!until) return;
+        adminAction(userId, action, { until });
+      } else {
+        adminAction(userId, action);
+      }
+    });
   });
 
-  function showToast(msg, isError = false) {
-    const toast = document.getElementById('toast');
-    toast.textContent = msg;
-    toast.className = 'toast' + (isError ? ' toast-error' : '') + ' toast-show';
-    setTimeout(() => { toast.className = 'toast hidden'; }, 2500);
-  }
+  // Role change selects
+  document.querySelectorAll('.role-select').forEach(select => {
+    (select as HTMLSelectElement).addEventListener('change', () => {
+      const userId = Number((select as HTMLElement).dataset.userId);
+      const role = (select as HTMLSelectElement).value;
+      adminAction(userId, 'changeRole', { role });
+    });
+  });
 </script>
 
-<style>
-  .admin-heading {
-    font: var(--md-sys-typescale-headline-large);
-    color: var(--md-sys-color-on-surface);
+<style is:global>
+  .admin-page {
+    max-width: 72rem;
+    margin: 0 auto;
+    padding: var(--space-8) var(--space-4);
+  }
+
+  .page-title {
+    font: var(--md-sys-typescale-headline-medium);
+    margin: 0 0 var(--space-4) 0;
+  }
+
+  .admin-nav {
+    display: flex;
+    gap: var(--space-2);
+    margin-bottom: var(--space-6);
+    border-bottom: 1px solid var(--md-sys-color-outline-variant);
+    padding-bottom: var(--space-2);
+  }
+
+  .admin-nav-link {
+    font: var(--md-sys-typescale-label-large);
+    color: var(--md-sys-color-on-surface-variant);
+    text-decoration: none;
+    padding: var(--space-1) var(--space-3);
+    border-radius: var(--md-sys-shape-corner-small);
+    transition: background var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard);
+  }
+  .admin-nav-link:hover { background: var(--md-sys-color-surface-container); }
+  .admin-nav-link--active {
+    color: var(--md-sys-color-primary);
+    background: var(--md-sys-color-primary-container);
+    font-weight: 600;
+  }
+
+  .filter-bar {
     margin-bottom: var(--space-6);
   }
 
-  .table-wrap {
+  .filter-form {
+    display: flex;
+    gap: var(--space-4);
+    align-items: flex-end;
+    flex-wrap: wrap;
+  }
+
+  .form-field {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+  }
+
+  .form-field label {
+    font: var(--md-sys-typescale-body-small);
+    color: var(--md-sys-color-on-surface-variant);
+  }
+
+  .card {
+    background: var(--md-sys-color-surface-container);
+    border: 1px solid var(--md-sys-color-outline-variant);
+    border-radius: var(--md-sys-shape-corner-large);
+    padding: var(--space-6);
+  }
+
+  .table-wrapper {
     overflow-x: auto;
   }
 
@@ -347,7 +293,6 @@ function isSuspended(suspendedUntil: string | null): boolean {
     width: 100%;
     border-collapse: collapse;
     font: var(--md-sys-typescale-body-medium);
-    color: var(--md-sys-color-on-surface);
   }
 
   .admin-table th {
@@ -356,239 +301,124 @@ function isSuspended(suspendedUntil: string | null): boolean {
     text-align: left;
     padding: var(--space-3) var(--space-4);
     border-bottom: 2px solid var(--md-sys-color-outline-variant);
-    white-space: nowrap;
   }
 
   .admin-table td {
     padding: var(--space-3) var(--space-4);
     border-bottom: 1px solid var(--md-sys-color-outline-variant);
+    vertical-align: middle;
+  }
+
+  .email-cell {
+    font: var(--md-sys-typescale-body-medium);
+    max-width: 200px;
+    overflow: hidden;
+    text-overflow: ellipsis;
     white-space: nowrap;
   }
 
-  .row-banned {
-    background: rgba(255, 100, 100, 0.1);
-  }
-
-  .row-pending {
-    background: rgba(255, 200, 50, 0.08);
-  }
-
-  .badge {
-    display: inline-block;
-    padding: 2px 8px;
-    border-radius: var(--md-sys-shape-corner-small);
-    font: var(--md-sys-typescale-label-large);
-  }
-
-  .badge-founder {
-    background: var(--md-sys-color-primary-container);
-    color: var(--md-sys-color-on-primary-container);
-  }
-
-  .badge-approved {
-    background: rgba(52, 168, 83, 0.15);
-    color: #1b7a30;
-  }
-
-  .badge-pending {
-    background: rgba(255, 200, 50, 0.2);
-    color: #8a6d00;
-  }
-
-  .badge-banned {
-    background: var(--md-sys-color-error-container);
-    color: var(--md-sys-color-on-error-container);
-  }
-
-  .role-select {
-    background: var(--md-sys-color-surface-container-high);
-    color: var(--md-sys-color-on-surface);
-    border: 1px solid var(--md-sys-color-outline);
-    border-radius: var(--md-sys-shape-corner-small);
-    padding: var(--space-1) var(--space-2);
-    font: var(--md-sys-typescale-body-medium);
-    cursor: pointer;
-  }
-
-  .btn-ban, .btn-activate, .btn-approve, .btn-reject, .btn-suspend {
-    border: none;
-    border-radius: var(--md-sys-shape-corner-small);
-    padding: var(--space-1) var(--space-3);
-    font: var(--md-sys-typescale-label-large);
-    cursor: pointer;
-    transition: background var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard);
+  .date-cell {
+    white-space: nowrap;
+    color: var(--md-sys-color-on-surface-variant);
   }
 
   .actions-cell {
     display: flex;
     gap: var(--space-2);
-    align-items: center;
+    flex-wrap: wrap;
   }
 
-  .btn-ban {
-    background: var(--md-sys-color-error-container);
-    color: var(--md-sys-color-on-error-container);
+  .badge {
+    display: inline-block;
+    font: var(--md-sys-typescale-body-small);
+    padding: var(--space-1) var(--space-2);
+    border-radius: var(--md-sys-shape-corner-small);
+    white-space: nowrap;
   }
+  .badge-success { background: #c8e6c9; color: #1b5e20; }
+  .badge-error { background: #ffcdd2; color: #b71c1c; }
+  .badge-warning { background: #fff9c4; color: #e65100; }
+  .badge-muted { background: var(--md-sys-color-surface-container-highest); color: var(--md-sys-color-on-surface-variant); }
 
-  .btn-ban:hover {
-    background: #b83030;
-    color: #fff;
-  }
-
-  .btn-activate {
-    background: var(--md-sys-color-primary-container);
-    color: var(--md-sys-color-on-primary-container);
-  }
-
-  .btn-activate:hover {
-    background: var(--md-sys-color-primary);
-    color: var(--md-sys-color-on-primary);
-  }
-
-  .btn-approve {
-    background: rgba(52, 168, 83, 0.15);
-    color: #1b7a30;
-  }
-
-  .btn-approve:hover {
-    background: rgba(52, 168, 83, 0.3);
-  }
-
-  .btn-reject {
-    background: rgba(255, 152, 0, 0.15);
-    color: #8a6d00;
-  }
-
-  .btn-reject:hover {
-    background: rgba(255, 152, 0, 0.3);
-  }
-
-  .btn-suspend {
-    background: rgba(255, 152, 0, 0.15);
-    color: #8a6d00;
-  }
-
-  .btn-suspend:hover {
-    background: rgba(255, 152, 0, 0.3);
-  }
-
-  .badge-suspended {
-    background: rgba(255, 152, 0, 0.2);
-    color: #8a6d00;
-  }
-
-  .row-suspended {
-    background: rgba(255, 152, 0, 0.08);
-  }
-
-  .suspend-dialog {
-    position: fixed;
-    inset: 0;
-    background: rgba(0, 0, 0, 0.5);
-    display: flex;
+  .btn-filled {
+    display: inline-flex;
     align-items: center;
     justify-content: center;
-    z-index: 2000;
-  }
-
-  .suspend-dialog-content {
-    background: var(--md-sys-color-surface-container-high);
-    color: var(--md-sys-color-on-surface);
-    border-radius: var(--md-sys-shape-corner-medium);
-    padding: var(--space-6);
-    min-width: 300px;
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-4);
-  }
-
-  .suspend-dialog-content h3 {
-    font: var(--md-sys-typescale-title-medium);
-    margin: 0;
-  }
-
-  .suspend-dialog-content .form-field {
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-1);
-  }
-
-  .suspend-dialog-content label {
     font: var(--md-sys-typescale-label-large);
+    color: var(--md-sys-color-on-primary);
+    background: var(--md-sys-color-primary);
+    border: none;
+    border-radius: var(--md-sys-shape-corner-full);
+    padding: var(--space-3) var(--space-8);
+    cursor: pointer;
+    transition: opacity var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard);
+  }
+  .btn-filled:hover { opacity: 0.88; }
+
+  .btn-sm {
+    font: var(--md-sys-typescale-body-small);
+    padding: var(--space-1) var(--space-3);
+    border-radius: var(--md-sys-shape-corner-small);
+    border: none;
+    cursor: pointer;
+    transition: opacity var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard);
+  }
+  .btn-sm:hover { opacity: 0.88; }
+  .btn-success { background: #c8e6c9; color: #1b5e20; }
+  .btn-warning { background: #fff9c4; color: #e65100; }
+  .btn-muted { background: var(--md-sys-color-surface-container-highest); color: var(--md-sys-color-on-surface-variant); }
+
+  .select {
+    appearance: none;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%2349454f' d='M6 8L1 3h10z'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right var(--space-2) center;
+    padding-right: var(--space-8);
+    font: var(--md-sys-typescale-body-medium);
+    color: var(--md-sys-color-on-surface);
+    background-color: var(--md-sys-color-surface);
+    border: 1px solid var(--md-sys-color-outline-variant);
+    border-radius: var(--md-sys-shape-corner-small);
+    padding: var(--space-1) var(--space-3);
+  }
+
+  .role-select {
+    min-width: 80px;
+  }
+
+  .empty-state {
+    text-align: center;
+    padding: var(--space-8);
     color: var(--md-sys-color-on-surface-variant);
   }
 
-  .suspend-dialog-content select,
-  .suspend-dialog-content input {
-    font: var(--md-sys-typescale-body-medium);
-    color: var(--md-sys-color-on-surface);
-    background: var(--md-sys-color-surface-container);
-    border: 1px solid var(--md-sys-color-outline-variant);
-    border-radius: var(--md-sys-shape-corner-small);
-    padding: var(--space-2) var(--space-3);
-  }
-
-  .suspend-dialog-actions {
+  .pagination {
     display: flex;
-    gap: var(--space-3);
-    justify-content: flex-end;
+    align-items: center;
+    justify-content: center;
+    gap: var(--space-4);
+    margin-top: var(--space-6);
   }
 
-  .btn-suspend-confirm {
-    font: var(--md-sys-typescale-label-large);
-    color: var(--md-sys-color-on-error-container);
-    background: var(--md-sys-color-error-container);
-    border: none;
-    border-radius: var(--md-sys-shape-corner-small);
-    padding: var(--space-2) var(--space-4);
-    cursor: pointer;
-  }
-
-  .btn-suspend-confirm:hover {
-    background: #b83030;
-    color: #fff;
-  }
-
-  .btn-suspend-confirm:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
-  }
-
-  .btn-suspend-cancel {
-    font: var(--md-sys-typescale-label-large);
-    color: var(--md-sys-color-on-surface);
-    background: var(--md-sys-color-surface-container);
-    border: 1px solid var(--md-sys-color-outline-variant);
-    border-radius: var(--md-sys-shape-corner-small);
-    padding: var(--space-2) var(--space-4);
-    cursor: pointer;
+  .pagination-info {
+    font: var(--md-sys-typescale-body-medium);
+    color: var(--md-sys-color-on-surface-variant);
   }
 
   .toast {
     position: fixed;
     bottom: var(--space-8);
     left: 50%;
-    transform: translateX(-50%);
+    transform: translateX(-50%) translateY(100px);
+    border-radius: var(--md-sys-shape-corner-small);
     padding: var(--space-3) var(--space-6);
-    border-radius: var(--md-sys-shape-corner-medium);
-    background: var(--md-sys-color-surface-container-highest);
-    color: var(--md-sys-color-on-surface);
     font: var(--md-sys-typescale-body-medium);
     z-index: 1000;
-    transition: opacity 0.3s;
-  }
-
-  .toast-error {
-    background: var(--md-sys-color-error-container);
-    color: var(--md-sys-color-on-error-container);
-  }
-
-  .toast-show {
-    opacity: 1;
-  }
-
-  .hidden {
     opacity: 0;
+    transition: transform 0.3s var(--md-sys-motion-easing-standard), opacity 0.3s var(--md-sys-motion-easing-standard);
     pointer-events: none;
   }
+  .toast--show { transform: translateX(-50%) translateY(0); opacity: 1; }
+  .toast--success { background: var(--md-sys-color-primary-container); color: var(--md-sys-color-on-primary-container); }
+  .toast--error { background: var(--md-sys-color-error); color: var(--md-sys-color-on-error); }
 </style>

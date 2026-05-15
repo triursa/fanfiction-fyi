@@ -1,71 +1,97 @@
-export const prerender = false;
-
-import { getDrizzle } from '@/lib/db';
-import { getAuth } from '@/lib/auth';
-import { markdownToHtml } from '@/lib/markdown';
-import { works, chapters, creatorships, pseuds } from '@/lib/schema';
-import { eq, and, isNotNull, isNull, sql, desc, inArray } from 'drizzle-orm';
 import type { APIRoute } from 'astro';
+import type { D1Database } from '@cloudflare/workers-types';
+import { eq, and, asc, sql } from 'drizzle-orm';
+import { getDb } from '@/v2/lib/db';
+import { requireAuth, checkApproved } from '@/v2/lib/auth';
+import { validateBody } from '@/v2/lib/validation';
+import { createChapterSchema } from '@/v2/lib/validation';
+import { chapters, works, creatorships, pseuds } from '@/v2/lib/schema/index';
 
-export const POST: APIRoute = async ({ params, request, locals }) => {
-  const d1 = locals.runtime.env.DB as D1Database;
-  const db = getDrizzle(d1);
-  const auth = await getAuth(d1, request);
-  if (!auth) return new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401, headers: { 'Content-Type': 'application/json' } });
+export const config = { auth: 'public' as const };
 
-  let body: any;
-  try { body = await request.json(); } catch { return new Response(JSON.stringify({ error: 'Invalid JSON' }), { status: 400, headers: { 'Content-Type': 'application/json' } }); }
-
-  const { work_id: workId } = body || {};
-  if (!workId) return new Response(JSON.stringify({ error: 'work_id required' }), { status: 400, headers: { 'Content-Type': 'application/json' } });
-
-  // Check ownership via creatorships + pseuds
-  const creatorship = await db.select().from(creatorships)
-    .innerJoin(pseuds, eq(pseuds.id, creatorships.pseudId))
-    .where(and(eq(creatorships.workId, workId), eq(pseuds.userId, auth.user.id)))
-    .get();
-  if (!creatorship) return new Response(JSON.stringify({ error: 'Forbidden: not a creator of this work' }), { status: 403, headers: { 'Content-Type': 'application/json' } });
-
-  const title = body?.title || 'Chapter';
-  const contentMd = body?.content_md || '';
-  const contentHtml = contentMd ? markdownToHtml(contentMd) : null;
-  const wordCount = contentMd ? contentMd.split(/\s+/).filter(Boolean).length : 0;
-
-  const maxPos = await db.select({ maxPos: sql<number>`MAX(${chapters.position})`.as('max_pos') })
-    .from(chapters).where(eq(chapters.workId, workId)).get();
-  const position = (maxPos?.maxPos ?? 0) + 1;
-
-  const draft = body?.draft !== undefined ? (body.draft ? 1 : 0) : 1;
-
-  const [inserted] = await db.insert(chapters).values({
-    workId,
-    position,
-    title,
-    contentMd,
-    contentHtml,
-    draft,
-    wordCount,
-  }).returning();
-
-  return new Response(JSON.stringify(inserted), { status: 201, headers: { 'Content-Type': 'application/json' } });
-};
-
-export const GET: APIRoute = async ({ url, locals }) => {
-  const d1 = locals.runtime.env.DB as D1Database;
-  const db = getDrizzle(d1);
-  const workId = Number(url.pathname.split('/')[3]);
+// GET /api/works/:id/chapters — List chapters for a work
+export const GET: APIRoute = async ({ params, locals }) => {
+  const workId = Number(params.id);
   if (!workId || isNaN(workId)) {
     return new Response(JSON.stringify({ error: 'Invalid work ID' }), { status: 400, headers: { 'Content-Type': 'application/json' } });
   }
-  const work = await db.select({ id: works.id, publishedAt: works.publishedAt }).from(works).where(eq(works.id, workId)).get();
+
+  const d1 = locals.runtime.env.DB as D1Database;
+  const db = getDb(d1);
+
+  const work = await db.select().from(works).where(eq(works.id, workId)).get();
   if (!work) {
     return new Response(JSON.stringify({ error: 'Work not found' }), { status: 404, headers: { 'Content-Type': 'application/json' } });
   }
-  if (!work.publishedAt) {
-    return new Response(JSON.stringify({ error: 'Work not found' }), { status: 404, headers: { 'Content-Type': 'application/json' } });
+
+  // Only show draft chapters to the work's authors
+  const chapterList = work.draft
+    ? await db.select().from(chapters).where(eq(chapters.workId, workId)).orderBy(asc(chapters.position))
+    : await db.select().from(chapters).where(and(eq(chapters.workId, workId), eq(chapters.draft, 0))).orderBy(asc(chapters.position));
+
+  const sanitized = chapterList.map(c => ({
+    id: c.id,
+    position: c.position,
+    title: c.title,
+    wordCount: c.wordCount,
+    draft: c.draft,
+    createdAt: c.createdAt,
+    updatedAt: c.updatedAt,
+  }));
+
+  return new Response(JSON.stringify({ data: sanitized, total: chapterList.length }), {
+    status: 200,
+    headers: { 'Content-Type': 'application/json' },
+  });
+};
+
+// POST /api/works/:id/chapters — Create a new chapter
+export const POST: APIRoute = async ({ params, request, locals }) => {
+  const workId = Number(params.id);
+  if (!workId || isNaN(workId)) {
+    return new Response(JSON.stringify({ error: 'Invalid work ID' }), { status: 400, headers: { 'Content-Type': 'application/json' } });
   }
-  const chapterRows = await db.select().from(chapters)
-    .where(and(eq(chapters.workId, workId), eq(chapters.draft, 0)))
-    .orderBy(chapters.position);
-  return new Response(JSON.stringify(chapterRows), { headers: { 'Content-Type': 'application/json' } });
+
+  const d1 = locals.runtime.env.DB as D1Database;
+  const db = getDb(d1);
+  const auth = await requireAuth(d1, request);
+  checkApproved(auth);
+
+  // Verify user is an author of this work
+  const userPseuds = await db.select().from(pseuds).where(eq(pseuds.userId, auth.user.id));
+  const pseudIds = userPseuds.map(p => p.id);
+  const isAuthor = pseudIds.length > 0 && await db.select().from(creatorships)
+    .where(and(eq(creatorships.workId, workId), sql`${creatorships.pseudId} IN (${pseudIds.join(',') || '0'})`))
+    .get() !== undefined;
+
+  if (!isAuthor) {
+    return new Response(JSON.stringify({ error: 'Not an author of this work' }), { status: 403, headers: { 'Content-Type': 'application/json' } });
+  }
+
+  const [data, error] = await validateBody(request, createChapterSchema);
+  if (error) return error;
+
+  // Get next position
+  const existing = await db.select().from(chapters).where(eq(chapters.workId, workId));
+  const nextPosition = existing.length + 1;
+
+  // Calculate word count
+  const wordCount = data.contentMd ? data.contentMd.split(/\s+/).filter(Boolean).length : 0;
+
+  const newChapter = await db.insert(chapters).values({
+    workId,
+    position: nextPosition,
+    title: data.title,
+    contentMd: data.contentMd ?? null,
+    contentHtml: null,
+    draft: 1,
+    wordCount,
+    images: '[]',
+    mood: data.mood ?? null,
+  }).returning();
+
+  return new Response(JSON.stringify({ data: newChapter[0] }), {
+    status: 201,
+    headers: { 'Content-Type': 'application/json' },
+  });
 };

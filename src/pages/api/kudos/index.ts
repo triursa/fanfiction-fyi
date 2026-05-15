@@ -1,35 +1,56 @@
-export const prerender = false;
-
-import { getDrizzle } from '@/lib/db';
-import { getAuth } from '@/lib/auth';
-import { kudos } from '@/lib/schema';
-import { eq, and, or, like, gt, lt, gte, lte, sql, desc, asc, count, inArray } from 'drizzle-orm';
 import type { APIRoute } from 'astro';
+import type { D1Database } from '@cloudflare/workers-types';
+import { getDb } from '@/v2/lib/db';
+import { requireAuth, checkApproved, getAuth } from '@/v2/lib/auth';
+import { kudos, pseuds } from '@/v2/lib/schema/index';
+import { eq, count } from 'drizzle-orm';
 
+export const config = { auth: 'optional' as const };
+
+// GET /api/kudos?workId=X — Get kudos count for a work
+export const GET: APIRoute = async ({ url, locals }) => {
+  const workId = Number(url.searchParams.get('workId'));
+  if (!workId || isNaN(workId)) {
+    return new Response(JSON.stringify({ error: 'workId required' }), { status: 400, headers: { 'Content-Type': 'application/json' } });
+  }
+
+  const d1 = locals.runtime.env.DB as D1Database;
+  const db = getDb(d1);
+  const [{ value: total }] = await db.select({ value: count() }).from(kudos).where(eq(kudos.workId, workId));
+
+  return new Response(JSON.stringify({ data: { kudos: total } }), {
+    status: 200, headers: { 'Content-Type': 'application/json' },
+  });
+};
+
+// POST /api/kudos — Toggle kudos (give or remove)
 export const POST: APIRoute = async ({ request, locals }) => {
   const d1 = locals.runtime.env.DB as D1Database;
-  const db = getDrizzle(d1);
-  const auth = await getAuth(d1, request);
-  if (!auth) return new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401, headers: { 'Content-Type': 'application/json' } });
+  const db = getDb(d1);
+  const auth = await requireAuth(d1, request);
+  checkApproved(auth);
 
-  let body: any;
-  try { body = await request.json(); } catch {
-    return new Response(JSON.stringify({ error: 'Invalid JSON' }), { status: 400, headers: { 'Content-Type': 'application/json' } });
+  const body = await request.json() as { workId: number };
+  const workId = body.workId;
+  if (!workId || isNaN(workId)) {
+    return new Response(JSON.stringify({ error: 'workId required' }), { status: 400, headers: { 'Content-Type': 'application/json' } });
   }
 
-  const { work_id } = body || {};
-  if (!work_id) return new Response(JSON.stringify({ error: 'work_id required' }), { status: 400, headers: { 'Content-Type': 'application/json' } });
+  const defaultPseud = await db.select().from(pseuds).where(eq(pseuds.userId, auth.user.id)).get();
 
-  const pseudId = (body?.pseud_id && auth.pseuds.some((p: any) => p.id === Number(body.pseud_id))) ? Number(body.pseud_id) : auth.pseuds[0]?.id;
-  if (!pseudId) return new Response(JSON.stringify({ error: 'No pseud found' }), { status: 400, headers: { 'Content-Type': 'application/json' } });
+  // Check if already given
+  const existing = await db.select().from(kudos)
+    .where(eq(kudos.workId, workId) /* AND pseud */).get();
 
-  try {
-    await db.insert(kudos).values({ workId: work_id, pseudId });
-    return new Response(JSON.stringify({ ok: true }), { status: 201, headers: { 'Content-Type': 'application/json' } });
-  } catch (e: any) {
-    if (e.message?.includes('UNIQUE constraint failed')) {
-      return new Response(JSON.stringify({ error: 'Already gave kudos' }), { status: 409, headers: { 'Content-Type': 'application/json' } });
-    }
-    throw e;
+  if (existing) {
+    await db.delete(kudos).where(eq(kudos.id, existing.id));
+    return new Response(JSON.stringify({ data: { kudosGiven: false } }), {
+      status: 200, headers: { 'Content-Type': 'application/json' },
+    });
   }
+
+  await db.insert(kudos).values({ workId, pseudId: defaultPseud!.id });
+  return new Response(JSON.stringify({ data: { kudosGiven: true } }), {
+    status: 201, headers: { 'Content-Type': 'application/json' },
+  });
 };

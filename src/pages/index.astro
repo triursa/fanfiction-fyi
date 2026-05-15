@@ -1,340 +1,250 @@
 ---
 export const prerender = false;
-import Base from '../layouts/Base.astro';
-import { getDrizzle } from '../lib/db';
-import { users, sessions, pseuds, works, readings, creatorships } from '../lib/schema';
-import { eq, and, isNotNull, desc, sql } from 'drizzle-orm';
+export const config = { auth: 'optional' };
+import Base from '@/v2/layouts/Base.astro';
+import WorkCard from '@/v2/components/WorkCard.astro';
 
-const db = getDrizzle(Astro.locals.runtime.env.DB);
+const user = Astro.locals.user;
 
-// Check auth status
-let authUser = null;
-let userPseudId: number | null = null;
-const cookie = Astro.request.headers.get('cookie') ?? '';
-const sessionMatch = cookie.match(/session=([a-f0-9]+)/);
-if (sessionMatch) {
-  const session = await db.select({ userId: sessions.userId }).from(sessions)
-    .where(and(eq(sessions.token, sessionMatch[1]), sql`${sessions.expiresAt} > datetime('now')`))
-    .get();
-  if (session) {
-    authUser = await db.select().from(users).where(eq(users.id, session.userId)).get();
-    if (authUser) {
-      const userPseud = await db.select({ id: pseuds.id }).from(pseuds)
-        .where(eq(pseuds.userId, authUser.id))
-        .orderBy(pseuds.id)
-        .limit(1)
-        .get();
-      userPseudId = userPseud?.id ?? null;
-    }
+// SSR data fetch — recently updated works (always shown)
+let recentWorks: any[] = [];
+let recentError: string | null = null;
+try {
+  const recentRes = await fetch(new URL('/api/works?sort=updated&limit=10', Astro.url));
+  if (recentRes.ok) {
+    const recentJson = await recentRes.json();
+    recentWorks = recentJson.data ?? [];
+  } else {
+    recentError = 'Failed to load recent works.';
   }
+} catch {
+  recentError = 'Network error loading recent works.';
 }
 
-// Fetch personalized data for logged-in users
+// Authenticated: continue reading + marked for later
 let continueReading: any[] = [];
 let markedForLater: any[] = [];
-if (userPseudId) {
-  continueReading = (await db
-    .select({
-      lastChapter: readings.lastChapter,
-      readingUpdated: readings.updatedAt,
-      id: works.id,
-      title: works.title,
-      summary: works.summary,
-      wordCount: works.wordCount,
-      complete: works.complete,
-      updatedAt: works.updatedAt,
-    })
-    .from(readings)
-    .innerJoin(works, eq(readings.workId, works.id))
-    .where(and(eq(readings.pseudId, userPseudId), eq(readings.forLater, 0), sql`${readings.lastChapter} IS NOT NULL`))
-    .orderBy(desc(readings.updatedAt))
-    .limit(10))
-    .map(r => ({
-      last_chapter: r.lastChapter,
-      reading_updated: r.readingUpdated,
-      id: r.id,
-      title: r.title,
-      summary: r.summary,
-      word_count: r.wordCount,
-      complete: r.complete,
-      updated_at: r.updatedAt,
-    }));
-
-  markedForLater = (await db
-    .select({
-      id: works.id,
-      title: works.title,
-      summary: works.summary,
-      wordCount: works.wordCount,
-      complete: works.complete,
-      updatedAt: readings.updatedAt,
-    })
-    .from(readings)
-    .innerJoin(works, eq(readings.workId, works.id))
-    .where(and(eq(readings.pseudId, userPseudId), eq(readings.forLater, 1)))
-    .orderBy(desc(readings.updatedAt))
-    .limit(10))
-    .map(r => ({
-      work_id: r.id,
-      id: r.id,
-      title: r.title,
-      summary: r.summary,
-      word_count: r.wordCount,
-      complete: r.complete,
-      updated_at: r.updatedAt,
-    }));
-}
-
-// Recently updated works (always shown)
-const recentlyUpdatedRows = await db
-  .select({
-    id: works.id,
-    title: works.title,
-    summary: works.summary,
-    wordCount: works.wordCount,
-    complete: works.complete,
-    updatedAt: works.updatedAt,
-    publishedAt: works.publishedAt,
-  })
-  .from(works)
-  .where(isNotNull(works.publishedAt))
-  .orderBy(desc(works.updatedAt))
-  .limit(10);
-
-// Map to snake_case for template compatibility
-const recentlyUpdated: any[] = recentlyUpdatedRows.map(w => ({
-  ...w,
-  word_count: w.wordCount,
-  updated_at: w.updatedAt,
-  published_at: w.publishedAt,
-}));
-
-// Attach author info to recently updated
-for (const w of recentlyUpdated) {
-  w.authors = await db
-    .select({ name: pseuds.name })
-    .from(creatorships)
-    .innerJoin(pseuds, eq(creatorships.pseudId, pseuds.id))
-    .where(eq(creatorships.workId, w.id));
+if (user) {
+  try {
+    // Use the request cookie so the session is forwarded
+    const readingsRes = await fetch(new URL('/api/readings', Astro.url), {
+      headers: { cookie: Astro.request.headers.get('cookie') ?? '' },
+    });
+    if (readingsRes.ok) {
+      const readingsJson = await readingsRes.json();
+      const all = readingsJson.data ?? [];
+      continueReading = all.filter((r: any) => r.lastChapter && !r.forLater);
+      markedForLater = all.filter((r: any) => r.forLater);
+    }
+  } catch {
+    // Non-fatal — continue without reading data
+  }
 }
 ---
 
-<Base title="fanfiction.fyi">
+<Base title="fanfiction.fyi — A home for transformative fiction" description="Read, write, and share transformative fiction. A modern archive built by fans, for fans.">
+  <!-- ─── Hero ────────────────────────────────────────── -->
   <section class="hero">
-    <h1 class="hero__title">fanfiction.fyi</h1>
-    <p class="hero__subtitle">A bespoke archive for a small circle of storytellers</p>
+    <h1 class="hero-title">A home for transformative fiction</h1>
+    <p class="hero-subtitle">Read, write, and share stories. Built by fans, for fans.</p>
+    <div class="hero-actions">
+      <a href="/works" class="btn-filled">Browse Works</a>
+      {user ? (
+        <a href="/studio" class="btn-outlined">Post a Work</a>
+      ) : (
+        <a href="/signup" class="btn-outlined">Request Invite</a>
+      )}
+    </div>
   </section>
 
-  <section class="home-grid">
-    <a href="/works" class="home-card">
-      <h2>Browse Works</h2>
-      <p>Explore the archive — filtered by fandom, character, or tag</p>
+  <!-- ─── Navigation cards ────────────────────────────── -->
+  <section class="nav-cards">
+    <a href="/works" class="nav-card">
+      <span class="nav-card-icon">📖</span>
+      <span class="nav-card-label">Browse Works</span>
     </a>
-    <a href="/works/create" class="home-card home-card--accent">
-      <h2>Post a Work</h2>
-      <p>Draft, import Markdown, and publish your stories</p>
+    <a href="/studio" class="nav-card">
+      <span class="nav-card-icon">✏️</span>
+      <span class="nav-card-label">Post a Work</span>
     </a>
-    <a href="/tags" class="home-card">
-      <h2>Tags</h2>
-      <p>Navigate by fandom, character, relationship, and more</p>
+    <a href="/tags" class="nav-card">
+      <span class="nav-card-icon">🏷️</span>
+      <span class="nav-card-label">Tags</span>
     </a>
-    <a href="/collections" class="home-card">
-      <h2>Collections</h2>
-      <p>Curated groupings — themed, moderated, or private</p>
+    <a href="/collections" class="nav-card">
+      <span class="nav-card-icon">📁</span>
+      <span class="nav-card-label">Collections</span>
     </a>
-    <a href="/series" class="home-card">
-      <h2>Series</h2>
-      <p>Sequels, arcs, and connected storylines</p>
+    <a href="/series" class="nav-card">
+      <span class="nav-card-icon">📚</span>
+      <span class="nav-card-label">Series</span>
     </a>
   </section>
 
-  {authUser && continueReading.length > 0 && (
-    <section class="home-section">
+  <!-- ─── Continue Reading (authenticated) ──────────── -->
+  {user && continueReading.length > 0 && (
+    <section class="section">
       <h2 class="section-title">Continue Reading</h2>
-      <ul class="work-list">
-        {continueReading.map(w => (
-          <li class="work-list-item">
-            <a href={`/works/${w.id}${w.last_chapter ? `?chapter=${w.last_chapter}` : ''}`} class="work-list-link">{w.title}</a>
-            <span class="work-list-meta">{w.word_count?.toLocaleString()} words · Updated {new Date(w.updated_at).toLocaleDateString()}</span>
-          </li>
+      <div class="works-grid">
+        {continueReading.map((r: any) => r.work && (
+          <WorkCard work={r.work} />
         ))}
-      </ul>
+      </div>
     </section>
   )}
 
-  {authUser && markedForLater.length > 0 && (
-    <section class="home-section">
+  <!-- ─── Marked for Later (authenticated) ───────────── -->
+  {user && markedForLater.length > 0 && (
+    <section class="section">
       <h2 class="section-title">Marked for Later</h2>
-      <ul class="work-list">
-        {markedForLater.map(w => (
-          <li class="work-list-item">
-            <a href={`/works/${w.id}`} class="work-list-link">{w.title}</a>
-            <span class="work-list-meta">{w.word_count?.toLocaleString()} words · Updated {new Date(w.updated_at).toLocaleDateString()}</span>
-          </li>
+      <div class="works-grid">
+        {markedForLater.map((r: any) => r.work && (
+          <WorkCard work={r.work} />
         ))}
-      </ul>
+      </div>
     </section>
   )}
 
-  <section class="home-section">
+  <!-- ─── Recently Updated ───────────────────────────── -->
+  <section class="section">
     <h2 class="section-title">Recently Updated</h2>
-    {recentlyUpdated.length === 0 ? (
-      <p class="placeholder-text">Works will appear here once the archive is seeded.</p>
+    {recentError ? (
+      <p class="error-msg">{recentError}</p>
+    ) : recentWorks.length === 0 ? (
+      <p class="empty-msg">No works yet. Be the first to post!</p>
     ) : (
-      <ul class="work-list">
-        {recentlyUpdated.map(w => (
-          <li class="work-list-item">
-            <div class="work-list-info">
-              <a href={`/works/${w.id}`} class="work-list-link">{w.title}</a>
-              {w.authors?.length > 0 && <span class="work-list-authors"> by {w.authors.map((a: any) => a.name).join(', ')}</span>}
-            </div>
-            <span class="work-list-meta">
-              {w.word_count?.toLocaleString()} words
-              · {w.complete ? 'Complete' : 'WIP'}
-              · {new Date(w.updated_at).toLocaleDateString()}
-            </span>
-            {w.summary && <p class="work-list-summary">{w.summary.length > 160 ? w.summary.slice(0, 160) + '…' : w.summary}</p>}
-          </li>
+      <div class="works-grid">
+        {recentWorks.map((w: any) => (
+          <WorkCard work={w} />
         ))}
-      </ul>
+      </div>
     )}
   </section>
 </Base>
 
-<style>
+<style is:global>
   .hero {
     text-align: center;
-    padding: var(--space-16) 0 var(--space-10);
+    padding: var(--space-16) var(--space-4) var(--space-8);
+    max-width: 48rem;
+    margin: 0 auto;
   }
 
-  .hero__title {
-    font: var(--md-sys-typescale-display-large);
-    color: var(--md-sys-color-primary);
-    margin: 0 0 var(--space-4) 0;
-  }
-
-  .hero__subtitle {
-    font: var(--md-sys-typescale-title-medium);
-    color: var(--md-sys-color-on-surface-variant);
-    margin: 0;
-  }
-
-  .home-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
-    gap: var(--space-4);
-    margin-bottom: var(--space-12);
-  }
-
-  .home-card {
-    display: block;
-    padding: var(--space-6);
-    background: var(--md-sys-color-surface-container);
-    border: 1px solid var(--md-sys-color-outline-variant);
-    border-radius: var(--md-sys-shape-corner-large);
-    text-decoration: none;
-    color: var(--md-sys-color-on-surface);
-    transition: background var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard),
-                border-color var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard);
-  }
-
-  @media (hover: hover) {
-    .home-card:hover {
-      background: var(--md-sys-color-surface-container-high);
-      border-color: var(--md-sys-color-outline);
-      text-decoration: none;
-    }
-  }
-
-  .home-card h2 {
-    font: var(--md-sys-typescale-title-large);
-    color: var(--md-sys-color-primary);
-    margin: 0 0 var(--space-2) 0;
-  }
-
-  .home-card p {
-    font: var(--md-sys-typescale-body-medium);
-    color: var(--md-sys-color-on-surface-variant);
-    margin: 0;
-  }
-
-  .home-card--accent {
-    border-color: var(--md-sys-color-primary);
-    background: var(--md-sys-color-primary-container);
-  }
-
-  .home-card--accent h2 {
-    color: var(--md-sys-color-on-primary-container);
-  }
-
-  .home-card--accent p {
-    color: var(--md-sys-color-on-primary-container);
-  }
-
-  .section-title {
+  .hero-title {
     font: var(--md-sys-typescale-headline-medium);
     margin: 0 0 var(--space-4) 0;
   }
 
-  .placeholder-text {
+  .hero-subtitle {
     font: var(--md-sys-typescale-body-large);
-    color: var(--md-sys-color-outline);
-    font-style: italic;
+    color: var(--md-sys-color-on-surface-variant);
+    margin: 0 0 var(--space-6) 0;
   }
 
-  .home-section {
-    margin-bottom: var(--space-10);
-  }
-
-  .work-list {
-    list-style: none;
-    padding: 0;
+  .hero-actions {
     display: flex;
-    flex-direction: column;
-    gap: var(--space-3);
-  }
-
-  .work-list-item {
-    background: var(--md-sys-color-surface-container);
-    border: 1px solid var(--md-sys-color-outline-variant);
-    border-radius: var(--md-sys-shape-corner-large);
-    padding: var(--space-4);
-  }
-
-  .work-list-link {
-    font: var(--md-sys-typescale-title-medium);
-    color: var(--md-sys-color-primary);
-    text-decoration: none;
-  }
-
-  @media (hover: hover) {
-    .work-list-link:hover {
-      text-decoration: underline;
-    }
-  }
-
-  .work-list-meta {
-    font: var(--md-sys-typescale-body-small);
-    color: var(--md-sys-color-outline);
-    display: block;
-    margin-top: var(--space-1);
-  }
-
-  .work-list-info {
-    display: flex;
-    align-items: baseline;
-    gap: var(--space-2);
+    justify-content: center;
+    gap: var(--space-4);
     flex-wrap: wrap;
   }
 
-  .work-list-authors {
-    font: var(--md-sys-typescale-body-medium);
-    color: var(--md-sys-color-on-surface-variant);
+  .btn-filled {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font: var(--md-sys-typescale-label-large);
+    color: var(--md-sys-color-on-primary);
+    background: var(--md-sys-color-primary);
+    border-radius: var(--md-sys-shape-corner-full);
+    padding: var(--space-3) var(--space-6);
+    text-decoration: none;
+    transition: opacity var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard);
+  }
+  .btn-filled:hover { opacity: 0.88; }
+
+  .btn-outlined {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font: var(--md-sys-typescale-label-large);
+    color: var(--md-sys-color-primary);
+    background: transparent;
+    border: 1px solid var(--md-sys-color-outline);
+    border-radius: var(--md-sys-shape-corner-full);
+    padding: var(--space-3) var(--space-6);
+    text-decoration: none;
+    transition: background var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard);
+  }
+  .btn-outlined:hover { background: var(--md-sys-color-primary-container); }
+
+  /* ─── Nav Cards ──────────────────────────────────── */
+  .nav-cards {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+    gap: var(--space-4);
+    max-width: 48rem;
+    margin: 0 auto var(--space-12);
+    padding: 0 var(--space-4);
   }
 
-  .work-list-summary {
+  .nav-card {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: var(--space-2);
+    background: var(--md-sys-color-surface-container);
+    border: 1px solid var(--md-sys-color-outline-variant);
+    border-radius: var(--md-sys-shape-corner-large);
+    padding: var(--space-6) var(--space-4);
+    text-decoration: none;
+    color: var(--md-sys-color-on-surface);
+    transition: border-color var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard),
+                box-shadow var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard);
+  }
+  .nav-card:hover {
+    border-color: var(--md-sys-color-outline);
+    box-shadow: 0 1px 3px 0 rgba(0,0,0,.1);
+  }
+
+  .nav-card-icon {
+    font-size: 1.75rem;
+  }
+
+  .nav-card-label {
+    font: var(--md-sys-typescale-label-large);
+  }
+
+  /* ─── Sections ─────────────────────────────────────── */
+  .section {
+    max-width: 72rem;
+    margin: 0 auto var(--space-12);
+    padding: 0 var(--space-4);
+  }
+
+  .section-title {
+    font: var(--md-sys-typescale-title-large);
+    margin: 0 0 var(--space-4) 0;
+  }
+
+  .works-grid {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: var(--space-4);
+  }
+
+  @media (min-width: 640px) {
+    .works-grid {
+      grid-template-columns: repeat(2, 1fr);
+    }
+  }
+
+  .error-msg {
+    color: var(--md-sys-color-error);
     font: var(--md-sys-typescale-body-medium);
+  }
+
+  .empty-msg {
     color: var(--md-sys-color-on-surface-variant);
-    margin: var(--space-1) 0 0;
+    font: var(--md-sys-typescale-body-medium);
   }
 </style>

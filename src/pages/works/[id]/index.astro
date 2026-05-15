@@ -1,1033 +1,506 @@
 ---
 export const prerender = false;
-import Base from '../../../layouts/Base.astro';
-import TagCluster from '../../../components/TagCluster.tsx';
-import CommentThread from '../../../components/CommentThread';
-import ReportButton from '../../../components/ReportButton';
-import { getDrizzle } from '../../../lib/db';
-import { works, chapters, creatorships, readings, sessions, users, pseuds as pseudsTable, tags, taggings, chapterReactions, comments, bookmarks, kudos, workRelations, serialWorks, series } from '../../../lib/schema';
-import { eq, and, ne, isNull, isNotNull, desc, sql } from 'drizzle-orm';
-import { markdownToHtml } from '../../../lib/markdown';
+export const config = { auth: 'optional' };
+import Base from '@/v2/layouts/Base.astro';
 
 const workId = Number(Astro.params.id);
-if (!workId) return Astro.redirect('/works');
-
-const d1 = Astro.locals.runtime.env.DB as D1Database;
-const db = getDrizzle(d1);
-
-const workRow = await db.select().from(works).where(eq(works.id, workId)).get();
-if (!workRow) return Astro.redirect('/works');
-
-// Map to snake_case for template compatibility
-const work: any = {
-  ...workRow,
-  published_at: workRow.publishedAt,
-  updated_at: workRow.updatedAt,
-  created_at: workRow.createdAt,
-  end_notes: workRow.endNotes,
-  word_count: workRow.wordCount,
-};
-
-const chaptersRows = await db
-  .select({
-    id: chapters.id,
-    position: chapters.position,
-    title: chapters.title,
-    draft: chapters.draft,
-    wordCount: chapters.wordCount,
-    updatedAt: chapters.updatedAt,
-  })
-  .from(chapters)
-  .where(eq(chapters.workId, workId))
-  .orderBy(chapters.position);
-
-// Map to snake_case for template compatibility
-const chapters: any[] = chaptersRows.map(c => ({
-  ...c,
-  word_count: c.wordCount,
-  updated_at: c.updatedAt,
-}));
-
-const publishedChapters = chapters.filter(c => c.draft === 0);
-
-const tagsRows = await db
-  .select({ id: tags.id, name: tags.name, type: tags.type })
-  .from(taggings)
-  .innerJoin(tags, eq(taggings.tagId, tags.id))
-  .where(eq(taggings.workId, workId));
-
-const pseudsRows = await db
-  .select({
-    id: pseudsTable.id,
-    userId: pseudsTable.userId,
-    name: pseudsTable.name,
-    iconKey: pseudsTable.iconKey,
-    role: creatorships.role,
-  })
-  .from(creatorships)
-  .innerJoin(pseudsTable, eq(creatorships.pseudId, pseudsTable.id))
-  .where(eq(creatorships.workId, workId));
-
-// Map to snake_case for template compatibility
-const tags: any[] = tagsRows;
-const pseuds: any[] = pseudsRows.map(p => ({ ...p, user_id: p.userId, icon_key: p.iconKey }));
-
-// Default chapter to display
-const chapterId = Number(Astro.url.searchParams.get('chapter')) || (publishedChapters[0]?.id ?? chapters[0]?.id);
-const chapterRow = chapterId ? await db.select().from(chapters).where(eq(chapters.id, chapterId)).get() : null;
-// Map to snake_case for template compatibility
-const chapter: any = chapterRow ? {
-  ...chapterRow,
-  content_html: chapterRow.contentHtml,
-  content_md: chapterRow.contentMd,
-  word_count: chapterRow.wordCount,
-} : null;
-
-// Check auth status
-let authUser: any = null;
-let userPseudId: number | null = null;
-const cookie = Astro.request.headers.get('cookie') ?? '';
-const sessionMatch = cookie.match(/session=([a-f0-9]+)/);
-if (sessionMatch) {
-  const session = await db.select({ userId: sessions.userId }).from(sessions)
-    .where(and(eq(sessions.token, sessionMatch[1]), sql`${sessions.expiresAt} > datetime('now')`))
-    .get();
-  if (session) {
-    authUser = await db.select().from(users).where(eq(users.id, session.userId)).get();
-    if (authUser) {
-      const userPseud = await db.select({ id: pseudsTable.id, name: pseudsTable.name }).from(pseudsTable)
-        .where(eq(pseudsTable.userId, authUser.id))
-        .orderBy(pseudsTable.id)
-        .limit(1)
-        .get();
-      userPseudId = userPseud?.id ?? null;
-    }
-  }
+if (!workId || Number.isNaN(workId)) {
+  return Astro.redirect('/works');
 }
 
-const isOwner = authUser && pseuds.some(p => p.user_id === authUser.id);
+// Fetch work
+let work: any = null;
+let chapters: any[] = [];
+let errorMsg: string | null = null;
 
-// Series membership
-const seriesLinksRows = await db
-  .select({
-    id: series.id,
-    title: series.title,
-    position: serialWorks.position,
-  })
-  .from(serialWorks)
-  .innerJoin(series, eq(serialWorks.seriesId, series.id))
-  .where(eq(serialWorks.workId, workId))
-  .orderBy(series.title);
-
-// Map to snake_case for template compatibility
-const seriesLinks: any[] = seriesLinksRows;
-
-// Work relations (lineage)
-const RELATION_LABELS: Record<string, string> = {
-  inspired_by: 'Inspired by',
-  remix_of: 'Remix of',
-  response_to: 'Response to',
-  alternate_pov: 'Alternate POV of',
-  continuation_of: 'Continuation of',
-  fix_it_for: 'Fix-it for',
-};
-const INVERSE_LABELS: Record<string, string> = {
-  inspired_by: 'Inspired',
-  remix_of: 'Remixed by',
-  response_to: 'Response by',
-  alternate_pov: 'Alternate POV',
-  continuation_of: 'Continued by',
-  fix_it_for: 'Fix-it for',
-};
-
-const outgoingRelationsRows = await db
-  .select({
-    id: workRelations.id,
-    relatedWorkId: workRelations.relatedWorkId,
-    relationType: workRelations.relationType,
-    relatedTitle: works.title,
-    relatedPublished: works.publishedAt,
-  })
-  .from(workRelations)
-  .innerJoin(works, eq(workRelations.relatedWorkId, works.id))
-  .where(eq(workRelations.workId, workId))
-  .orderBy(desc(workRelations.createdAt));
-
-const outgoingRelations: any[] = outgoingRelationsRows.map(r => ({
-  ...r,
-  related_work_id: r.relatedWorkId,
-  relation_type: r.relationType,
-  related_title: r.relatedTitle,
-  related_published: r.relatedPublished,
-}));
-
-const incomingRelationsRows = await db
-  .select({
-    id: workRelations.id,
-    workId: workRelations.workId,
-    relationType: workRelations.relationType,
-    sourceTitle: works.title,
-    sourcePublished: works.publishedAt,
-  })
-  .from(workRelations)
-  .innerJoin(works, eq(workRelations.workId, works.id))
-  .where(eq(workRelations.relatedWorkId, workId))
-  .orderBy(desc(workRelations.createdAt));
-
-const incomingRelations: any[] = incomingRelationsRows.map(r => ({
-  ...r,
-  relation_type: r.relationType,
-  source_title: r.sourceTitle,
-  source_published: r.sourcePublished,
-}));
-
-const hasRelations = outgoingRelations.length > 0 || incomingRelations.length > 0;
-
-// Tag grouping now handled by TagCluster Preact component on the client
-
-// Word counts: work.word_count only sums published chapters.
-// For owner view: compute total including drafts, and count all chapters.
-const totalWordCount = chapters.reduce((sum: number, c: any) => sum + (c.word_count || 0), 0);
-const totalChapterCount = chapters.length;
-
-// Reading time estimation (230 wpm)
-const readingTimeMinutes = Math.max(1, Math.ceil((isOwner ? totalWordCount : (work.word_count || 0)) / 230));
-
-// Kudos count
-const kudosResult = await db
-  .select({ cnt: sql<number>`count(${kudos.id})` })
-  .from(kudos)
-  .where(eq(kudos.workId, workId))
-  .get();
-const kudosCount = kudosResult?.cnt ?? 0;
-
-// Chapter reactions — counts for current chapter
-let reactionRows: { reaction: string; cnt: number }[] = [];
-if (chapterId) {
-  reactionRows = await db
-    .select({
-      reaction: chapterReactions.reaction,
-      cnt: sql<number>`count(${chapterReactions.id})`,
-    })
-    .from(chapterReactions)
-    .where(eq(chapterReactions.chapterId, chapterId))
-    .groupBy(chapterReactions.reaction);
-}
-const reactionCounts: Record<string, number> = {};
-for (const row of reactionRows) {
-  reactionCounts[row.reaction] = row.cnt;
-}
-
-// User's own reactions for current chapter
-let myReactions: string[] = [];
-if (userPseudId && chapterId) {
-  const myRows = await db
-    .select({ reaction: chapterReactions.reaction })
-    .from(chapterReactions)
-    .where(and(eq(chapterReactions.chapterId, chapterId), eq(chapterReactions.pseudId, userPseudId)));
-  myReactions = myRows.map(r => r.reaction);
-}
-
-// Work-level aggregate reaction summary (all chapters)
-const workReactionSummary = await db
-  .select({
-    reaction: chapterReactions.reaction,
-    cnt: sql<number>`count(${chapterReactions.id})`,
-  })
-  .from(chapterReactions)
-  .innerJoin(chapters, eq(chapterReactions.chapterId, chapters.id))
-  .where(eq(chapters.workId, workId))
-  .groupBy(chapterReactions.reaction)
-  .orderBy(desc(sql`count(${chapterReactions.id})`));
-
-// Bookmark & reading state for logged-in users
-let existingBookmark: any = null;
-let readingProgress: any = null;
-if (userPseudId) {
-  const bm = await db.select({
-    id: bookmarks.id,
-    notes: bookmarks.notes,
-    private: bookmarks.private,
-  }).from(bookmarks)
-    .where(and(eq(bookmarks.pseudId, userPseudId), eq(bookmarks.workId, workId)))
-    .get();
-  existingBookmark = bm;
-
-  const rp = await db.select().from(readings)
-    .where(and(eq(readings.pseudId, userPseudId), eq(readings.workId, workId)))
-    .get();
-  if (rp) {
-    readingProgress = { ...rp, for_later: rp.forLater, last_chapter: rp.lastChapter };
-  }
-}
-
-// Comments — fetch all top-level + replies in one query, build tree client-side
-const allCommentsRows = await db
-  .select({
-    id: comments.id,
-    workId: comments.workId,
-    chapterId: comments.chapterId,
-    pseudId: comments.pseudId,
-    parentId: comments.parentId,
-    content: comments.content,
-    createdAt: comments.createdAt,
-    pseudName: pseudsTable.name,
-  })
-  .from(comments)
-  .innerJoin(pseudsTable, eq(comments.pseudId, pseudsTable.id))
-  .where(eq(comments.workId, workId))
-  .orderBy(comments.createdAt);
-
-// Map to snake_case for template compatibility
-const allComments: any[] = allCommentsRows.map(c => ({
-  ...c,
-  parent_id: c.parentId,
-  pseud_name: c.pseudName,
-  created_at: c.createdAt,
-  chapter_id: c.chapterId,
-  work_id: c.workId,
-  pseud_id: c.pseudId,
-}));
-
-for (const c of allComments) {
-  if (c.content) {
-    c.content_html = markdownToHtml(c.content);
-  }
-}
-const commentsJson = JSON.stringify(allComments);
-
-// Recommendations — kudos-based collaborative filtering with tag fallback
-let recommendations: any[] = [];
-let recMethod = 'recent';
 try {
-  // Strategy 1: Kudos overlap — "Readers who enjoyed this also enjoyed..."
-  const kudosOverlap = await db
-    .select({
-      id: works.id,
-      title: works.title,
-      slug: works.slug,
-      summary: works.summary,
-      wordCount: works.wordCount,
-      complete: works.complete,
-      publishedAt: works.publishedAt,
-      overlap: sql<number>`count(${kudos.id})`,
-    })
-    .from(kudos)
-    .innerJoin(
-      sql`(SELECT pseud_id FROM kudos WHERE work_id = ${workId}) AS src`,
-      sql`src.pseud_id = ${kudos.pseudId}`
-    )
-    .innerJoin(works, sql`${kudos.workId} = ${works.id}`)
-    .where(and(ne(works.id, workId), eq(works.draft, 0), sql`${works.publishedAt} IS NOT NULL`))
-    .groupBy(works.id, works.title, works.slug, works.summary, works.wordCount, works.complete, works.publishedAt)
-    .orderBy(desc(sql`overlap`))
-    .limit(5);
-
-  if (kudosOverlap.length >= 3) {
-    recommendations = kudosOverlap;
-    recMethod = 'kudos';
-  } else {
-    // Strategy 2: Tag-based similarity
-    const tagOverlap = await db
-      .select({
-        id: works.id,
-        title: works.title,
-        slug: works.slug,
-        summary: works.summary,
-        wordCount: works.wordCount,
-        complete: works.complete,
-        publishedAt: works.publishedAt,
-        overlap: sql<number>`count(${taggings.id})`,
-      })
-      .from(taggings)
-      .innerJoin(works, eq(taggings.workId, works.id))
-      .where(and(
-        ne(works.id, workId),
-        eq(works.draft, 0),
-        sql`${works.publishedAt} IS NOT NULL`,
-        sql`${taggings.tagId} IN (SELECT tag_id FROM taggings WHERE work_id = ${workId})`,
-      ))
-      .groupBy(works.id, works.title, works.slug, works.summary, works.wordCount, works.complete, works.publishedAt)
-      .orderBy(desc(sql`overlap`))
-      .limit(5);
-
-    if (tagOverlap.length > 0) {
-      recommendations = tagOverlap;
-      recMethod = 'tags';
-    }
+  const workRes = await fetch(new URL(`/api/works/${workId}`, Astro.url));
+  if (!workRes.ok) {
+    return Astro.redirect('/works');
   }
-
-  // Enrich with authors
-  if (recommendations.length > 0) {
-    const recWorkIds = recommendations.map(r => r.id);
-    const recAuthorRows = await db
-      .select({ workId: creatorships.workId, pseudName: pseudsTable.name, pseudId: pseudsTable.id })
-      .from(creatorships)
-      .innerJoin(pseudsTable, eq(creatorships.pseudId, pseudsTable.id))
-      .where(sql`${creatorships.workId} IN (${sql.join(recWorkIds.map(id => sql`${id}`), sql`, `)})`);
-
-    const authorMap = new Map<number, { pseudName: string; pseudId: number }[]>();
-    for (const row of recAuthorRows) {
-      if (!authorMap.has(row.workId)) authorMap.set(row.workId, []);
-      authorMap.get(row.workId)!.push({ pseudName: row.pseudName, pseudId: row.pseudId });
-    }
-    recommendations = recommendations.map(r => ({
-      ...r,
-      authors: authorMap.get(r.id) || [],
-    }));
-  }
-} catch (e) {
-  console.error('Recommendations query failed:', e);
+  const workJson = await workRes.json();
+  work = workJson.data;
+} catch {
+  errorMsg = 'Failed to load work.';
 }
+
+// Fetch chapters list
+if (work) {
+  try {
+    const chapRes = await fetch(new URL(`/api/works/${workId}/chapters`, Astro.url));
+    if (chapRes.ok) {
+      const chapJson = await chapRes.json();
+      chapters = chapJson.data ?? [];
+    }
+  } catch {
+    // Non-fatal — show work without chapter list
+  }
+}
+
+if (!work && !errorMsg) {
+  return Astro.redirect('/works');
+}
+
+// Derived data
+const authorPseuds = work.authors?.map((a: any) => a.name).join(', ') ?? 'Unknown';
+const fandoms = work.tags?.filter((t: any) => t.type === 'fandom') ?? [];
+const characters = work.tags?.filter((t: any) => t.type === 'character') ?? [];
+const relationships = work.tags?.filter((t: any) => t.type === 'relationship') ?? [];
+const freeforms = work.tags?.filter((t: any) => t.type === 'freeform') ?? [];
+const ratings = work.tags?.filter((t: any) => t.type === 'rating') ?? [];
+const warnings = work.tags?.filter((t: any) => t.type === 'warning') ?? [];
+const categories = work.tags?.filter((t: any) => t.type === 'category') ?? [];
+
+const isComplete = !!work.complete;
+const wordCount = work.wordCount?.toLocaleString() ?? '0';
+const readingTime = work.wordCount ? Math.max(1, Math.round(work.wordCount / 250)) : '?';
+const pubDate = work.publishedAt ? new Date(work.publishedAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : null;
+const updateDate = work.updatedAt ? new Date(work.updatedAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : null;
+const user = Astro.locals.user;
 ---
 
-<Base title={`${work.title} — fanfiction.fyi`}>
-  <div class="work-layout">
-    <!-- Main content column -->
-    <div class="work-main">
-      <header class="work-header-main">
-        <h1 class="work-title">{work.title}</h1>
-        <p class="work-authors">
-          By {pseuds.map((p, i) => (
-            <Fragment>
-              {i > 0 ? ', ' : ''}
-              <a href={`/pseuds/${p.id}`} class="pseud-link">
-                {p.icon_key && <img class="pseud-icon-sm" src={`/api/storage/${p.icon_key}`} alt="" />}
-                {p.name}
+<Base title={`${work.title} — fanfiction.fyi`} description={work.summary || `Read ${work.title} on fanfiction.fyi`}>
+  <section class="work-detail">
+    {errorMsg ? (
+      <p class="error-msg">{errorMsg}</p>
+    ) : (
+      <div class="work-layout">
+        <!-- ─── Main content ──────────────────────────── -->
+        <article class="work-main">
+          <header class="work-header">
+            <h1 class="work-title">{work.title}</h1>
+            <p class="work-author">by {authorPseuds}</p>
+
+            {ratings.length > 0 && (
+              <div class="tag-row">
+                <span class="tag-label">Rating:</span>
+                {ratings.map((t: any) => (
+                  <a href={`/works?rating=${encodeURIComponent(t.name)}`} class="tag tag-rating">{t.name}</a>
+                ))}
+              </div>
+            )}
+            {warnings.length > 0 && (
+              <div class="tag-row">
+                <span class="tag-label">Warnings:</span>
+                {warnings.map((t: any) => (
+                  <a href={`/works?warning=${encodeURIComponent(t.name)}`} class="tag tag-warning">{t.name}</a>
+                ))}
+              </div>
+            )}
+            {categories.length > 0 && (
+              <div class="tag-row">
+                <span class="tag-label">Category:</span>
+                {categories.map((t: any) => (
+                  <a href={`/works?category=${encodeURIComponent(t.name)}`} class="tag">{t.name}</a>
+                ))}
+              </div>
+            )}
+            {fandoms.length > 0 && (
+              <div class="tag-row">
+                <span class="tag-label">Fandom:</span>
+                {fandoms.map((t: any) => (
+                  <a href={`/works?fandom=${encodeURIComponent(t.name)}`} class="tag tag-fandom">{t.name}</a>
+                ))}
+              </div>
+            )}
+          </header>
+
+          {work.summary && (
+            <section class="work-summary">
+              <h2 class="section-heading">Summary</h2>
+              <p>{work.summary}</p>
+            </section>
+          )}
+
+          {work.notes && (
+            <section class="work-notes">
+              <h2 class="section-heading">Author's Notes</h2>
+              <div class="notes-content" set:html={work.notes} />
+            </section>
+          )}
+
+          <!-- First chapter content or link to reader -->
+          {chapters.length > 0 ? (
+            <div class="read-link">
+              <a href={`/works/${workId}/chapters/${chapters[0].id}`} class="btn-filled">
+                Start Reading →
               </a>
-            </Fragment>
-          ))}
-        </p>
-        {work.summary && <p class="work-summary">{work.summary}</p>}
-      </header>
+            </div>
+          ) : (
+            <p class="empty-msg">No chapters published yet.</p>
+          )}
+        </article>
 
-      {work.notes && (
-        <section class="work-notes">
-          <h3>Author's Notes</h3>
-          <div class="prose-content" set:html={markdownToHtml(work.notes)} />
-        </section>
-      )}
+        <!-- ─── Sidebar ──────────────────────────────── -->
+        <aside class="work-sidebar">
+          {/* Stats card */}
+          <div class="stats-card">
+            <dl class="stats-grid">
+              <dt>Words</dt>
+              <dd>{wordCount}</dd>
+              <dt>Chapters</dt>
+              <dd>{work.chapterCount ?? chapters.length}</dd>
+              <dt>Reading Time</dt>
+              <dd>{readingTime} min</dd>
+              <dt>Status</dt>
+              <dd>{isComplete ? 'Complete' : 'Work in Progress'}</dd>
+              {pubDate && (<><dt>Published</dt><dd>{pubDate}</dd></>)}
+              {updateDate && (<><dt>Updated</dt><dd>{updateDate}</dd></>)}
+              <dt>Language</dt>
+              <dd>{work.language ?? 'en'}</dd>
+            </dl>
 
-      {chapter && (
-        <section class="chapter-content">
-          <h2 class="chapter-title">{chapter.title}</h2>
-          {chapter.content_html && <div class="prose-content" set:html={chapter.content_html} />}
-          {!chapter.content_html && chapter.content_md && <div class="prose-content" set:html={markdownToHtml(chapter.content_md)} />}
-          {!chapter.content_html && !chapter.content_md && <p class="placeholder-text">Content not available.</p>}
-        </section>
-      )}
-
-      {work.end_notes && (
-        <section class="work-notes">
-          <h3>End Notes</h3>
-          <div class="prose-content" set:html={markdownToHtml(work.end_notes)} />
-        </section>
-      )}
-
-      <!-- Comments Section -->
-      <CommentThread
-        client:load
-        workId={work.id}
-        chapterId={null}
-        comments={allComments}
-        authed={!!authUser}
-        currentPseudId={userPseudId}
-        currentPseudName={authUser ? (pseuds.find(p => p.user_id === authUser.id)?.name ?? null) : null}
-      />
-
-      <!-- Recommendations -->
-      {recommendations.length > 0 && (
-        <section class="recommendations-section">
-          <h3 class="recommendations-heading">
-            {recMethod === 'kudos' ? '✨ Readers Also Enjoyed' : recMethod === 'tags' ? '🏷️ Similar Works' : '📖 More Works'}
-          </h3>
-          <div class="recommendations-grid">
-            {recommendations.map(rec => (
-              <a href={`/works/${rec.id}`} class="recommendation-card">
-                <div class="rec-card-body">
-                  <h4 class="rec-title">{rec.title}</h4>
-                  {rec.authors?.length > 0 && (
-                    <p class="rec-authors">by {rec.authors.map((a: any) => a.pseudName).join(', ')}</p>
-                  )}
-                  {rec.summary && (
-                    <p class="rec-summary">{rec.summary.length > 140 ? rec.summary.slice(0, 140) + '…' : rec.summary}</p>
-                  )}
-                  <div class="rec-meta">
-                    <span>{(rec.wordCount || 0).toLocaleString()} words</span>
-                    <span>{rec.complete ? '✓ Complete' : '✎ WIP'}</span>
-                  </div>
-                </div>
-              </a>
-            ))}
-          </div>
-        </section>
-      )}
-    </div>
-
-    <!-- Sticky sidebar on desktop -->
-    <aside class="work-sidebar">
-      <!-- Metadata -->
-      <div class="sidebar-card">
-        <div class="sidebar-stats">
-          <div class="sidebar-stat"><span>Words</span><span class="sidebar-stat-value">{(isOwner ? totalWordCount : work.word_count || 0).toLocaleString()}</span></div>
-          <div class="sidebar-stat"><span>Chapters</span><span class="sidebar-stat-value">{isOwner ? totalChapterCount : publishedChapters.length}</span></div>
-          <div class="sidebar-stat"><span>Reading time</span><span class="sidebar-stat-value">~{readingTimeMinutes} min</span></div>
-          <div class="sidebar-stat"><span>Status</span><span class="sidebar-stat-value">{work.complete ? 'Complete' : 'WIP'}</span></div>
-          {work.published_at && <div class="sidebar-stat"><span>Published</span><span class="sidebar-stat-value">{new Date(work.published_at).toLocaleDateString()}</span></div>}
-        </div>
-      </div>
-
-      <!-- Tags -->
-      {tags.length > 0 && (
-        <div class="sidebar-card sidebar-tags">
-          <TagCluster client:load tags={tags.map((t: any) => ({ id: t.id, name: t.name, type: t.type }))} />
-        </div>
-      )}
-
-      <!-- Series -->
-      {seriesLinks.length > 0 && (
-        <div class="sidebar-card">
-          <h4 class="sidebar-heading">Series</h4>
-          {seriesLinks.map(sl => (
-            <p class="series-link">Part {sl.position} of <a href={`/series/${sl.id}`}>{sl.title}</a></p>
-          ))}
-        </div>
-      )}
-
-      <!-- Related Works -->
-      {hasRelations && (
-        <div class="sidebar-card">
-          <h4 class="sidebar-heading">Related Works</h4>
-          <ul class="relations-list">
-            {outgoingRelations.map(r => (
-              <li class="relation-item">
-                <span class="relation-label">{RELATION_LABELS[r.relation_type] || r.relation_type}</span>
-                <a href={`/works/${r.related_work_id}`} class="relation-link">{r.related_title}</a>
-              </li>
-            ))}
-            {incomingRelations.map(r => (
-              <li class="relation-item">
-                <span class="relation-label inverse">{INVERSE_LABELS[r.relation_type] || r.relation_type}</span>
-                <a href={`/works/${r.work_id}`} class="relation-link">{r.source_title}</a>
-              </li>
-            ))}
-          </ul>
-          <a href={`/works/${workId}/lineage`} class="lineage-link">View Lineage Graph ↗</a>
-        </div>
-      )}
-
-      <!-- Chapter Nav -->
-      {publishedChapters.length > 1 && (
-        <div class="sidebar-card">
-          <h4 class="sidebar-heading">Chapters</h4>
-          <ol class="sidebar-chapter-list">
-            {publishedChapters.map(c => (
-              <li class={c.id === chapterId ? 'current' : ''}>
-                <a href={`/works/${work.id}?chapter=${c.id}`}>{c.title}</a>
-              </li>
-            ))}
-          </ol>
-        </div>
-      )}
-
-      <!-- Chapter Reactions -->
-      {chapter && (
-        <div class="sidebar-card">
-          <h4 class="sidebar-heading">React to this chapter</h4>
-          <div class="chapter-reactions" data-chapter-id={chapter.id} data-authed={authUser ? 'true' : 'false'}>
-            <div class="reactions-bar">
-              <button class="reaction-btn" data-reaction="fire" data-mine={myReactions.includes('fire') ? '1' : '0'} title="Fire">🔥 <span class="reaction-count">{reactionCounts['fire'] || 0}</span></button>
-              <button class="reaction-btn" data-reaction="cry" data-mine={myReactions.includes('cry') ? '1' : '0'} title="Crying">😭 <span class="reaction-count">{reactionCounts['cry'] || 0}</span></button>
-              <button class="reaction-btn" data-reaction="heartbreak" data-mine={myReactions.includes('heartbreak') ? '1' : '0'} title="Heartbreak">💔 <span class="reaction-count">{reactionCounts['heartbreak'] || 0}</span></button>
-              <button class="reaction-btn" data-reaction="swords" data-mine={myReactions.includes('swords') ? '1' : '0'} title="Action">⚔️ <span class="reaction-count">{reactionCounts['swords'] || 0}</span></button>
-              <button class="reaction-btn" data-reaction="heart" data-mine={myReactions.includes('heart') ? '1' : '0'} title="Love">❤️ <span class="reaction-count">{reactionCounts['heart'] || 0}</span></button>
-              <button class="reaction-btn" data-reaction="mindblown" data-mine={myReactions.includes('mindblown') ? '1' : '0'} title="Mind blown">🤯 <span class="reaction-count">{reactionCounts['mindblown'] || 0}</span></button>
+            {/* Kudos button */}
+            <div class="action-row">
+              <button id="kudos-btn" class="btn-outlined action-btn" data-work-id={workId}>
+                ❤ <span id="kudos-count">{work.kudosCount ?? 0}</span> Kudos
+              </button>
+              {user && (
+                <button id="bookmark-btn" class="btn-outlined action-btn" data-work-id={workId}>
+                  ★ Mark for Later
+                </button>
+              )}
             </div>
           </div>
-        </div>
-      )}
 
-      <!-- Work Actions -->
-      <div class="sidebar-card">
-        <h4 class="sidebar-heading">Actions</h4>
-        <div class="sidebar-actions">
-          <button id="kudos-btn" class="btn-primary">❤️ Leave Kudos ({kudosCount})</button>
-          <a href={`/works/${work.id}/read${chapterId ? `?chapter=${chapterId}` : ''}`} class="btn-secondary">📖 Reading Mode</a>
-          {work.published_at && (
-            <a href={`/api/works/${work.id}/export?format=epub`} class="btn-secondary" download>📥 Export EPUB</a>
+          {/* Characters / Relationships / Freeform tags */}
+          {characters.length > 0 && (
+            <div class="sidebar-section">
+              <h3 class="sidebar-heading">Characters</h3>
+              <div class="tag-cluster">
+                {characters.map((t: any) => (
+                  <a href={`/works?character=${encodeURIComponent(t.name)}`} class="sidebar-tag">{t.name}</a>
+                ))}
+              </div>
+            </div>
           )}
-          {authUser && (
-            <Fragment>
-              <button id="bookmark-btn" class="btn-secondary" data-bookmarked={existingBookmark ? 'true' : 'false'} data-work-id={work.id}>
-                {existingBookmark ? '🔖 Bookmarked' : '🔖 Bookmark'}
-              </button>
-              <button id="mark-later-btn" class="btn-secondary" data-for-later={readingProgress?.for_later ? 'true' : 'false'} data-work-id={work.id}>
-                {readingProgress?.for_later ? '📋 Marked for Later' : '📋 Mark for Later'}
-              </button>
-            </Fragment>
+          {relationships.length > 0 && (
+            <div class="sidebar-section">
+              <h3 class="sidebar-heading">Relationships</h3>
+              <div class="tag-cluster">
+                {relationships.map((t: any) => (
+                  <a href={`/works?relationship=${encodeURIComponent(t.name)}`} class="sidebar-tag">{t.name}</a>
+                ))}
+              </div>
+            </div>
           )}
-          <ReportButton client:load targetType="work" targetId={work.id} targetLabel={work.title} authed={!!authUser} />
-        </div>
+          {freeforms.length > 0 && (
+            <div class="sidebar-section">
+              <h3 class="sidebar-heading">Additional Tags</h3>
+              <div class="tag-cluster">
+                {freeforms.map((t: any) => (
+                  <a href={`/works?freeform=${encodeURIComponent(t.name)}`} class="sidebar-tag">{t.name}</a>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Chapter list */}
+          {chapters.length > 1 && (
+            <div class="sidebar-section">
+              <h3 class="sidebar-heading">Chapters</h3>
+              <ol class="chapter-list">
+                {chapters.map((c: any, i: number) => (
+                  <li>
+                    <a href={`/works/${workId}/chapters/${c.id}`}>
+                      <span class="chapter-num">{i + 1}.</span> {c.title || `Chapter ${c.position}`}
+                      <span class="chapter-meta">{c.wordCount?.toLocaleString() ?? '0'} words</span>
+                    </a>
+                  </li>
+                ))}
+              </ol>
+            </div>
+          )}
+        </aside>
       </div>
-
-      <!-- Reaction Summary -->
-      {workReactionSummary.length > 0 && (
-        <div class="sidebar-card">
-          <h4 class="sidebar-heading">Reactions</h4>
-          <div class="work-reactions-summary">
-            {workReactionSummary.map(r => (
-              <span class="reaction-pill">
-                {r.reaction === 'fire' ? '🔥' : r.reaction === 'cry' ? '😭' : r.reaction === 'heartbreak' ? '💔' : r.reaction === 'swords' ? '⚔️' : r.reaction === 'heart' ? '❤️' : '🤯'} {r.cnt}
-              </span>
-            ))}
-          </div>
-        </div>
-      )}
-
-      <!-- Bookmark Info -->
-      {authUser && existingBookmark && (
-        <div class="sidebar-card bookmark-info-card">
-          <h4 class="sidebar-heading">Your Bookmark</h4>
-          <span class="bookmark-badge">🔖 Bookmarked</span>
-          {existingBookmark.private && <span class="badge-private-inline">Private</span>}
-          {existingBookmark.notes && <p class="bookmark-user-notes">"{existingBookmark.notes}"</p>}
-        </div>
-      )}
-
-      <!-- Owner Actions -->
-      {isOwner && (
-        <div class="sidebar-card">
-          <h4 class="sidebar-heading">Author</h4>
-          <div class="sidebar-actions">
-            <a href={`/works/${work.id}/settings`} class="btn-secondary">Edit Work</a>
-            <a href={`/works/${work.id}/draft`} class="btn-secondary">Write / Add Chapter</a>
-          </div>
-        </div>
-      )}
-    </aside>
-  </div>
+    )}
+  </section>
 </Base>
 
-<style is:global>
-  @import '../../../styles/composer.css';
+<script>
+  // Kudos button
+  const kudosBtn = document.getElementById('kudos-btn');
+  if (kudosBtn) {
+    kudosBtn.addEventListener('click', async () => {
+      const workId = kudosBtn.getAttribute('data-work-id');
+      try {
+        const res = await fetch(`/api/works/${workId}/kudos`, { method: 'POST' });
+        if (res.ok) {
+          const countEl = document.getElementById('kudos-count');
+          if (countEl) countEl.textContent = String(Number(countEl.textContent) + 1);
+          kudosBtn.classList.add('kudos-given');
+          kudosBtn.textContent = '❤ Kudos Given';
+          (kudosBtn as HTMLButtonElement).disabled = true;
+        }
+      } catch { /* non-fatal */ }
+    });
+  }
 
-  /* ── Layout: responsive CSS Grid ── */
+  // Bookmark / Mark for later
+  const bookmarkBtn = document.getElementById('bookmark-btn');
+  if (bookmarkBtn) {
+    bookmarkBtn.addEventListener('click', async () => {
+      const workId = bookmarkBtn.getAttribute('data-work-id');
+      try {
+        const res = await fetch('/api/readings', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ workId: Number(workId), forLater: true }),
+        });
+        if (res.ok) {
+          bookmarkBtn.textContent = '★ Marked for Later';
+          (bookmarkBtn as HTMLButtonElement).disabled = true;
+        }
+      } catch { /* non-fatal */ }
+    });
+  }
+</script>
+
+<style is:global>
+  .work-detail {
+    max-width: 72rem;
+    margin: 0 auto;
+    padding: var(--space-8) var(--space-4);
+  }
+
   .work-layout {
     display: grid;
     grid-template-columns: 1fr;
     gap: var(--space-8);
-    max-width: 1200px;
-    margin: 0 auto;
-    padding: var(--space-6) var(--space-4);
-    align-items: start;
   }
 
-  .work-main {
-    min-width: 0;
-  }
-
-  .work-sidebar {
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-4);
-    min-width: 0;
-  }
-
-  @media (min-width: 1024px) {
+  @media (min-width: 768px) {
     .work-layout {
-      grid-template-columns: minmax(0, 1fr) 300px;
-      gap: var(--space-10);
-      padding: var(--space-6) var(--space-8);
-    }
-
-    .work-sidebar {
-      position: sticky;
-      top: calc(var(--space-16) + var(--space-4));
-      align-self: start;
-      max-height: calc(100vh - 6rem);
-      overflow-y: auto;
-      overscroll-behavior: contain;
+      grid-template-columns: 1fr 320px;
     }
   }
 
-  /* ── Sidebar cards ── */
-  .sidebar-card {
-    background: var(--md-sys-color-surface-container);
-    border: 1px solid var(--md-sys-color-outline-variant);
-    border-radius: var(--md-sys-shape-corner-large);
-    padding: var(--space-4);
+  /* ─── Main content ──────────────────────────────── */
+  .work-main { min-width: 0; }
+
+  .work-header { margin-bottom: var(--space-6); }
+
+  .work-title {
+    font: var(--md-sys-typescale-headline-medium);
+    margin: 0 0 var(--space-2) 0;
   }
 
-  .sidebar-heading {
-    font: var(--md-sys-typescale-title-small);
+  .work-author {
+    font: var(--md-sys-typescale-body-large);
     color: var(--md-sys-color-on-surface-variant);
-    margin: 0 0 var(--space-3);
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
+    margin: 0 0 var(--space-4) 0;
   }
 
-  .sidebar-stats {
+  .tag-row {
     display: flex;
-    flex-direction: column;
-    gap: var(--space-2);
-  }
-
-  .sidebar-stat {
-    display: flex;
-    justify-content: space-between;
+    flex-wrap: wrap;
     align-items: center;
+    gap: var(--space-1);
+    margin-bottom: var(--space-1);
+  }
+
+  .tag-label {
+    font: var(--md-sys-typescale-label-large);
+    color: var(--md-sys-color-on-surface-variant);
+    margin-right: var(--space-1);
+  }
+
+  .tag {
+    font: var(--md-sys-typescale-body-small);
+    color: var(--md-sys-color-primary);
+    background: var(--md-sys-color-surface-container);
+    border-radius: var(--md-sys-shape-corner-small);
+    padding: 2px 8px;
+    text-decoration: none;
+    transition: background var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard);
+  }
+  .tag:hover { background: var(--md-sys-color-surface-container-high); }
+
+  .tag-rating { color: #c62828; }
+  .tag-warning { color: #e65100; }
+  .tag-fandom { background: var(--md-sys-color-primary-container); color: var(--md-sys-color-on-primary-container); }
+
+  .work-summary {
+    background: var(--md-sys-color-surface-container);
+    border-radius: var(--md-sys-shape-corner-large);
+    padding: var(--space-4) var(--space-6);
+    margin-bottom: var(--space-6);
+  }
+
+  .work-summary p {
+    font: var(--md-sys-typescale-body-large);
+    font-family: 'Merriweather', serif;
+    line-height: 1.7;
+    color: var(--md-sys-color-on-surface);
+  }
+
+  .work-notes {
+    border-left: 3px solid var(--md-sys-color-outline-variant);
+    padding-left: var(--space-4);
+    margin-bottom: var(--space-6);
+  }
+
+  .notes-content {
     font: var(--md-sys-typescale-body-medium);
     color: var(--md-sys-color-on-surface-variant);
   }
 
-  .sidebar-stat-value {
-    color: var(--md-sys-color-on-surface);
-    font-weight: 500;
-    text-align: right;
-    margin-left: var(--space-2);
+  .section-heading {
+    font: var(--md-sys-typescale-label-large);
+    color: var(--md-sys-color-on-surface-variant);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    margin: 0 0 var(--space-2) 0;
+    font-size: 0.75rem;
   }
 
-  .sidebar-actions {
+  .read-link { margin: var(--space-6) 0; }
+
+  .btn-filled {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font: var(--md-sys-typescale-label-large);
+    color: var(--md-sys-color-on-primary);
+    background: var(--md-sys-color-primary);
+    border-radius: var(--md-sys-shape-corner-full);
+    padding: var(--space-3) var(--space-8);
+    text-decoration: none;
+    transition: opacity var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard);
+  }
+  .btn-filled:hover { opacity: 0.88; }
+
+  .btn-outlined {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font: var(--md-sys-typescale-label-large);
+    color: var(--md-sys-color-primary);
+    background: transparent;
+    border: 1px solid var(--md-sys-color-outline);
+    border-radius: var(--md-sys-shape-corner-full);
+    padding: var(--space-2) var(--space-4);
+    cursor: pointer;
+    transition: background var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard);
+  }
+  .btn-outlined:hover { background: var(--md-sys-color-primary-container); }
+  .btn-outlined:disabled { opacity: 0.5; cursor: default; }
+
+  .kudos-given {
+    color: #c62828;
+    border-color: #c62828;
+  }
+
+  /* ─── Sidebar ──────────────────────────────────────── */
+  .work-sidebar {
     display: flex;
     flex-direction: column;
-    gap: var(--space-2);
+    gap: var(--space-6);
   }
 
-  .sidebar-actions .btn-primary,
-  .sidebar-actions .btn-secondary {
-    width: 100%;
-    text-align: center;
-    justify-content: center;
-    display: inline-block;
-  }
-
-  /* ── Main column content ── */
-  .work-header-main { margin-bottom: var(--space-6); }
-  .work-title { font: var(--md-sys-typescale-headline-large); color: var(--md-sys-color-on-surface); margin: 0 0 var(--space-4); }
-  .work-authors { font: var(--md-sys-typescale-title-medium); color: var(--md-sys-color-on-surface-variant); margin: 0 0 var(--space-2); }
-  .work-authors a, .pseud-link { color: var(--md-sys-color-primary); }
-  .pseud-icon-sm { width: 20px; height: 20px; border-radius: 50%; object-fit: cover; vertical-align: middle; margin-right: 4px; }
-  .work-summary { font: var(--md-sys-typescale-body-large); color: var(--md-sys-color-on-surface-variant); font-style: italic; margin: var(--space-2) 0; }
-
-  .work-notes { background: var(--md-sys-color-surface-container); border-radius: var(--md-sys-shape-corner-medium); padding: var(--space-4); margin: var(--space-6) 0; }
-  .work-notes h3 { font: var(--md-sys-typescale-title-medium); margin: 0 0 var(--space-2); }
-
-  .chapter-title { font: var(--md-sys-typescale-headline-medium); color: var(--md-sys-color-on-surface); margin: var(--space-6) 0 var(--space-4); }
-
-  .prose-content { font: var(--md-sys-typescale-body-large); line-height: 1.8; color: var(--md-sys-color-on-surface); }
-  .prose-content p { margin: var(--space-2) 0; }
-  .prose-content h1, .prose-content h2, .prose-content h3 { margin: var(--space-6) 0 var(--space-2); color: var(--md-sys-color-on-surface); }
-  .prose-content img.chapter-image, .prose-content img { max-width: 100%; height: auto; border-radius: var(--md-sys-shape-corner-medium); margin: var(--space-4) 0; display: block; }
-  .prose-content figure { margin: var(--space-4) 0; text-align: center; }
-  .prose-content figcaption { font: var(--md-sys-typescale-body-small); color: var(--md-sys-color-on-surface-variant); margin-top: var(--space-1); }
-
-  /* ── Tags (handled by TagCluster component + composer.css) ── */
-
-  /* ── Series ── */
-  .series-link { font: var(--md-sys-typescale-body-medium); color: var(--md-sys-color-on-surface-variant); margin: var(--space-1) 0; }
-  .series-link a { color: var(--md-sys-color-primary); }
-
-  /* ── Relations ── */
-  .relations-list { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: var(--space-2); }
-  .relation-item { display: flex; flex-direction: column; gap: var(--space-1); }
-  .relation-label { font: var(--md-sys-typescale-label-medium); background: var(--md-sys-color-tertiary-container); color: var(--md-sys-color-on-tertiary-container); padding: 1px var(--space-2); border-radius: var(--md-sys-shape-corner-full); white-space: nowrap; }
-  .relation-label.inverse { background: var(--md-sys-color-secondary-container); color: var(--md-sys-color-on-secondary-container); }
-  .relation-link { color: var(--md-sys-color-primary); font: var(--md-sys-typescale-body-medium); text-decoration: none; }
-  .relation-link:hover { text-decoration: underline; }
-  .lineage-link { font: var(--md-sys-typescale-label-medium); color: var(--md-sys-color-primary); display: inline-block; margin-top: var(--space-2); text-decoration: none; }
-  .lineage-link:hover { text-decoration: underline; }
-
-  /* ── Chapter nav (sidebar style) ── */
-  .sidebar-chapter-list { list-style: none; padding-left: 0; margin: 0; }
-  .sidebar-chapter-list li { padding: var(--space-1) 0; border-bottom: 1px solid var(--md-sys-color-outline-variant); }
-  .sidebar-chapter-list li:last-child { border-bottom: none; }
-  .sidebar-chapter-list li a { color: var(--md-sys-color-primary); font: var(--md-sys-typescale-body-medium); text-decoration: none; display: block; padding: var(--space-1) 0; }
-  @media (hover: hover) { .sidebar-chapter-list li a:hover { text-decoration: underline; } }
-  .sidebar-chapter-list li.current a { font-weight: 600; color: var(--md-sys-color-on-surface); }
-
-  /* ── Chapter Reactions ── */
-  .chapter-reactions { margin-top: 0; }
-  .reactions-bar { display: flex; gap: var(--space-2); flex-wrap: wrap; }
-  .reaction-btn {
-    display: inline-flex; align-items: center; gap: var(--space-1);
-    font: var(--md-sys-typescale-label-large);
-    background: var(--md-sys-color-surface-container-high);
-    color: var(--md-sys-color-on-surface);
-    border: 1px solid var(--md-sys-color-outline-variant);
-    border-radius: var(--md-sys-shape-corner-full);
-    padding: var(--space-1) var(--space-3);
-    cursor: pointer;
-    transition: background 0.2s, border-color 0.2s, transform 0.1s;
-    user-select: none; -webkit-user-select: none;
-    min-height: 36px; min-width: 44px;
-    flex: 1;
-    justify-content: center;
-  }
-  .reaction-btn:hover { background: var(--md-sys-color-surface-container-highest); border-color: var(--md-sys-color-outline); }
-  .reaction-btn:active { transform: scale(0.95); }
-  .reaction-btn[data-mine="1"] {
-    background: var(--md-sys-color-primary-container);
-    color: var(--md-sys-color-on-primary-container);
-    border-color: var(--md-sys-color-primary);
-    font-weight: 600;
-  }
-  .reaction-btn[data-mine="1"]:hover { background: var(--md-sys-color-secondary-container); }
-  .reaction-count { font: var(--md-sys-typescale-label-medium); }
-  .reaction-btn[disabled], .chapter-reactions[data-authed="false"] .reaction-btn {
-    cursor: default; opacity: 0.7;
-  }
-
-  /* ── Work-level reaction summary ── */
-  .work-reactions-summary { display: flex; gap: var(--space-2); flex-wrap: wrap; }
-  .reaction-pill {
-    font: var(--md-sys-typescale-label-medium);
-    background: var(--md-sys-color-secondary-container);
-    color: var(--md-sys-color-on-secondary-container);
-    border-radius: var(--md-sys-shape-corner-full);
-    padding: var(--space-1) var(--space-3);
-  }
-
-  /* ── Buttons ── */
-  .btn-primary { font: var(--md-sys-typescale-label-large); color: var(--md-sys-color-on-primary); background: var(--md-sys-color-primary); border: none; border-radius: var(--md-sys-shape-corner-full); padding: var(--space-3) var(--space-6); cursor: pointer; }
-  .btn-secondary { font: var(--md-sys-typescale-label-large); color: var(--md-sys-color-primary); background: transparent; border: 1px solid var(--md-sys-color-outline); border-radius: var(--md-sys-shape-corner-full); padding: var(--space-3) var(--space-6); cursor: pointer; text-decoration: none; }
-  .placeholder-text { font: var(--md-sys-typescale-body-large); color: var(--md-sys-color-outline); font-style: italic; }
-
-  /* ── Bookmark info card ── */
-  .bookmark-info-card { }
-  .bookmark-badge { font: var(--md-sys-typescale-label-large); color: var(--md-sys-color-on-secondary-container); }
-  .badge-private-inline { font: var(--md-sys-typescale-label-small); background: var(--md-sys-color-tertiary-container); color: var(--md-sys-color-on-tertiary-container); padding: 2px var(--space-2); border-radius: var(--md-sys-shape-corner-full); margin-left: var(--space-2); }
-  .bookmark-user-notes { font: var(--md-sys-typescale-body-medium); color: var(--md-sys-color-on-surface-variant); margin: var(--space-2) 0 0; font-style: italic; }
-
-  /* ── Comments (moved to theme.css) ── */
-
-  /* ── Recommendations ── */
-  .recommendations-section {
-    margin-top: var(--space-8);
-  }
-  .recommendations-heading {
-    font: var(--md-sys-typescale-title-medium);
-    color: var(--md-sys-color-on-surface);
-    margin-bottom: var(--space-4);
-  }
-  .recommendations-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
-    gap: var(--space-3);
-  }
-  .recommendation-card {
-    display: block;
+  .stats-card {
     background: var(--md-sys-color-surface-container);
     border: 1px solid var(--md-sys-color-outline-variant);
-    border-radius: 12px;
-    padding: var(--space-4);
-    text-decoration: none;
+    border-radius: var(--md-sys-shape-corner-large);
+    padding: var(--space-4) var(--space-6);
+  }
+
+  .stats-grid {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: var(--space-1) var(--space-4);
+    margin: 0;
+  }
+
+  .stats-grid dt {
+    font: var(--md-sys-typescale-label-large);
+    color: var(--md-sys-color-on-surface-variant);
+    font-size: 0.8rem;
+  }
+
+  .stats-grid dd {
+    font: var(--md-sys-typescale-body-medium);
     color: var(--md-sys-color-on-surface);
-    transition: background-color 0.15s, box-shadow 0.15s;
+    margin: 0;
   }
-  .recommendation-card:hover {
-    background: var(--md-sys-color-surface-container-high);
-    box-shadow: 0 2px 8px rgba(0,0,0,0.12);
-  }
-  .rec-card-body {
+
+  .action-row {
     display: flex;
-    flex-direction: column;
+    flex-wrap: wrap;
+    gap: var(--space-2);
+    margin-top: var(--space-4);
+  }
+
+  .action-btn {
+    font: var(--md-sys-typescale-label-large);
+  }
+
+  .sidebar-section { margin: 0; }
+
+  .sidebar-heading {
+    font: var(--md-sys-typescale-label-large);
+    color: var(--md-sys-color-on-surface-variant);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    font-size: 0.75rem;
+    margin: 0 0 var(--space-2) 0;
+  }
+
+  .tag-cluster {
+    display: flex;
+    flex-wrap: wrap;
     gap: var(--space-1);
   }
-  .rec-title {
-    font: var(--md-sys-typescale-title-small);
-    color: var(--md-sys-color-on-surface);
-    margin: 0;
-    line-height: 1.3;
+
+  .sidebar-tag {
+    font: var(--md-sys-typescale-body-small);
+    color: var(--md-sys-color-primary);
+    background: var(--md-sys-color-primary-container);
+    border-radius: var(--md-sys-shape-corner-full);
+    padding: 2px 10px;
+    text-decoration: none;
+    transition: opacity var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard);
   }
-  .rec-authors {
-    font: var(--md-sys-typescale-label-small);
+  .sidebar-tag:hover { opacity: 0.8; }
+
+  .chapter-list {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+  }
+
+  .chapter-list li {
+    border-bottom: 1px solid var(--md-sys-color-outline-variant);
+  }
+  .chapter-list li:last-child { border-bottom: none; }
+
+  .chapter-list a {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    padding: var(--space-2) 0;
+    text-decoration: none;
+    color: var(--md-sys-color-primary);
+    font: var(--md-sys-typescale-body-medium);
+  }
+
+  .chapter-num {
     color: var(--md-sys-color-on-surface-variant);
-    margin: 0;
+    margin-right: var(--space-1);
   }
-  .rec-summary {
+
+  .chapter-meta {
     font: var(--md-sys-typescale-body-small);
     color: var(--md-sys-color-on-surface-variant);
-    margin: var(--space-1) 0;
-    line-height: 1.5;
-  }
-  .rec-meta {
-    display: flex;
-    gap: var(--space-2);
-    font: var(--md-sys-typescale-label-small);
-    color: var(--md-sys-color-outline);
-    margin-top: auto;
   }
 
-  @media (max-width: 1023px) {
-    .work-layout { gap: var(--space-6); padding: var(--space-4); }
-    .recommendations-grid {
-      grid-template-columns: 1fr;
-    }
+  .error-msg {
+    color: var(--md-sys-color-error);
+    font: var(--md-sys-typescale-body-large);
+  }
+
+  .empty-msg {
+    color: var(--md-sys-color-on-surface-variant);
+    font: var(--md-sys-typescale-body-large);
   }
 </style>
-
-<script define:vars={{ workId, chapterId, authed: !!authUser }}>
-  function escapeHtml(str) {
-    const div = document.createElement('div');
-    div.textContent = str;
-    return div.innerHTML;
-  }
-
-  // Kudos
-  const kudosBtn = document.getElementById('kudos-btn');
-  if (kudosBtn) {
-    kudosBtn.addEventListener('click', async () => {
-      try {
-        const res = await fetch('/api/kudos', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ work_id: workId }),
-        });
-        if (res.ok) {
-          kudosBtn.textContent = '❤️ Kudos Left!';
-          kudosBtn.disabled = true;
-        } else if (res.status === 409) {
-          kudosBtn.textContent = '❤️ Already Gave Kudos';
-          kudosBtn.disabled = true;
-        }
-      } catch { /* silently fail */ }
-    });
-  }
-
-  // Chapter reactions — toggle on click
-  const reactionsContainer = document.querySelector('.chapter-reactions');
-  if (reactionsContainer) {
-    reactionsContainer.addEventListener('click', async (e) => {
-      const btn = e.target.closest('.reaction-btn');
-      if (!btn) return;
-
-      if (!authed) {
-        window.location.href = '/login';
-        return;
-      }
-
-      const reaction = btn.dataset.reaction;
-      if (!reaction || !chapterId) return;
-
-      // Optimistic update
-      const isMine = btn.dataset.mine === '1';
-      const countEl = btn.querySelector('.reaction-count');
-      let count = parseInt(countEl?.textContent || '0', 10);
-
-      if (isMine) {
-        btn.dataset.mine = '0';
-        count = Math.max(0, count - 1);
-      } else {
-        btn.dataset.mine = '1';
-        count = count + 1;
-      }
-      if (countEl) countEl.textContent = String(count);
-
-      try {
-        const res = await fetch(`/api/works/${workId}/chapters/${chapterId}/reactions`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ reaction }),
-        });
-        if (res.ok) {
-          // Update work-level summary if present
-          const data = await res.json();
-          const summaryEl = document.querySelector('.work-reactions-summary');
-          if (summaryEl && data.counts) {
-            const reactionEmojis = { fire: '🔥', cry: '😭', heartbreak: '💔', swords: '⚔️', heart: '❤️', mindblown: '🤯' };
-            const sortedReactions = Object.entries(data.counts).sort((a, b) => b[1] - a[1]);
-            summaryEl.innerHTML = sortedReactions.map(([r, c]) =>
-              `<span class="reaction-pill">${reactionEmojis[r] || escapeHtml(r)} ${c}</span>`
-            ).join('');
-          }
-        } else {
-          // Revert on failure
-          if (isMine) {
-            btn.dataset.mine = '1';
-            count = count + 1;
-          } else {
-            btn.dataset.mine = '0';
-            count = Math.max(0, count - 1);
-          }
-          if (countEl) countEl.textContent = String(count);
-        }
-      } catch {
-        // Revert on network error
-        if (isMine) {
-          btn.dataset.mine = '1';
-          count = count + 1;
-        } else {
-          btn.dataset.mine = '0';
-          count = Math.max(0, count - 1);
-        }
-        if (countEl) countEl.textContent = String(count);
-      }
-    });
-  }
-
-  if (!authed) return; // everything below requires auth
-
-  // Bookmark toggle
-  const bookmarkBtn = document.getElementById('bookmark-btn');
-  if (bookmarkBtn) {
-    bookmarkBtn.addEventListener('click', async () => {
-      const isBookmarked = bookmarkBtn.dataset.bookmarked === 'true';
-      try {
-        if (isBookmarked) {
-          const res = await fetch('/api/bookmarks', {
-            method: 'DELETE',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ work_id: workId }),
-          });
-          if (res.ok) {
-            bookmarkBtn.textContent = '🔖 Bookmark';
-            bookmarkBtn.dataset.bookmarked = 'false';
-          }
-        } else {
-          const res = await fetch('/api/bookmarks', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ work_id: workId }),
-          });
-          if (res.ok || res.status === 409) {
-            bookmarkBtn.textContent = '🔖 Bookmarked';
-            bookmarkBtn.dataset.bookmarked = 'true';
-          }
-        }
-      } catch { /* silently fail */ }
-    });
-  }
-
-  // Mark for Later toggle
-  const laterBtn = document.getElementById('mark-later-btn');
-  if (laterBtn) {
-    laterBtn.addEventListener('click', async () => {
-      const isForLater = laterBtn.dataset.forLater === 'true';
-      try {
-        const res = await fetch(`/api/works/${workId}/progress`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ for_later: !isForLater }),
-        });
-        if (res.ok) {
-          if (isForLater) {
-            laterBtn.textContent = '📋 Mark for Later';
-            laterBtn.dataset.forLater = 'false';
-          } else {
-            laterBtn.textContent = '📋 Marked for Later';
-            laterBtn.dataset.forLater = 'true';
-          }
-        }
-      } catch { /* silently fail */ }
-    });
-  }
-
-  // Reading progress — auto-send on page load
-  try {
-    fetch(`/api/works/${workId}/progress`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ last_chapter: chapterId }),
-    }).catch(() => {});
-  } catch { /* silently fail */ }
-</script>

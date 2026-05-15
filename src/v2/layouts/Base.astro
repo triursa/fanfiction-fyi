@@ -1,6 +1,7 @@
 ---
 export const prerender = false;
 import { ViewTransitions } from 'astro:transitions';
+import { getTheme, DEFAULT_THEME } from '../styles/themes';
 
 interface Props {
   title?: string;
@@ -11,17 +12,60 @@ const { title = 'fanfiction.fyi', description = 'A home for transformative ficti
 
 // Read user from locals (set by middleware)
 const user = Astro.locals.user;
+
+// Serialize the default theme as inline CSS for SSR (avoids FOUC)
+const ssrThemeStyle = (() => {
+  const theme = getTheme(DEFAULT_THEME);
+  const rules = Object.entries(theme.colors)
+    .map(([token, value]) => `${token}:${value}`)
+    .join(';');
+  return `:root{${rules}}`;
+})();
 ---
 
 <!doctype html>
-<html lang="en">
+<html lang="en" data-theme="obsidian" data-color-scheme="dark">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <meta name="description" content={description} />
   <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
-  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Merriweather:ital,wght@0,400;0,700;1,400&display=swap" />
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Merriweather:ital,wght@0,400;0,700;1,400&family=Bitter:wght@400;700&family=JetBrains+Mono:wght@400;700&display=swap" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/opendyslexic@4.0.1/index.min.css" />
   <title>{title}</title>
+
+  <!-- SSR-inlined theme tokens — overridden client-side from localStorage -->
+  <style>{ssrThemeStyle}</style>
+
+  <!-- Anti-FOUC: apply persisted theme before paint -->
+  <script is:inline>
+    (function () {
+      var KEY = 'ffy-theme';
+      var DEFAULT = 'obsidian';
+      try {
+        var stored = localStorage.getItem(KEY);
+        var name = (stored === 'obsidian' || stored === 'ember' || stored === 'forest' || stored === 'aurora' || stored === 'midnight' || stored === 'paper') ? stored : DEFAULT;
+        // Lazy-load theme tokens — minimal inline map for pre-paint speed
+        var themes = {
+          obsidian: {'--md-sys-color-primary':'#B0C4D8','--md-sys-color-on-primary':'#1C2F3F','--md-sys-color-primary-container':'#374A5C','--md-sys-color-on-primary-container':'#D3E4F6','--md-sys-color-secondary':'#A3B8CC','--md-sys-color-on-secondary':'#0D1F30','--md-sys-color-secondary-container':'#2A3E52','--md-sys-color-on-secondary-container':'#C2D6EB','--md-sys-color-tertiary':'#8FA8BF','--md-sys-color-on-tertiary':'#182A3C','--md-sys-color-tertiary-container':'#354A5E','--md-sys-color-on-tertiary-container':'#B8D1E9','--md-sys-color-error':'#FFB4AB','--md-sys-color-on-error':'#690005','--md-sys-color-error-container':'#93000A','--md-sys-color-on-error-container':'#FFDAD6','--md-sys-color-surface':'#111418','--md-sys-color-on-surface':'#E1E2E6','--md-sys-color-surface-variant':'#42474E','--md-sys-color-on-surface-variant':'#C2C7CE','--md-sys-color-outline':'#8C9199','--md-sys-color-outline-variant':'#42474E','--md-sys-color-inverse-surface':'#E1E2E6','--md-sys-color-inverse-on-surface':'#2E3035','--md-sys-color-inverse-primary':'#516375','--md-sys-color-surface-dim':'#111418','--md-sys-color-surface-bright':'#373940','--md-sys-color-surface-container-lowest':'#0C0F13','--md-sys-color-surface-container-low':'#191C20','--md-sys-color-surface-container':'#1D2024','--md-sys-color-surface-container-high':'#282A2F','--md-sys-color-surface-container-highest':'#33353A'},
+          ember: {'--md-sys-color-primary':'#E8BF9A','--md-sys-color-on-primary':'#3E2210','--md-sys-color-primary-container':'#5C3A1E','--md-sys-color-on-primary-container':'#F6DCC5','--md-sys-color-secondary':'#DDB990','--md-sys-color-on-secondary':'#2A1605','--md-sys-color-secondary-container':'#4A3020','--md-sys-color-on-secondary-container':'#F2D5B5','--md-sys-color-tertiary':'#C9A07A','--md-sys-color-on-tertiary':'#2E1A08','--md-sys-color-tertiary-container':'#4F3318','--md-sys-color-on-tertiary-container':'#E4C0A0','--md-sys-color-error':'#FFB4AB','--md-sys-color-on-error':'#690005','--md-sys-color-error-container':'#93000A','--md-sys-color-on-error-container':'#FFDAD6','--md-sys-color-surface':'#15120E','--md-sys-color-on-surface':'#E6E0D8','--md-sys-color-surface-variant':'#4E4439','--md-sys-color-on-surface-variant':'#D2C3B5','--md-sys-color-outline':'#9B8E81','--md-sys-color-outline-variant':'#4E4439','--md-sys-color-inverse-surface':'#E6E0D8','--md-sys-color-inverse-on-surface':'#322B24','--md-sys-color-inverse-primary':'#7B5530','--md-sys-color-surface-dim':'#15120E','--md-sys-color-surface-bright':'#3C3730','--md-sys-color-surface-container-lowest':'#0F0D09','--md-sys-color-surface-container-low':'#1D1A15','--md-sys-color-surface-container':'#211E19','--md-sys-color-surface-container-high':'#2C2823','--md-sys-color-surface-container-highest':'#37332D'},
+          forest: {'--md-sys-color-primary':'#A8D4BD','--md-sys-color-on-primary':'#0E2E1F','--md-sys-color-primary-container':'#2D4E3C','--md-sys-color-on-primary-container':'#C4EDDA','--md-sys-color-secondary':'#B8CCBE','--md-sys-color-on-secondary':'#0B2018','--md-sys-color-secondary-container':'#283E30','--md-sys-color-on-secondary-container':'#D0E6D6','--md-sys-color-tertiary':'#9BBFA8','--md-sys-color-on-tertiary':'#0C2615','--md-sys-color-tertiary-container':'#304D38','--md-sys-color-on-tertiary-container':'#B2D4BF','--md-sys-color-error':'#FFB4AB','--md-sys-color-on-error':'#690005','--md-sys-color-error-container':'#93000A','--md-sys-color-on-error-container':'#FFDAD6','--md-sys-color-surface':'#0E1510','--md-sys-color-on-surface':'#DDE4DA','--md-sys-color-surface-variant':'#3E4A40','--md-sys-color-on-surface-variant':'#BECAB9','--md-sys-color-outline':'#889486','--md-sys-color-outline-variant':'#3E4A40','--md-sys-color-inverse-surface':'#DDE4DA','--md-sys-color-inverse-on-surface':'#273026','--md-sys-color-inverse-primary':'#447750','--md-sys-color-surface-dim':'#0E1510','--md-sys-color-surface-bright':'#343B34','--md-sys-color-surface-container-lowest':'#090E0A','--md-sys-color-surface-container-low':'#1A201A','--md-sys-color-surface-container':'#1E241F','--md-sys-color-surface-container-high':'#282F29','--md-sys-color-surface-container-highest':'#333A33'},
+          aurora: {'--md-sys-color-primary':'#DDBFE8','--md-sys-color-on-primary':'#2D1340','--md-sys-color-primary-container':'#4A2E5C','--md-sys-color-on-primary-container':'#F2DAFA','--md-sys-color-secondary':'#C9B0D6','--md-sys-color-on-secondary':'#16102A','--md-sys-color-secondary-container':'#3E2E4F','--md-sys-color-on-secondary-container':'#E0CCEA','--md-sys-color-tertiary':'#A8C2C8','--md-sys-color-on-tertiary':'#132831','--md-sys-color-tertiary-container':'#374C54','--md-sys-color-on-tertiary-container':'#C0DCE4','--md-sys-color-error':'#FFB4AB','--md-sys-color-on-error':'#690005','--md-sys-color-error-container':'#93000A','--md-sys-color-on-error-container':'#FFDAD6','--md-sys-color-surface':'#141218','--md-sys-color-on-surface':'#E6E0E8','--md-sys-color-surface-variant':'#494250','--md-sys-color-on-surface-variant':'#CBC4CE','--md-sys-color-outline':'#958F99','--md-sys-color-outline-variant':'#494250','--md-sys-color-inverse-surface':'#E6E0E8','--md-sys-color-inverse-on-surface':'#322D3A','--md-sys-color-inverse-primary':'#684878','--md-sys-color-surface-dim':'#141218','--md-sys-color-surface-bright':'#3B3740','--md-sys-color-surface-container-lowest':'#0E0C13','--md-sys-color-surface-container-low':'#1C1A21','--md-sys-color-surface-container':'#211E26','--md-sys-color-surface-container-high':'#2B2831','--md-sys-color-surface-container-highest':'#36333C'},
+          midnight: {'--md-sys-color-primary':'#ADC2E8','--md-sys-color-on-primary':'#152440','--md-sys-color-primary-container':'#354865','--md-sys-color-on-primary-container':'#CCE0F6','--md-sys-color-secondary':'#A0B0CC','--md-sys-color-on-secondary':'#081A30','--md-sys-color-secondary-container':'#27405A','--md-sys-color-on-secondary-container':'#BDD0EA','--md-sys-color-tertiary':'#96AAC4','--md-sys-color-on-tertiary':'#141E2E','--md-sys-color-tertiary-container':'#35485C','--md-sys-color-on-tertiary-container':'#B4C8E0','--md-sys-color-error':'#FFB4AB','--md-sys-color-on-error':'#690005','--md-sys-color-error-container':'#93000A','--md-sys-color-on-error-container':'#FFDAD6','--md-sys-color-surface':'#0C1118','--md-sys-color-on-surface':'#DDE2EA','--md-sys-color-surface-variant':'#3E4550','--md-sys-color-on-surface-variant':'#C0C6D0','--md-sys-color-outline':'#8A909A','--md-sys-color-outline-variant':'#3E4550','--md-sys-color-inverse-surface':'#DDE2EA','--md-sys-color-inverse-on-surface':'#2A3038','--md-sys-color-inverse-primary':'#4870A0','--md-sys-color-surface-dim':'#0C1118','--md-sys-color-surface-bright':'#323840','--md-sys-color-surface-container-lowest':'#070C13','--md-sys-color-surface-container-low':'#171C24','--md-sys-color-surface-container':'#1C2028','--md-sys-color-surface-container-high':'#262B33','--md-sys-color-surface-container-highest':'#31363E'},
+          paper: {'--md-sys-color-primary':'#3B5470','--md-sys-color-on-primary':'#FFFFFF','--md-sys-color-primary-container':'#C6D5E8','--md-sys-color-on-primary-container':'#001E34','--md-sys-color-secondary':'#8B9DAF','--md-sys-color-on-secondary':'#FFFFFF','--md-sys-color-secondary-container':'#E0E8F4','--md-sys-color-on-secondary-container':'#1A2535','--md-sys-color-tertiary':'#6D8BA5','--md-sys-color-on-tertiary':'#FFFFFF','--md-sys-color-tertiary-container':'#CCE0F4','--md-sys-color-on-tertiary-container':'#0A1E30','--md-sys-color-error':'#BA1A1A','--md-sys-color-on-error':'#FFFFFF','--md-sys-color-error-container':'#FFDAD6','--md-sys-color-on-error-container':'#410002','--md-sys-color-surface':'#FAFAFE','--md-sys-color-on-surface':'#1A1C1E','--md-sys-color-surface-variant':'#DFE2EA','--md-sys-color-on-surface-variant':'#434750','--md-sys-color-outline':'#73777F','--md-sys-color-outline-variant':'#C3C6CE','--md-sys-color-inverse-surface':'#2E3035','--md-sys-color-inverse-on-surface':'#F0F0F6','--md-sys-color-inverse-primary':'#AECBE8','--md-sys-color-surface-dim':'#DADAE0','--md-sys-color-surface-bright':'#FAFAFE','--md-sys-color-surface-container-lowest':'#FFFFFF','--md-sys-color-surface-container-low':'#F4F4FA','--md-sys-color-surface-container':'#EEEEF4','--md-sys-color-surface-container-high':'#E8E8EE','--md-sys-color-surface-container-highest':'#E3E3E9'}
+        };
+        var colors = themes[name];
+        if (!colors) return;
+        var root = document.documentElement;
+        for (var k in colors) {
+          root.style.setProperty(k, colors[k]);
+        }
+        root.setAttribute('data-theme', name);
+        root.setAttribute('data-color-scheme', name === 'paper' ? 'light' : 'dark');
+      } catch (e) { /* localStorage unavailable — keep SSR defaults */ }
+    })();
+  </script>
+
   <ViewTransitions />
 </head>
 <body>
@@ -58,55 +102,11 @@ const user = Astro.locals.user;
 </html>
 
 <style is:global>
-  :root {
-    --space-1: 0.25rem;
-    --space-2: 0.5rem;
-    --space-3: 0.75rem;
-    --space-4: 1rem;
-    --space-6: 1.5rem;
-    --space-8: 2rem;
-    --space-12: 3rem;
-    --space-16: 4rem;
-    --md-sys-color-primary: #6750a4;
-    --md-sys-color-on-primary: #ffffff;
-    --md-sys-color-primary-container: #eaddff;
-    --md-sys-color-on-primary-container: #21005d;
-    --md-sys-color-secondary: #625b71;
-    --md-sys-color-on-secondary: #ffffff;
-    --md-sys-color-surface: #fdf8ff;
-    --md-sys-color-on-surface: #1c1b1f;
-    --md-sys-color-on-surface-variant: #49454f;
-    --md-sys-color-surface-container: #f3edf7;
-    --md-sys-color-surface-container-high: #ece6f0;
-    --md-sys-color-surface-container-highest: #e6e0e9;
-    --md-sys-color-outline: #79747e;
-    --md-sys-color-outline-variant: #cac4d0;
-    --md-sys-color-error: #b3261e;
-    --md-sys-color-on-error: #ffffff;
-    --md-sys-shape-corner-small: 8px;
-    --md-sys-shape-corner-large: 16px;
-    --md-sys-shape-corner-full: 9999px;
-    --md-sys-typescale-body-small: 500 12px/16px 'Inter', sans-serif;
-    --md-sys-typescale-body-medium: 400 14px/20px 'Inter', sans-serif;
-    --md-sys-typescale-body-large: 400 16px/24px 'Inter', sans-serif;
-    --md-sys-typescale-label-large: 500 14px/20px 'Inter', sans-serif;
-    --md-sys-typescale-title-large: 500 22px/28px 'Inter', sans-serif;
-    --md-sys-typescale-headline-medium: 500 28px/36px 'Inter', sans-serif;
-    --md-sys-motion-duration-short4: 200ms;
-    --md-sys-motion-easing-standard: cubic-bezier(0.2, 0, 0, 1);
-  }
+  @import '../styles/global.css';
 
-  *, *::before, *::after { box-sizing: border-box; margin: 0; }
-
-  body {
-    font: var(--md-sys-typescale-body-large);
-    color: var(--md-sys-color-on-surface);
-    background: var(--md-sys-color-surface);
-    min-height: 100vh;
-  }
-
-  a { color: var(--md-sys-color-primary); }
-
+  /* --------------------------------------------------------------------------
+     App bar & navigation (component-specific, uses tokens)
+     -------------------------------------------------------------------------- */
   .skip-link {
     position: absolute;
     top: -100px;
@@ -156,7 +156,6 @@ const user = Astro.locals.user;
     border-radius: var(--md-sys-shape-corner-full);
     transition: background var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard);
   }
-  .nav-link:hover { background: var(--md-sys-color-surface-container); }
 
   .nav-link--admin {
     font-weight: 700;
@@ -164,7 +163,11 @@ const user = Astro.locals.user;
     color: var(--md-sys-color-on-error);
     border-radius: var(--md-sys-shape-corner-full);
   }
-  .nav-link--admin:hover { opacity: 0.88; background: var(--md-sys-color-error); color: var(--md-sys-color-on-error); }
+  .nav-link--admin:hover {
+    opacity: 0.88;
+    background: var(--md-sys-color-error);
+    color: var(--md-sys-color-on-error);
+  }
 
   .nav-link-btn {
     font: var(--md-sys-typescale-label-large);
@@ -173,5 +176,10 @@ const user = Astro.locals.user;
     border: none;
     cursor: pointer;
     padding: var(--space-2) var(--space-3);
+    border-radius: var(--md-sys-shape-corner-full);
+    transition: background var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard);
+  }
+  .nav-link-btn:hover {
+    background: var(--md-sys-color-surface-container);
   }
 </style>

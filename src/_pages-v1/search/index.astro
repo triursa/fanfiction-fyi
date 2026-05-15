@@ -1,0 +1,465 @@
+---
+export const prerender = false;
+import Base from '../../layouts/Base.astro';
+import BrowseKeyboardNav from '../../components/BrowseKeyboardNav';
+import { getDrizzle } from '../../lib/db';
+import { tags, taggings, pseuds, creatorships } from '../../lib/schema';
+import { eq, sql, inArray } from 'drizzle-orm';
+import SearchPage from '../../components/SearchPage';
+
+const d1 = Astro.locals.runtime.env.DB as D1Database;
+const db = getDrizzle(d1);
+
+const query = Astro.url.searchParams.get('q')?.trim() || '';
+const type = Astro.url.searchParams.get('type')?.trim() || '';
+const complete = Astro.url.searchParams.get('complete')?.trim() || '';
+const word_min = Number(Astro.url.searchParams.get('word_min')) || 0;
+const word_max = Number(Astro.url.searchParams.get('word_max')) || 0;
+const page = Math.max(Number(Astro.url.searchParams.get('page')) || 1, 1);
+const limit = 20;
+const offset = (page - 1) * limit;
+
+// Build SSR query — FTS5 and dynamic SQL require raw D1
+let results: any[] = [];
+let total = 0;
+
+const hasQuery = query.length > 0;
+const words = query.split(/\s+/).filter(w => /^[\w\u4e00-\u9fff\u3040-\u309f\u30a0-\u30ff\uac00-\ud7af]+$/.test(w));
+const sanitizedQ = words.join(' ').trim();
+
+const conditions: string[] = ['w.published_at IS NOT NULL'];
+const bindings: any[] = [];
+const countBindings: any[] = [];
+
+if (type) {
+  conditions.push(`w.id IN (SELECT tg.work_id FROM taggings tg JOIN tags t ON t.id = tg.tag_id WHERE t.type = ?)`);
+  bindings.push(type);
+  countBindings.push(type);
+}
+if (complete === '1') { conditions.push('w.complete = 1'); }
+if (complete === '0') { conditions.push('w.complete = 0'); }
+if (word_min > 0) { conditions.push('w.word_count >= ?'); bindings.push(word_min); countBindings.push(word_min); }
+if (word_max > 0) { conditions.push('w.word_count <= ?'); bindings.push(word_max); countBindings.push(word_max); }
+
+const whereClause = 'WHERE ' + conditions.join(' AND ');
+
+if (hasQuery && sanitizedQ) {
+  const ftsJoin = `JOIN works_fts f ON f.rowid = w.id`;
+  const allConditions = ' AND ' + conditions.join(' AND ');
+
+  const dataSql = `SELECT w.id, w.title, w.summary, w.word_count, w.complete, w.published_at, w.updated_at FROM works w ${ftsJoin} WHERE works_fts MATCH ?${allConditions} ORDER BY rank LIMIT ? OFFSET ?`;
+  const countSql = `SELECT COUNT(*) as total FROM works w ${ftsJoin} WHERE works_fts MATCH ?${allConditions}`;
+
+  const dataResult = await d1.prepare(dataSql).bind(sanitizedQ, ...bindings, limit, offset).all<any>();
+  results = dataResult.results;
+  const totalRow = await d1.prepare(countSql).bind(sanitizedQ, ...countBindings).first<{ total: number }>();
+  total = totalRow?.total ?? 0;
+} else if (conditions.length > 1 || !hasQuery) {
+  const dataSql = `SELECT w.id, w.title, w.summary, w.word_count, w.complete, w.published_at, w.updated_at FROM works w ${whereClause} ORDER BY w.updated_at DESC LIMIT ? OFFSET ?`;
+  const countSql = `SELECT COUNT(*) as total FROM works w ${whereClause}`;
+
+  const dataResult = await d1.prepare(dataSql).bind(...bindings, limit, offset).all<any>();
+  results = dataResult.results;
+  const totalRow = await d1.prepare(countSql).bind(...countBindings).first<{ total: number }>();
+  total = totalRow?.total ?? 0;
+}
+
+// Enrich with pseuds and tags
+const workIds = results.map((w: any) => w.id);
+
+if (workIds.length > 0) {
+  const pseudRows = await db.select({
+    workId: creatorships.workId,
+    pseudName: pseuds.name,
+  }).from(creatorships)
+    .innerJoin(pseuds, eq(pseuds.id, creatorships.pseudId))
+    .where(inArray(creatorships.workId, workIds));
+
+  const pseudByWorkId = new Map<number, string | null>();
+  for (const row of pseudRows) {
+    if (!pseudByWorkId.has(row.workId)) pseudByWorkId.set(row.workId, row.pseudName);
+  }
+
+  const tagRows = await db.select({
+    workId: taggings.workId,
+    id: tags.id,
+    name: tags.name,
+    type: tags.type,
+  }).from(taggings)
+    .innerJoin(tags, eq(tags.id, taggings.tagId))
+    .where(inArray(taggings.workId, workIds));
+
+  const tagsByWorkId = new Map<number, any[]>();
+  for (const row of tagRows) {
+    const tagList = tagsByWorkId.get(row.workId) ?? [];
+    tagList.push({ id: row.id, name: row.name, type: row.type });
+    tagsByWorkId.set(row.workId, tagList);
+  }
+
+  for (const w of results) {
+    w.pseud_name = pseudByWorkId.get(w.id) ?? null;
+    w.tags = tagsByWorkId.get(w.id) ?? [];
+  }
+} else {
+  for (const w of results) {
+    w.pseud_name = null;
+    w.tags = [];
+  }
+}
+
+const initialFilters = { type, complete, word_min, word_max };
+---
+
+<Base title={query ? `Search: ${query} — fanfiction.fyi` : 'Search — fanfiction.fyi'}>
+  <SearchPage
+    client:load
+    initialQuery={query}
+    initialFilters={initialFilters}
+    initialPage={page}
+    initialResults={results}
+    initialTotal={total}
+  />
+
+  <BrowseKeyboardNav client:load />
+</Base>
+
+<style is:global>
+  @import '../../styles/theme.css';
+
+  .search-page { max-width: 960px; margin: 0 auto; padding: 0 var(--space-4); }
+  .page-title {
+    font: var(--md-sys-typescale-headline-medium);
+    color: var(--md-sys-color-on-surface);
+    margin: 0 0 var(--space-6);
+  }
+
+  /* ── Search Bar ── */
+  .search-bar { margin-bottom: var(--space-4); }
+
+  .search-input-wrapper {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    background: var(--md-sys-color-surface-container-high);
+    border: 1px solid var(--md-sys-color-outline-variant);
+    border-radius: var(--md-sys-shape-corner-extra-large);
+    padding: var(--space-4) var(--space-6);
+    transition: border-color var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard);
+  }
+  .search-input-wrapper:focus-within {
+    border-color: var(--md-sys-color-primary);
+  }
+
+  .search-icon {
+    color: var(--md-sys-color-on-surface-variant);
+    flex-shrink: 0;
+  }
+
+  .search-input {
+    flex: 1;
+    font: var(--md-sys-typescale-headline-medium);
+    color: var(--md-sys-color-on-surface);
+    background: transparent;
+    border: none;
+    outline: none;
+    min-width: 0;
+  }
+  .search-input::placeholder { color: var(--md-sys-color-outline); }
+
+  /* ── Filter Chips ── */
+  .filter-chips-container {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-3);
+    margin-bottom: var(--space-6);
+  }
+
+  .filter-row {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+  }
+
+  .filter-row__label {
+    font: var(--md-sys-typescale-label-large);
+    color: var(--md-sys-color-on-surface-variant);
+    min-width: 64px;
+    flex-shrink: 0;
+  }
+
+  .filter-row__chips {
+    display: flex;
+    gap: var(--space-2);
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+    padding-bottom: 2px;
+  }
+  .filter-row__chips::-webkit-scrollbar { display: none; }
+
+  .filter-chip {
+    font: var(--md-sys-typescale-label-large);
+    color: var(--md-sys-color-on-surface-variant);
+    background: var(--md-sys-color-surface-container-low);
+    border: 1px solid var(--md-sys-color-outline-variant);
+    border-radius: var(--md-sys-shape-corner-small);
+    padding: var(--space-1) var(--space-3);
+    cursor: pointer;
+    white-space: nowrap;
+    user-select: none;
+    transition: background var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard),
+                color var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard),
+                border-color var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard);
+    min-height: 32px;
+    display: inline-flex;
+    align-items: center;
+  }
+
+  .filter-chip:hover {
+    background: var(--md-sys-color-surface-container-high);
+  }
+
+  .filter-chip--active {
+    background: var(--md-sys-color-secondary-container);
+    color: var(--md-sys-color-on-secondary-container);
+    border-color: transparent;
+  }
+
+  @media (hover: hover) {
+    .filter-chip--active:hover {
+      background: var(--md-sys-color-secondary);
+      color: var(--md-sys-color-on-secondary);
+    }
+  }
+
+  /* ── Loading / Results ── */
+  .search-loading {
+    font: var(--md-sys-typescale-body-large);
+    color: var(--md-sys-color-on-surface-variant);
+    text-align: center;
+    padding: var(--space-16) 0;
+  }
+
+  .placeholder-text {
+    font: var(--md-sys-typescale-body-large);
+    color: var(--md-sys-color-outline);
+    font-style: italic;
+    text-align: center;
+    padding: var(--space-16) 0;
+  }
+
+  .no-results {
+    font: var(--md-sys-typescale-body-large);
+    color: var(--md-sys-color-on-surface-variant);
+    text-align: center;
+    padding: var(--space-16) 0;
+  }
+
+  .query-highlight {
+    color: var(--md-sys-color-primary);
+    font-style: italic;
+  }
+
+  .results-meta {
+    font: var(--md-sys-typescale-body-medium);
+    color: var(--md-sys-color-outline);
+    margin-bottom: var(--space-4);
+  }
+
+  .results-list {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-4);
+  }
+
+  /* ── Work Card (M3 Outlined) ── */
+  .work-card {
+    padding: var(--space-4) var(--space-6);
+    background: var(--md-sys-color-surface-container);
+    border: 1px solid var(--md-sys-color-outline-variant);
+    border-radius: var(--md-sys-shape-corner-large);
+    transition: background var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard),
+                border-color var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard),
+                box-shadow var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard);
+  }
+
+  @media (hover: hover) {
+    .work-card:hover {
+      background: var(--md-sys-color-surface-container-high);
+      border-color: var(--md-sys-color-outline);
+      box-shadow: var(--md-sys-elevation-1);
+    }
+  }
+
+  .work-card__header {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: var(--space-2);
+    margin-bottom: var(--space-1);
+  }
+
+  .work-card__title {
+    font: var(--md-sys-typescale-title-large);
+    color: var(--md-sys-color-primary);
+    text-decoration: none;
+  }
+  @media (hover: hover) {
+    .work-card__title:hover { text-decoration: underline; }
+  }
+
+  .work-card__author {
+    font: var(--md-sys-typescale-body-medium);
+    color: var(--md-sys-color-on-surface-variant);
+  }
+
+  .work-card__summary {
+    font: var(--md-sys-typescale-body-medium);
+    color: var(--md-sys-color-on-surface-variant);
+    margin: var(--space-1) 0 var(--space-2);
+    line-height: 1.5;
+  }
+
+  .work-card__meta {
+    display: flex;
+    gap: var(--space-2);
+    flex-wrap: wrap;
+    margin-bottom: var(--space-2);
+  }
+
+  .work-card__meta-item {
+    font: var(--md-sys-typescale-body-small);
+    color: var(--md-sys-color-outline);
+  }
+
+  .work-card__meta-sep {
+    font: var(--md-sys-typescale-body-small);
+    color: var(--md-sys-color-outline-variant);
+  }
+
+  /* ── Tag Chips on Work Cards — Obsidian palette tinting ── */
+  .work-card__tags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-1);
+    margin-top: var(--space-2);
+  }
+
+  .work-tag-group {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-1);
+  }
+
+  .work-tag {
+    font: var(--md-sys-typescale-body-small);
+    padding: 2px var(--space-2);
+    border-radius: var(--md-sys-shape-corner-full);
+    text-decoration: none;
+    white-space: nowrap;
+    transition: background var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard);
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-1);
+    border: 1px solid transparent;
+    line-height: 1.4;
+  }
+
+  /* Tag type accent colors — Obsidian tinted palette */
+  .work-tag--fandom {
+    background: rgba(107, 144, 190, 0.15);
+    color: #8BB4E8;
+    border-color: rgba(107, 144, 190, 0.4);
+  }
+  .work-tag--character {
+    background: rgba(107, 168, 130, 0.15);
+    color: #7DD4A0;
+    border-color: rgba(107, 168, 130, 0.4);
+  }
+  .work-tag--relationship {
+    background: rgba(190, 107, 150, 0.15);
+    color: #E88BB4;
+    border-color: rgba(190, 107, 150, 0.4);
+  }
+  .work-tag--freeform {
+    background: rgba(123, 143, 168, 0.15);
+    color: #9BB5CE;
+    border-color: rgba(123, 143, 168, 0.3);
+  }
+  .work-tag--rating {
+    background: rgba(200, 170, 100, 0.15);
+    color: #D4B872;
+    border-color: rgba(200, 170, 100, 0.4);
+  }
+  .work-tag--warning {
+    background: rgba(190, 107, 107, 0.15);
+    color: #E88B8B;
+    border-color: rgba(190, 107, 107, 0.4);
+  }
+  .work-tag--category {
+    background: rgba(123, 143, 168, 0.10);
+    color: #8BA2B8;
+    border-color: rgba(123, 143, 168, 0.25);
+  }
+
+  @media (hover: hover) {
+    .work-tag:hover {
+      text-decoration: none;
+      filter: brightness(1.2);
+    }
+  }
+
+  /* ── Pagination ── */
+  .pagination {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: var(--space-4);
+    margin-top: var(--space-8);
+    padding-bottom: var(--space-4);
+  }
+
+  .fab-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 48px;
+    height: 48px;
+    border-radius: var(--md-sys-shape-corner-large);
+    background: var(--md-sys-color-primary-container);
+    color: var(--md-sys-color-on-primary-container);
+    border: none;
+    cursor: pointer;
+    box-shadow: var(--md-sys-elevation-1);
+    transition: background var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard),
+                box-shadow var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard);
+  }
+  @media (hover: hover) {
+    .fab-btn:hover {
+      background: var(--md-sys-color-primary);
+      color: var(--md-sys-color-on-primary);
+      box-shadow: var(--md-sys-elevation-2);
+    }
+  }
+
+  .page-indicator {
+    font: var(--md-sys-typescale-label-large);
+    color: var(--md-sys-color-on-surface-variant);
+  }
+
+  /* ── Responsive ── */
+  @media (max-width: 640px) {
+    .filter-row__label {
+      min-width: 56px;
+      font: var(--md-sys-typescale-body-small);
+    }
+    .filter-chip {
+      padding: var(--space-1) var(--space-2);
+      font: var(--md-sys-typescale-body-small);
+    }
+    .work-card {
+      padding: var(--space-3) var(--space-4);
+    }
+  }
+</style>

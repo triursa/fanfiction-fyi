@@ -122,7 +122,10 @@ function verifyOrigin(request: Request): boolean {
   const allowedHosts = ['fanfiction.fyi', 'staging.fanfiction.fyi', 'localhost:4321'];
   try {
     const url = new URL(origin);
-    return allowedHosts.some(host => url.host === host);
+    // Allow any localhost port in development / test
+    return allowedHosts.some(host => url.host === host)
+      || url.hostname === 'localhost'
+      || url.hostname === '127.0.0.1';
   } catch {
     return false;
   }

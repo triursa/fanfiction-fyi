@@ -1,60 +1,96 @@
 ---
+/**
+ * Admin Reports Page — Auth: required, mod+ only
+ * Content report queue. List reports with type, reporter, target, status.
+ * Resolve/dismiss actions.
+ */
 export const prerender = false;
-import Base from '@/layouts/Base.astro';
-import { getDrizzle } from '@/lib/db';
-import { UserRole, ROLE_LEVEL } from '@/lib/types';
-import { users, sessions } from '@/lib/schema';
-import { eq, and, gt, sql } from 'drizzle-orm';
+import Base from '@/v2/layouts/Base.astro';
+import type { D1Database } from '@cloudflare/workers-types';
+import { getDb } from '@/v2/lib/db';
+import { contentReports, users } from '@/v2/lib/schema/index';
+import { desc, count, sql, eq, and } from 'drizzle-orm';
 
-// Auth gate: mod+ required
-const cookie = Astro.request.headers.get('cookie') ?? '';
-const sessionMatch = cookie.match(/session=([a-f0-9]+)/);
-if (!sessionMatch) return Astro.redirect('/login');
+const user = Astro.locals.user;
 
-const d1 = Astro.locals.runtime.env.DB as D1Database;
-const db = getDrizzle(d1);
-const session = await db.select({ userId: sessions.userId }).from(sessions).where(and(eq(sessions.token, sessionMatch[1]), gt(sessions.expiresAt, sql`datetime('now')`))).get();
-if (!session) return Astro.redirect('/login');
+// Auth check: mod+ only
+if (!user || !['founder', 'admin', 'mod'].includes(user.role)) {
+  return Astro.redirect('/login');
+}
 
-const currentUser = await db.select({ id: users.id, role: users.role }).from(users).where(eq(users.id, session.userId)).get();
-if (!currentUser) return Astro.redirect('/login');
+const d1 = locals.runtime.env.DB as D1Database;
+const db = getDb(d1);
 
-const userLevel = ROLE_LEVEL[currentUser.role as UserRole] ?? 0;
-if (userLevel < ROLE_LEVEL[UserRole.Mod]) return Astro.redirect('/');
+const url = new URL(Astro.request.url);
+const page = Math.max(1, Number(url.searchParams.get('page')) || 1);
+const limit = 20;
+const statusFilter = url.searchParams.get('status') || '';
 
-// Fetch reports via raw D1 for multi-table joins
-const { results: reportRows } = await d1.prepare(`
-  SELECT cr.id, cr.target_type, cr.target_id, cr.reason, cr.details, cr.status, cr.created_at, cr.resolved_at, cr.resolution,
-    u.email as reporter_email, r.email as resolver_email
-  FROM content_reports cr
-  JOIN users u ON u.id = cr.reporter_id
-  LEFT JOIN users r ON r.id = cr.resolver_id
-  ORDER BY cr.created_at DESC
-  LIMIT 200
-`).all<{
-  id: number; target_type: string; target_id: number; reason: string; details: string | null;
-  status: string; created_at: string; resolved_at: string | null; resolution: string | null;
-  reporter_email: string; resolver_email: string | null;
-}>();
+// Build conditions
+const conditions = [];
+if (statusFilter && ['open', 'resolved', 'dismissed'].includes(statusFilter)) {
+  conditions.push(eq(contentReports.status, statusFilter));
+}
+const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
 
-const allReports = (reportRows ?? []).map(r => ({
-  id: r.id,
-  targetType: r.target_type,
-  targetId: r.target_id,
-  reason: r.reason,
-  details: r.details,
-  status: r.status,
-  createdAt: r.created_at,
-  resolvedAt: r.resolved_at,
-  resolution: r.resolution,
-  reporterEmail: r.reporter_email,
-  resolverEmail: r.resolver_email,
+const [{ total }] = await db.select({ total: count() }).from(contentReports).where(whereClause);
+const totalPages = Math.ceil(total / limit);
+
+const reports = await db
+  .select({
+    id: contentReports.id,
+    reporterId: contentReports.reporterId,
+    targetType: contentReports.targetType,
+    targetId: contentReports.targetId,
+    reason: contentReports.reason,
+    details: contentReports.details,
+    status: contentReports.status,
+    resolverId: contentReports.resolverId,
+    resolution: contentReports.resolution,
+    createdAt: contentReports.createdAt,
+    updatedAt: contentReports.updatedAt,
+  })
+  .from(contentReports)
+  .where(whereClause)
+  .orderBy(desc(contentReports.createdAt))
+  .limit(limit)
+  .offset((page - 1) * limit);
+
+// Enrich with reporter info
+const reporterIds = [...new Set(reports.map(r => r.reporterId).filter(Boolean))] as number[];
+let reporterMap: Record<number, { email: string; displayName: string | null }> = {};
+if (reporterIds.length > 0) {
+  const reporterRows = await db
+    .select({ id: users.id, email: users.email, displayName: users.displayName })
+    .from(users)
+    .where(sql`${users.id} IN (${sql.join(reporterIds.map(id => sql`${id}`), sql`, `)})`);
+  for (const r of reporterRows) {
+    reporterMap[r.id] = { email: r.email, displayName: r.displayName };
+  }
+}
+
+// Enrich with resolver info
+const resolverIds = [...new Set(reports.map(r => r.resolverId).filter(Boolean))] as number[];
+let resolverMap: Record<number, { email: string; displayName: string | null }> = {};
+if (resolverIds.length > 0) {
+  const resolverRows = await db
+    .select({ id: users.id, email: users.email, displayName: users.displayName })
+    .from(users)
+    .where(sql`${users.id} IN (${sql.join(resolverIds.map(id => sql`${id}`), sql`, `)})`);
+  for (const r of resolverRows) {
+    resolverMap[r.id] = { email: r.email, displayName: r.displayName };
+  }
+}
+
+const enrichedReports = reports.map(r => ({
+  ...r,
+  reporter: r.reporterId && reporterMap[r.reporterId]
+    ? { id: r.reporterId, ...reporterMap[r.reporterId] }
+    : null,
+  resolver: r.resolverId && resolverMap[r.resolverId]
+    ? { id: r.resolverId, ...resolverMap[r.resolverId] }
+    : null,
 }));
-
-const statusFilter = Astro.url.searchParams.get('status') || 'open';
-const filteredReports = statusFilter === 'all'
-  ? allReports
-  : allReports.filter(r => r.status === statusFilter);
 
 const reasonLabels: Record<string, string> = {
   harassment: 'Harassment',
@@ -63,166 +99,374 @@ const reasonLabels: Record<string, string> = {
   graphic: 'Graphic Content',
   other: 'Other',
 };
-
-const statusColors: Record<string, string> = {
-  open: '#f59e0b',
-  resolved: '#10b981',
-  dismissed: '#6b7280',
-};
 ---
 
-<Base title="Reports — Admin">
-  <h1 class="admin-heading">Content Reports</h1>
+<Base title="Admin: Reports — fanfiction.fyi" description="Manage content reports">
+  <section class="admin-page">
+    <h1 class="page-title">Content Reports</h1>
 
-  <nav class="admin-tabs">
-    <a href="/admin/reports?status=open" class:active={statusFilter === 'open'}>Open ({allReports.filter(r => r.status === 'open').length})</a>
-    <a href="/admin/reports?status=resolved" class:active={statusFilter === 'resolved'}>Resolved ({allReports.filter(r => r.status === 'resolved').length})</a>
-    <a href="/admin/reports?status=dismissed" class:active={statusFilter === 'dismissed'}>Dismissed ({allReports.filter(r => r.status === 'dismissed').length})</a>
-    <a href="/admin/reports?status=all" class:active={statusFilter === 'all'}>All ({allReports.length})</a>
-  </nav>
+    <nav class="admin-nav" aria-label="Admin sections">
+      <a href="/admin/users" class="admin-nav-link">Users</a>
+      <a href="/admin/invite-codes" class="admin-nav-link">Invite Codes</a>
+      <a href="/admin/reports" class="admin-nav-link admin-nav-link--active">Reports</a>
+    </nav>
 
-  <div class="table-wrap">
-    {filteredReports.length === 0 ? (
-      <p class="empty-state">No {statusFilter === 'all' ? '' : statusFilter} reports.</p>
-    ) : (
-      <table class="admin-table">
-        <thead>
-          <tr>
-            <th>ID</th>
-            <th>Type</th>
-            <th>Target</th>
-            <th>Reason</th>
-            <th>Reporter</th>
-            <th>Date</th>
-            <th>Status</th>
-            <th>Actions</th>
-          </tr>
-        </thead>
-        <tbody>
-          {filteredReports.map(r => (
+    <div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+    <!-- ── Filters ────────────────────────────────────────── -->
+    <div class="filter-bar">
+      <form method="GET" class="filter-form">
+        <div class="form-field">
+          <label for="status-filter">Status</label>
+          <select id="status-filter" name="status" class="select">
+            <option value="">All statuses</option>
+            <option value="open" selected={statusFilter === 'open'}>Open</option>
+            <option value="resolved" selected={statusFilter === 'resolved'}>Resolved</option>
+            <option value="dismissed" selected={statusFilter === 'dismissed'}>Dismissed</option>
+          </select>
+        </div>
+        <button type="submit" class="btn-filled">Filter</button>
+      </form>
+    </div>
+
+    <!-- ── Reports Table ────────────────────────────────────── -->
+    <div class="card">
+      <div class="table-wrapper">
+        <table class="admin-table">
+          <thead>
             <tr>
-              <td>{r.id}</td>
-              <td><span class="badge badge-type">{r.targetType}</span></td>
-              <td>
-                {r.targetType === 'work' ? (
-                  <a href={`/works/${r.targetId}`}>Work #{r.targetId}</a>
-                ) : (
-                  <span>Comment #{r.targetId}</span>
-                )}
-              </td>
-              <td>{reasonLabels[r.reason] ?? r.reason}{r.details ? ` — ${r.details.slice(0, 80)}${r.details.length > 80 ? '…' : ''}` : ''}</td>
-              <td class="email-cell">{r.reporterEmail}</td>
-              <td class="date-cell">{new Date(r.createdAt.replace(' ', 'T') + 'Z').toLocaleDateString()}</td>
-              <td>
-                <span class="status-dot" style={`background:${statusColors[r.status] ?? '#6b7280'}`}></span>
-                {r.status}
-              </td>
-              <td>
-                {r.status === 'open' && (
-                  <div class="action-group">
-                    <button
-                      class="btn-sm btn-resolve"
-                      data-report-id={r.id}
-                      data-action="resolve"
-                    >Resolve</button>
-                    <button
-                      class="btn-sm btn-dismiss"
-                      data-report-id={r.id}
-                      data-action="dismiss"
-                    >Dismiss</button>
-                  </div>
-                )}
-                {r.resolverEmail && (
-                  <span class="resolver-info">by {r.resolverEmail}</span>
-                )}
-              </td>
+              <th>#</th>
+              <th>Type</th>
+              <th>Target</th>
+              <th>Reason</th>
+              <th>Reporter</th>
+              <th>Status</th>
+              <th>Created</th>
+              <th>Actions</th>
             </tr>
-          ))}
-        </tbody>
-      </table>
-    )}
-  </div>
+          </thead>
+          <tbody>
+            {enrichedReports.map(r => (
+              <tr data-report-id={r.id}>
+                <td>{r.id}</td>
+                <td>
+                  <span class={`badge badge-${r.targetType === 'work' ? 'primary' : 'secondary'}`}>
+                    {r.targetType}
+                  </span>
+                </td>
+                <td class="target-cell">{r.targetType} #{r.targetId}</td>
+                <td>
+                  <span class="reason-tag">{reasonLabels[r.reason] || r.reason}</span>
+                  {r.details && <details class="report-details"><summary>Details</summary><p>{r.details}</p></details>}
+                </td>
+                <td>
+                  {r.reporter ? (
+                    <span>{r.reporter.displayName || r.reporter.email}</span>
+                  ) : '—'}
+                </td>
+                <td>
+                  {r.status === 'open' ? (
+                    <span class="badge badge-warning">Open</span>
+                  ) : r.status === 'resolved' ? (
+                    <span class="badge badge-success">Resolved</span>
+                  ) : (
+                    <span class="badge badge-muted">Dismissed</span>
+                  )}
+                </td>
+                <td class="date-cell">{new Date(r.createdAt).toLocaleDateString()}</td>
+                <td class="actions-cell">
+                  {r.status === 'open' && (
+                    <>
+                      <button class="btn-sm btn-success" data-action="resolve" data-report-id={r.id}>Resolve</button>
+                      <button class="btn-sm btn-muted" data-action="dismiss" data-report-id={r.id}>Dismiss</button>
+                    </>
+                  )}
+                  {r.status !== 'open' && (
+                    <span class="resolved-by">
+                      {r.resolver ? `by ${r.resolver.displayName || r.resolver.email}` : ''}
+                      {r.resolution && <details class="report-details"><summary>Resolution</summary><p>{r.resolution}</p></details>}
+                    </span>
+                  )}
+                </td>
+              </tr>
+            ))}
+            {enrichedReports.length === 0 && (
+              <tr><td colspan="8" class="empty-state">No reports found.</td></tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+
+      <!-- ── Pagination ─────────────────────────────────────── -->
+      {totalPages > 1 && (
+        <nav class="pagination" aria-label="Pagination">
+          {page > 1 && <a href={`?page=${page - 1}${statusFilter ? `&status=${statusFilter}` : ''}`} class="btn-sm">Previous</a>}
+          <span class="pagination-info">Page {page} of {totalPages}</span>
+          {page < totalPages && <a href={`?page=${page + 1}${statusFilter ? `&status=${statusFilter}` : ''}`} class="btn-sm">Next</a>}
+        </nav>
+      )}
+    </div>
+  </section>
 </Base>
 
-<style is:global>
-  .admin-tabs {
-    display: flex;
-    gap: 0.5rem;
-    margin-bottom: 1.5rem;
-  }
-  .admin-tabs a {
-    padding: 0.5rem 1rem;
-    border-radius: 8px;
-    text-decoration: none;
-    color: var(--md-sys-color-on-surface-variant);
-    background: var(--md-sys-color-surface-container);
-    font-size: 0.875rem;
-  }
-  .admin-tabs a.active,
-  .admin-tabs a:hover {
-    background: var(--md-sys-color-primary-container);
-    color: var(--md-sys-color-on-primary-container);
-  }
-  .badge {
-    display: inline-block;
-    padding: 0.15rem 0.5rem;
-    border-radius: 4px;
-    font-size: 0.75rem;
-    text-transform: capitalize;
-  }
-  .badge-type {
-    background: rgba(123, 143, 168, 0.15);
-    color: var(--md-sys-color-on-surface);
-  }
-  .status-dot {
-    display: inline-block;
-    width: 8px;
-    height: 8px;
-    border-radius: 50%;
-    margin-right: 4px;
-    vertical-align: middle;
-  }
-  .action-group {
-    display: flex;
-    gap: 0.25rem;
-  }
-  .btn-sm {
-    padding: 0.25rem 0.5rem;
-    border-radius: 4px;
-    border: 1px solid var(--md-sys-color-outline);
-    background: transparent;
-    color: var(--md-sys-color-on-surface);
-    cursor: pointer;
-    font-size: 0.75rem;
-  }
-  .btn-resolve:hover { background: #10b98120; border-color: #10b981; color: #10b981; }
-  .btn-dismiss:hover { background: #f59e0b20; border-color: #f59e0b; color: #f59e0b; }
-  .resolver-info { font-size: 0.7rem; color: var(--md-sys-color-on-surface-variant); }
-  .email-cell { font-size: 0.8rem; }
-  .date-cell { font-size: 0.8rem; white-space: nowrap; }
-  .empty-state { color: var(--md-sys-color-on-surface-variant); text-align: center; padding: 2rem; }
-</style>
-
 <script>
-  document.querySelectorAll('.btn-resolve, .btn-dismiss').forEach(btn => {
-    btn.addEventListener('click', async () => {
-      const reportId = btn.dataset.reportId;
-      const action = btn.dataset.action;
-      try {
-        const res = await fetch(`/api/admin/reports/${reportId}`, {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ action }),
-        });
-        if (res.ok) {
-          window.location.reload();
-        } else {
-          const data = await res.json().catch(() => ({}));
-          alert(data.error || 'Failed to update report');
-        }
-      } catch {
-        alert('Network error');
+  function showToast(message: string, type: 'success' | 'error' = 'success') {
+    const toast = document.getElementById('toast')!;
+    toast.textContent = message;
+    toast.className = `toast toast--${type} toast--show`;
+    setTimeout(() => { toast.className = 'toast'; }, 3000);
+  }
+
+  async function resolveReport(reportId: number, status: 'resolved' | 'dismissed') {
+    let resolution = '';
+    if (status === 'resolved') {
+      resolution = prompt('Enter resolution notes (optional):') || '';
+    }
+    try {
+      const res = await fetch(`/api/admin/reports/${reportId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status, resolution: resolution || undefined }),
+      });
+      if (res.ok) {
+        showToast(`Report ${status}.`);
+        setTimeout(() => window.location.reload(), 800);
+      } else {
+        const data = await res.json();
+        showToast(data.error || 'Failed to update report.', 'error');
       }
+    } catch {
+      showToast('Network error.', 'error');
+    }
+  }
+
+  document.querySelectorAll('[data-action="resolve"]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const reportId = Number((btn as HTMLElement).dataset.reportId);
+      resolveReport(reportId, 'resolved');
+    });
+  });
+
+  document.querySelectorAll('[data-action="dismiss"]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const reportId = Number((btn as HTMLElement).dataset.reportId);
+      resolveReport(reportId, 'dismissed');
     });
   });
 </script>
+
+<style is:global>
+  .admin-page {
+    max-width: 80rem;
+    margin: 0 auto;
+    padding: var(--space-8) var(--space-4);
+  }
+
+  .page-title {
+    font: var(--md-sys-typescale-headline-medium);
+    margin: 0 0 var(--space-4) 0;
+  }
+
+  .admin-nav {
+    display: flex;
+    gap: var(--space-2);
+    margin-bottom: var(--space-6);
+    border-bottom: 1px solid var(--md-sys-color-outline-variant);
+    padding-bottom: var(--space-2);
+  }
+
+  .admin-nav-link {
+    font: var(--md-sys-typescale-label-large);
+    color: var(--md-sys-color-on-surface-variant);
+    text-decoration: none;
+    padding: var(--space-1) var(--space-3);
+    border-radius: var(--md-sys-shape-corner-small);
+    transition: background var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard);
+  }
+  .admin-nav-link:hover { background: var(--md-sys-color-surface-container); }
+  .admin-nav-link--active {
+    color: var(--md-sys-color-primary);
+    background: var(--md-sys-color-primary-container);
+    font-weight: 600;
+  }
+
+  .filter-bar {
+    margin-bottom: var(--space-6);
+  }
+
+  .filter-form {
+    display: flex;
+    gap: var(--space-4);
+    align-items: flex-end;
+    flex-wrap: wrap;
+  }
+
+  .form-field {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+  }
+
+  .form-field label {
+    font: var(--md-sys-typescale-body-small);
+    color: var(--md-sys-color-on-surface-variant);
+  }
+
+  .card {
+    background: var(--md-sys-color-surface-container);
+    border: 1px solid var(--md-sys-color-outline-variant);
+    border-radius: var(--md-sys-shape-corner-large);
+    padding: var(--space-6);
+  }
+
+  .table-wrapper {
+    overflow-x: auto;
+  }
+
+  .admin-table {
+    width: 100%;
+    border-collapse: collapse;
+    font: var(--md-sys-typescale-body-medium);
+  }
+
+  .admin-table th {
+    font: var(--md-sys-typescale-label-large);
+    color: var(--md-sys-color-on-surface-variant);
+    text-align: left;
+    padding: var(--space-3) var(--space-4);
+    border-bottom: 2px solid var(--md-sys-color-outline-variant);
+  }
+
+  .admin-table td {
+    padding: var(--space-3) var(--space-4);
+    border-bottom: 1px solid var(--md-sys-color-outline-variant);
+    vertical-align: middle;
+  }
+
+  .target-cell {
+    white-space: nowrap;
+  }
+
+  .date-cell {
+    white-space: nowrap;
+    color: var(--md-sys-color-on-surface-variant);
+  }
+
+  .actions-cell {
+    display: flex;
+    gap: var(--space-2);
+    flex-wrap: wrap;
+  }
+
+  .badge {
+    display: inline-block;
+    font: var(--md-sys-typescale-body-small);
+    padding: var(--space-1) var(--space-2);
+    border-radius: var(--md-sys-shape-corner-small);
+    white-space: nowrap;
+  }
+  .badge-primary { background: #eaddff; color: #21005d; }
+  .badge-secondary { background: #e0e0e0; color: #424242; }
+  .badge-success { background: #c8e6c9; color: #1b5e20; }
+  .badge-warning { background: #fff9c4; color: #e65100; }
+  .badge-muted { background: var(--md-sys-color-surface-container-highest); color: var(--md-sys-color-on-surface-variant); }
+
+  .reason-tag {
+    font: var(--md-sys-typescale-body-small);
+    font-weight: 500;
+  }
+
+  .report-details {
+    font: var(--md-sys-typescale-body-small);
+    color: var(--md-sys-color-on-surface-variant);
+    margin-top: var(--space-1);
+    cursor: pointer;
+  }
+
+  .report-details p {
+    margin: var(--space-1) 0 0 0;
+    white-space: pre-wrap;
+  }
+
+  .resolved-by {
+    font: var(--md-sys-typescale-body-small);
+    color: var(--md-sys-color-on-surface-variant);
+  }
+
+  .btn-filled {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font: var(--md-sys-typescale-label-large);
+    color: var(--md-sys-color-on-primary);
+    background: var(--md-sys-color-primary);
+    border: none;
+    border-radius: var(--md-sys-shape-corner-full);
+    padding: var(--space-3) var(--space-8);
+    cursor: pointer;
+    transition: opacity var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard);
+  }
+  .btn-filled:hover { opacity: 0.88; }
+
+  .btn-sm {
+    font: var(--md-sys-typescale-body-small);
+    padding: var(--space-1) var(--space-3);
+    border-radius: var(--md-sys-shape-corner-small);
+    border: none;
+    cursor: pointer;
+    transition: opacity var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard);
+  }
+  .btn-sm:hover { opacity: 0.88; }
+  .btn-success { background: #c8e6c9; color: #1b5e20; }
+  .btn-muted { background: var(--md-sys-color-surface-container-highest); color: var(--md-sys-color-on-surface-variant); }
+
+  .select {
+    appearance: none;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%2349454f' d='M6 8L1 3h10z'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right var(--space-2) center;
+    padding-right: var(--space-8);
+    font: var(--md-sys-typescale-body-medium);
+    color: var(--md-sys-color-on-surface);
+    background-color: var(--md-sys-color-surface);
+    border: 1px solid var(--md-sys-color-outline-variant);
+    border-radius: var(--md-sys-shape-corner-small);
+    padding: var(--space-1) var(--space-3);
+  }
+
+  .empty-state {
+    text-align: center;
+    padding: var(--space-8);
+    color: var(--md-sys-color-on-surface-variant);
+  }
+
+  .pagination {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: var(--space-4);
+    margin-top: var(--space-6);
+  }
+
+  .pagination-info {
+    font: var(--md-sys-typescale-body-medium);
+    color: var(--md-sys-color-on-surface-variant);
+  }
+
+  .toast {
+    position: fixed;
+    bottom: var(--space-8);
+    left: 50%;
+    transform: translateX(-50%) translateY(100px);
+    border-radius: var(--md-sys-shape-corner-small);
+    padding: var(--space-3) var(--space-6);
+    font: var(--md-sys-typescale-body-medium);
+    z-index: 1000;
+    opacity: 0;
+    transition: transform 0.3s var(--md-sys-motion-easing-standard), opacity 0.3s var(--md-sys-motion-easing-standard);
+    pointer-events: none;
+  }
+  .toast--show { transform: translateX(-50%) translateY(0); opacity: 1; }
+  .toast--success { background: var(--md-sys-color-primary-container); color: var(--md-sys-color-on-primary-container); }
+  .toast--error { background: var(--md-sys-color-error); color: var(--md-sys-color-on-error); }
+</style>

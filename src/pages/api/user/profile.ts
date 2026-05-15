@@ -1,118 +1,55 @@
-export const prerender = false;
-
 import type { APIRoute } from 'astro';
-import { requireAuth } from '@/lib/auth';
-import { getDrizzle } from '@/lib/db';
-import { users } from '@/lib/schema';
-import { eq, sql } from 'drizzle-orm';
+import type { D1Database } from '@cloudflare/workers-types';
+import { getDb } from '@/v2/lib/db';
+import { requireAuth } from '@/v2/lib/auth';
+import { validateBody } from '@/v2/lib/validation';
+import { updateProfileSchema } from '@/v2/lib/validation';
+import { users } from '@/v2/lib/schema/index';
+import { eq } from 'drizzle-orm';
 
-const VALID_EMAIL_VISIBILITY = ['public', 'mutual', 'private'] as const;
-const VALID_READING_FONT_SIZE = ['small', 'default', 'large', 'xlarge'] as const;
+export const config = { auth: 'required' as const };
 
-/**
- * PUT /api/user/profile — update authenticated user's profile fields
- * Accepts: { display_name?, bio?, email_visibility?, reading_font_size?, avatar_url? }
- * D1 eventual consistency: changes may take 500-800ms to be visible in subsequent reads
- */
-export const PUT: APIRoute = async ({ locals, request }) => {
+// GET /api/user/profile — Get current user profile
+export const GET: APIRoute = async ({ request, locals }) => {
   const d1 = locals.runtime.env.DB as D1Database;
+  const db = getDb(d1);
   const auth = await requireAuth(d1, request);
-  if (!auth) {
-    return new Response(JSON.stringify({ error: 'Auth required' }), {
-      status: 401,
-      headers: { 'Content-Type': 'application/json' },
-    });
-  }
 
-  let body: Record<string, unknown>;
-  try {
-    body = await request.json();
-  } catch {
-    return new Response(JSON.stringify({ error: 'Invalid JSON body' }), {
-      status: 400,
-      headers: { 'Content-Type': 'application/json' },
-    });
-  }
+  const user = await db.select({
+    id: users.id, email: users.email, displayName: users.displayName,
+    bio: users.bio, role: users.role, approved: users.approved,
+    emailVisibility: users.emailVisibility, theme: users.theme,
+    readingFontSize: users.readingFontSize, readingSkinOverride: users.readingSkinOverride,
+    avatarKey: users.avatarKey, createdAt: users.createdAt,
+  }).from(users).where(eq(users.id, auth.user.id)).get();
 
-  // Build update values dynamically — only update provided fields
-  const updateValues: Record<string, any> = {};
+  return new Response(JSON.stringify({ data: user }), {
+    status: 200, headers: { 'Content-Type': 'application/json' },
+  });
+};
 
-  if ('display_name' in body) {
-    updateValues.displayName = typeof body.display_name === 'string' ? body.display_name : null;
-  }
+// PUT /api/user/profile — Update profile
+export const PUT: APIRoute = async ({ request, locals }) => {
+  const d1 = locals.runtime.env.DB as D1Database;
+  const db = getDb(d1);
+  const auth = await requireAuth(d1, request);
 
-  if ('bio' in body) {
-    const bio = typeof body.bio === 'string' ? body.bio : '';
-    updateValues.bio = bio.slice(0, 500);
-  }
+  const [data, error] = await validateBody(request, updateProfileSchema);
+  if (error) return error;
 
-  if ('email_visibility' in body) {
-    const vis = body.email_visibility as string;
-    if (!VALID_EMAIL_VISIBILITY.includes(vis as any)) {
-      return new Response(JSON.stringify({ error: 'Invalid email_visibility value' }), {
-        status: 400,
-        headers: { 'Content-Type': 'application/json' },
-      });
-    }
-    updateValues.emailVisibility = vis;
-  }
+  const updates: Record<string, any> = { updatedAt: new Date().toISOString() };
+  if (data.displayName !== undefined) updates.displayName = data.displayName;
+  if (data.bio !== undefined) updates.bio = data.bio;
+  if (data.emailVisibility !== undefined) updates.emailVisibility = data.emailVisibility;
+  if (data.theme !== undefined) updates.theme = data.theme;
+  if (data.readingFontSize !== undefined) updates.readingFontSize = data.readingFontSize;
+  if (data.readingSkinOverride !== undefined) updates.readingSkinOverride = data.readingSkinOverride;
 
-  if ('reading_font_size' in body) {
-    const fs = body.reading_font_size as string;
-    if (!VALID_READING_FONT_SIZE.includes(fs as any)) {
-      return new Response(JSON.stringify({ error: 'Invalid reading_font_size value' }), {
-        status: 400,
-        headers: { 'Content-Type': 'application/json' },
-      });
-    }
-    updateValues.readingFontSize = fs;
-  }
+  const updated = await db.update(users).set(updates).where(eq(users.id, auth.user.id)).returning();
 
-  if ('mood_disabled' in body) {
-    const md = body.mood_disabled;
-    updateValues.moodDisabled = (md === true || md === 1) ? 1 : 0;
-  }
-
-  if ('avatar_url' in body) {
-    updateValues.avatarUrl = typeof body.avatar_url === 'string' ? body.avatar_url : null;
-  }
-
-  if ('avatar_key' in body) {
-    updateValues.avatarKey = typeof body.avatar_key === 'string' ? body.avatar_key : null;
-  }
-
-  if (Object.keys(updateValues).length === 0) {
-    return new Response(JSON.stringify({ error: 'No fields to update' }), {
-      status: 400,
-      headers: { 'Content-Type': 'application/json' },
-    });
-  }
-
-  updateValues.updatedAt = sql`datetime('now')`;
-
-  const db = getDrizzle(d1);
-  await db.update(users).set(updateValues).where(eq(users.id, auth.user.id));
-
-  // Fetch updated user to return
-  const updated = await db.select().from(users).where(eq(users.id, auth.user.id)).get();
-
-  return new Response(
-    JSON.stringify({
-      user: {
-        id: updated!.id,
-        email: updated!.email,
-        role: updated!.role,
-        display_name: updated!.displayName,
-        avatar_url: updated!.avatarUrl,
-        avatar_key: updated!.avatarKey,
-        bio: updated!.bio,
-        email_visibility: updated!.emailVisibility,
-        reading_font_size: updated!.readingFontSize,
-        mood_disabled: updated!.moodDisabled ?? 0,
-      },
-    }),
-    {
-      headers: { 'Content-Type': 'application/json' },
-    }
-  );
+  return new Response(JSON.stringify({ data: {
+    id: updated[0].id, displayName: updated[0].displayName, bio: updated[0].bio,
+    emailVisibility: updated[0].emailVisibility, theme: updated[0].theme,
+    readingFontSize: updated[0].readingFontSize, readingSkinOverride: updated[0].readingSkinOverride,
+  }}), { status: 200, headers: { 'Content-Type': 'application/json' } });
 };

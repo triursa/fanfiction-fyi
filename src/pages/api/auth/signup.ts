@@ -1,98 +1,70 @@
-export const prerender = false;
-
-import { getDrizzle } from '@/lib/db';
-import { users, inviteCodes, pseuds } from '@/lib/schema';
-import { hashPassword, createSession, setSessionCookie } from '@/lib/auth';
-import { checkRateLimit, recordFailedAttempt, clearRateLimit } from '@/lib/rate-limit';
-import { eq, sql } from 'drizzle-orm';
 import type { APIRoute } from 'astro';
+import { eq } from 'drizzle-orm';
+import type { D1Database } from '@cloudflare/workers-types';
+import { getDb } from '@/v2/lib/db';
+import { hashPassword, createSession, sessionCookie, validateInviteCode, markInviteCodeUsed } from '@/v2/lib/auth';
+import { users, pseuds } from '@/v2/lib/schema/index';
+import { z } from 'zod';
+import { validateBody } from '@/v2/lib/validation';
 
-export const POST: APIRoute = async ({ request, locals, clientAddress }) => {
+const signupSchema = z.object({
+  email: z.string().email('Invalid email address'),
+  password: z.string().min(8, 'Password must be at least 8 characters'),
+  displayName: z.string().min(1).max(50).optional(),
+  inviteCode: z.string().min(1, 'Invite code is required'),
+});
+
+export const config = { auth: 'public' as const };
+
+export const POST: APIRoute = async ({ request, locals }) => {
   const d1 = locals.runtime.env.DB as D1Database;
-  const db = getDrizzle(d1);
+  const db = getDb(d1);
 
-  let body: any;
-  try { body = await request.json(); } catch {
-    return new Response(JSON.stringify({ error: 'Invalid JSON' }), { status: 400, headers: { 'Content-Type': 'application/json' } });
-  }
+  // Validate request body
+  const [data, error] = await validateBody(request, signupSchema);
+  if (error) return error;
 
-  const { invite_code, email, password, display_name } = body || {};
-  if (!invite_code || !email || !password || !display_name) {
-    return new Response(JSON.stringify({ error: 'Missing fields' }), { status: 400, headers: { 'Content-Type': 'application/json' } });
-  }
-  if (password.length < 8 || password.length > 128) {
-    return new Response(JSON.stringify({ error: 'Password must be 8–128 characters' }), { status: 400, headers: { 'Content-Type': 'application/json' } });
+  // Check invite code
+  const inviteResult = await validateInviteCode(d1, data.inviteCode);
+  if (!inviteResult.valid) {
+    return new Response(JSON.stringify({ error: inviteResult.error }), { status: 400, headers: { 'Content-Type': 'application/json' } });
   }
 
-  // Basic email format validation
-  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-    return new Response(JSON.stringify({ error: 'Invalid email format' }), { status: 400, headers: { 'Content-Type': 'application/json' } });
-  }
-
-  // Rate limit by IP to prevent signup spam
-  const rateLimitKey = (clientAddress || request.headers.get('x-forwarded-for') || 'unknown').split(',')[0].trim();
-  const rateLimit = await checkRateLimit(d1, rateLimitKey, 'signup');
-  if (!rateLimit.allowed) {
-    return new Response(JSON.stringify({ error: `Too many signup attempts. Try again in ${rateLimit.retryAfterSeconds}s.`, retryAfter: rateLimit.retryAfterSeconds }), {
-      status: 429,
-      headers: { 'Content-Type': 'application/json', 'Retry-After': String(rateLimit.retryAfterSeconds) },
-    });
-  }
-
-  const invite = await db
-    .select({ id: inviteCodes.id, usedBy: inviteCodes.usedBy })
-    .from(inviteCodes)
-    .where(eq(inviteCodes.code, invite_code))
-    .get();
-  if (!invite) {
-    await recordFailedAttempt(d1, rateLimitKey, 'signup');
-    return new Response(JSON.stringify({ error: 'Invalid invite code' }), { status: 400, headers: { 'Content-Type': 'application/json' } });
-  }
-  if (invite.usedBy !== null) {
-    return new Response(JSON.stringify({ error: 'Invite code already used' }), { status: 400, headers: { 'Content-Type': 'application/json' } });
-  }
-
-  const existing = await db
-    .select({ id: users.id })
-    .from(users)
-    .where(eq(users.email, email))
-    .get();
+  // Check if email already exists
+  const existing = await db.select({ id: users.id }).from(users).where(eq(users.email, data.email)).get();
   if (existing) {
     return new Response(JSON.stringify({ error: 'Email already registered' }), { status: 409, headers: { 'Content-Type': 'application/json' } });
   }
 
-  const passwordHash = await hashPassword(password);
-
-  // New invite-code users require approval (approved = 0)
-  // Founder can pre-approve via admin panel after signup
-  const userResult = await db.insert(users).values({
-    email,
+  // Hash password and create user
+  const passwordHash = await hashPassword(data.password);
+  const result = await db.insert(users).values({
+    email: data.email,
     passwordHash,
-    inviteCode: invite_code,
-    approved: 0,
-    createdAt: sql`(datetime('now'))`,
-    updatedAt: sql`(datetime('now'))`,
-  });
-  const userId = userResult.meta.last_row_id as number;
+    displayName: data.displayName || data.email.split('@')[0],
+    approved: 1,
+  }).returning({ id: users.id });
 
-  await db.update(inviteCodes)
-    .set({ usedBy: userId, usedAt: sql`(datetime('now'))` })
-    .where(eq(inviteCodes.id, invite.id));
+  const userId = result[0].id;
 
-  const pseudResult = await db.insert(pseuds).values({
+  // Mark invite code as used
+  await markInviteCodeUsed(d1, data.inviteCode, userId);
+
+  // Create default pseud
+  await db.insert(pseuds).values({
     userId,
-    name: display_name,
-    createdAt: sql`(datetime('now'))`,
+    name: data.displayName || data.email.split('@')[0],
+    isDefault: 1,
   });
-  const pseudId = pseudResult.meta.last_row_id as number;
 
-  // Clear rate limit on successful signup
-  await clearRateLimit(d1, rateLimitKey, 'signup');
-
+  // Create session
   const token = await createSession(d1, userId);
 
-  return new Response(JSON.stringify({ id: userId, email, pseud_id: pseudId, approvalStatus: 'pending' }), {
+  return new Response(JSON.stringify({ success: true, userId }), {
     status: 201,
-    headers: { 'Content-Type': 'application/json', 'Set-Cookie': setSessionCookie(token) },
+    headers: {
+      'Content-Type': 'application/json',
+      'Set-Cookie': sessionCookie(token),
+    },
   });
 };

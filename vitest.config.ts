@@ -9,7 +9,7 @@ export default defineConfig({
     coverage: {
       provider: 'v8',
       reportsDirectory: './coverage',
-      include: ['src/lib/**/*.ts', 'src/lib/**/*.tsx'],
+      include: ['src/lib/**/*.ts', 'src/lib/**/*.tsx', 'src/v2/lib/**/*.ts', 'src/v2/styles/**/*.ts'],
     },
   },
   resolve: {

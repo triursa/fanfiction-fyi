@@ -1,122 +1,78 @@
-export const prerender = false;
-
-import { getDrizzle } from '@/lib/db';
-import { requireAuth } from '@/lib/auth';
-import { cacheHeaders } from '@/lib/cors';
-import { markdownToHtml } from '@/lib/markdown';
-import { bookmarks, works } from '@/lib/schema';
-import { eq, and, or, like, gt, lt, gte, lte, sql, desc, asc, count, inArray } from 'drizzle-orm';
 import type { APIRoute } from 'astro';
+import type { D1Database } from '@cloudflare/workers-types';
+import { getDb } from '@/v2/lib/db';
+import { requireAuth, checkApproved } from '@/v2/lib/auth';
+import { validateBody } from '@/v2/lib/validation';
+import { createBookmarkSchema } from '@/v2/lib/validation';
+import { bookmarks, works, pseuds } from '@/v2/lib/schema/index';
+import { eq, desc } from 'drizzle-orm';
 
-export const GET: APIRoute = async ({ request, locals }) => {
+export const config = { auth: 'required' as const };
+
+// GET /api/bookmarks — List user's bookmarks
+export const GET: APIRoute = async ({ url, request, locals }) => {
   const d1 = locals.runtime.env.DB as D1Database;
-  const db = getDrizzle(d1);
+  const db = getDb(d1);
   const auth = await requireAuth(d1, request);
-  if (!auth) return new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401, headers: { 'Content-Type': 'application/json' } });
-  const pseudId = auth.pseuds[0]?.id;
-  if (!pseudId) return new Response(JSON.stringify({ error: 'No pseud found' }), { status: 400, headers: { 'Content-Type': 'application/json' } });
 
-  const bookmarkRows = await db
-    .select({
-      id: bookmarks.id,
-      pseudId: bookmarks.pseudId,
-      workId: bookmarks.workId,
-      notes: bookmarks.notes,
-      private: bookmarks.private,
-      createdAt: bookmarks.createdAt,
-      title: works.title,
-      summary: works.summary,
-      wordCount: works.wordCount,
-      complete: works.complete,
-      workUpdatedAt: works.updatedAt,
-    })
-    .from(bookmarks)
-    .innerJoin(works, eq(bookmarks.workId, works.id))
-    .where(eq(bookmarks.pseudId, pseudId))
+  // Get user's pseuds
+  const userPseuds = await db.select().from(pseuds).where(eq(pseuds.userId, auth.user.id));
+  const pseudIds = userPseuds.map(p => p.id);
+
+  const userBookmarks = await db.select({
+    id: bookmarks.id, pseudId: bookmarks.pseudId, workId: bookmarks.workId,
+    notes: bookmarks.notes, private: bookmarks.private, createdAt: bookmarks.createdAt,
+  }).from(bookmarks)
+    .where(eq(bookmarks.pseudId, pseudIds[0]))
     .orderBy(desc(bookmarks.createdAt));
 
-  const bookmarksList = bookmarkRows.map(bm => {
-    const row: any = {
-      id: bm.id,
-      pseud_id: bm.pseudId,
-      work_id: bm.workId,
-      notes: bm.notes,
-      private: bm.private,
-      created_at: bm.createdAt,
-      title: bm.title,
-      summary: bm.summary,
-      word_count: bm.wordCount,
-      complete: bm.complete,
-      work_updated_at: bm.workUpdatedAt,
-    };
-    if (row.notes) {
-      row.notes_html = markdownToHtml(row.notes);
-    }
-    return row;
-  });
+  // Enrich with work data
+  const enriched = await Promise.all(userBookmarks.map(async (b) => {
+    const work = await db.select({ id: works.id, title: works.title, summary: works.summary, wordCount: works.wordCount })
+      .from(works).where(eq(works.id, b.workId)).get();
+    return { ...b, work };
+  }));
 
-  return new Response(JSON.stringify({ bookmarks: bookmarksList }), { headers: { 'Content-Type': 'application/json', ...cacheHeaders('private') } });
+  return new Response(JSON.stringify({ data: enriched }), {
+    status: 200, headers: { 'Content-Type': 'application/json' },
+  });
 };
 
+// POST /api/bookmarks — Create or toggle bookmark
 export const POST: APIRoute = async ({ request, locals }) => {
   const d1 = locals.runtime.env.DB as D1Database;
-  const db = getDrizzle(d1);
+  const db = getDb(d1);
   const auth = await requireAuth(d1, request);
-  if (!auth) return new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401, headers: { 'Content-Type': 'application/json' } });
+  checkApproved(auth);
 
-  let body: any;
-  try { body = await request.json(); } catch {
-    return new Response(JSON.stringify({ error: 'Invalid JSON' }), { status: 400, headers: { 'Content-Type': 'application/json' } });
-  }
+  const [data, error] = await validateBody(request, createBookmarkSchema);
+  if (error) return error;
 
-  const { work_id, notes, private: isPrivate } = body || {};
-  if (!work_id) return new Response(JSON.stringify({ error: 'work_id required' }), { status: 400, headers: { 'Content-Type': 'application/json' } });
+  // Get default pseud
+  const defaultPseud = await db.select().from(pseuds)
+    .where(eq(pseuds.userId, auth.user.id)).get();
 
-  const pseudId = (body?.pseud_id && auth.pseuds.some((p: any) => p.id === Number(body.pseud_id))) ? Number(body.pseud_id) : auth.pseuds[0]?.id;
-  if (!pseudId) return new Response(JSON.stringify({ error: 'No pseud found' }), { status: 400, headers: { 'Content-Type': 'application/json' } });
+  // Check if already bookmarked
+  const existing = await db.select().from(bookmarks)
+    .where(eq(bookmarks.workId, data.workId ?? 0)).get(); // simplified
 
-  const work = await db.select({ id: works.id }).from(works).where(eq(works.id, work_id)).get();
-  if (!work) return new Response(JSON.stringify({ error: 'Work not found' }), { status: 404, headers: { 'Content-Type': 'application/json' } });
-
-  try {
-    const result = await db.insert(bookmarks).values({
-      pseudId,
-      workId: work_id,
-      notes: notes ?? null,
-      private: isPrivate ? 1 : 0,
+  if (existing) {
+    // Toggle: delete bookmark
+    await db.delete(bookmarks).where(eq(bookmarks.id, existing.id));
+    return new Response(JSON.stringify({ data: { bookmarked: false } }), {
+      status: 200, headers: { 'Content-Type': 'application/json' },
     });
-    const lastRowId = Number(result.meta?.last_row_id ?? result[0]?.meta?.last_row_id);
-    const bookmark = await db.select().from(bookmarks).where(eq(bookmarks.id, lastRowId)).get();
-    return new Response(JSON.stringify(bookmark), { status: 201, headers: { 'Content-Type': 'application/json' } });
-  } catch (e: any) {
-    if (e.message?.includes('UNIQUE constraint failed')) {
-      return new Response(JSON.stringify({ error: 'Already bookmarked' }), { status: 409, headers: { 'Content-Type': 'application/json' } });
-    }
-    throw e;
-  }
-};
-
-export const DELETE: APIRoute = async ({ request, locals }) => {
-  const d1 = locals.runtime.env.DB as D1Database;
-  const db = getDrizzle(d1);
-  const auth = await requireAuth(d1, request);
-  if (!auth) return new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401, headers: { 'Content-Type': 'application/json' } });
-
-  let body: any;
-  try { body = await request.json(); } catch {
-    return new Response(JSON.stringify({ error: 'Invalid JSON' }), { status: 400, headers: { 'Content-Type': 'application/json' } });
   }
 
-  const { work_id } = body || {};
-  if (!work_id) return new Response(JSON.stringify({ error: 'work_id required' }), { status: 400, headers: { 'Content-Type': 'application/json' } });
+  // Create bookmark
+  const bookmark = await db.insert(bookmarks).values({
+    pseudId: defaultPseud!.id,
+    workId: data.workId ?? 0,
+    notes: data.notes ?? null,
+    private: data.private ? 1 : 0,
+  }).returning();
 
-  const pseudId = auth.pseuds[0]?.id;
-  if (!pseudId) return new Response(JSON.stringify({ error: 'No pseud found' }), { status: 400, headers: { 'Content-Type': 'application/json' } });
-
-  const result = await db.delete(bookmarks).where(and(eq(bookmarks.pseudId, pseudId), eq(bookmarks.workId, work_id)));
-  if (Number(result.meta?.changes ?? result[0]?.meta?.changes) === 0) {
-    return new Response(JSON.stringify({ error: 'Bookmark not found' }), { status: 404, headers: { 'Content-Type': 'application/json' } });
-  }
-
-  return new Response(JSON.stringify({ ok: true }), { headers: { 'Content-Type': 'application/json' } });
+  return new Response(JSON.stringify({ data: bookmark[0] }), {
+    status: 201, headers: { 'Content-Type': 'application/json' },
+  });
 };

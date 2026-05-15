@@ -1,0 +1,177 @@
+---
+export const prerender = false;
+import Base from '../../layouts/Base.astro';
+import BrowseKeyboardNav from '../../components/BrowseKeyboardNav';
+import { getDrizzle } from '../../lib/db';
+import { works, chapters, tags, taggings, pseuds, creatorships } from '../../lib/schema';
+import { eq, and, isNotNull, desc, sql } from 'drizzle-orm';
+
+const db = getDrizzle(Astro.locals.runtime.env.DB);
+
+const page = Number(Astro.url.searchParams.get('page')) || 1;
+const limit = 20;
+const offset = (page - 1) * limit;
+
+const worksRows = await db
+  .select({
+    id: works.id,
+    title: works.title,
+    summary: works.summary,
+    wordCount: works.wordCount,
+    complete: works.complete,
+    updatedAt: works.updatedAt,
+    publishedAt: works.publishedAt,
+    chapterCount: sql<number>`count(${chapters.id})`,
+  })
+  .from(works)
+  .leftJoin(chapters, eq(chapters.workId, works.id))
+  .where(isNotNull(works.publishedAt))
+  .groupBy(works.id)
+  .orderBy(desc(works.updatedAt))
+  .limit(limit)
+  .offset(offset);
+
+// Cast to any[] for template compatibility (nested tags/pseuds added below)
+const worksList: any[] = worksRows.map(w => ({
+  ...w,
+  word_count: w.wordCount,
+  updated_at: w.updatedAt,
+  published_at: w.publishedAt,
+  chapter_count: w.chapterCount,
+  tags: [],
+  pseuds: [],
+}));
+
+for (const w of worksList) {
+  w.tags = await db
+    .select({ name: tags.name, type: tags.type })
+    .from(taggings)
+    .innerJoin(tags, eq(taggings.tagId, tags.id))
+    .where(eq(taggings.workId, w.id));
+
+  w.pseuds = await db
+    .select({ name: pseuds.name, icon_key: pseuds.iconKey })
+    .from(creatorships)
+    .innerJoin(pseuds, eq(creatorships.pseudId, pseuds.id))
+    .where(eq(creatorships.workId, w.id));
+}
+---
+
+<Base title="Works — fanfiction.fyi">
+  <section class="works-listing">
+    <h1 class="page-title">Works</h1>
+
+    {worksList.length === 0 && (
+      <div class="empty-state" role="status">
+        <p class="placeholder-text">No works have been published yet.</p>
+        <a href="/works/create" class="empty-state-cta">Post a Work</a>
+      </div>
+    )}
+
+    <div class="works-grid">
+      {worksList.map(w => (
+        <a href={`/works/${w.id}`} class="work-card">
+          <h2 class="work-card__title">{w.title}</h2>
+          <p class="work-card__author">By {w.pseuds.map((p: any, i: number) => (
+            <Fragment>
+              {i > 0 ? ', ' : ''}
+              {p.icon_key && <img class="pseud-icon-sm" src={`/api/storage/${p.icon_key}`} alt="" />}
+              {p.name}
+            </Fragment>
+          ))}</p>
+          {w.summary && <p class="work-card__summary">{w.summary.length > 200 ? w.summary.slice(0, 200) + '…' : w.summary}</p>}
+          <div class="work-card__meta">
+            <span>{w.word_count.toLocaleString()} words</span>
+            <span>·</span>
+            <span>{w.chapter_count} chapter{w.chapter_count !== 1 ? 's' : ''}</span>
+            <span>·</span>
+            <span>{w.complete ? 'Complete' : 'WIP'}</span>
+          </div>
+          <div class="work-card__tags">
+            {w.tags.filter((t: any) => t.type === 'fandom').map((t: any) => <span class="tag-pill">{t.name}</span>)}
+          </div>
+        </a>
+      ))}
+    </div>
+
+    {page > 1 && <a href={`/works?page=${page - 1}`} class="btn-secondary">← Previous</a>}
+    {worksList.length === limit && <a href={`/works?page=${page + 1}`} class="btn-secondary">Next →</a>}
+  </section>
+
+  <BrowseKeyboardNav client:load />
+</Base>
+
+<style is:global>
+  @import '../../styles/theme.css';
+
+    .works-listing { max-width: 1200px; margin: 0 auto; padding: 0 var(--space-4); }
+    .page-title { font: var(--md-sys-typescale-headline-medium); color: var(--md-sys-color-on-surface); margin: 0 0 var(--space-6); }
+    .placeholder-text { font: var(--md-sys-typescale-body-large); color: var(--md-sys-color-outline); font-style: italic; }
+    .empty-state { text-align: center; padding: var(--space-8) 0; }
+
+    .works-grid {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: var(--space-4);
+    }
+
+    @media (min-width: 768px) {
+      .works-grid {
+        grid-template-columns: repeat(2, 1fr);
+      }
+    }
+
+    .empty-state-cta {
+      display: inline-block;
+      margin-top: var(--space-4);
+      font: var(--md-sys-typescale-label-large);
+      color: var(--md-sys-color-on-primary);
+      background: var(--md-sys-color-primary);
+      border-radius: var(--md-sys-shape-corner-full);
+      padding: var(--space-3) var(--space-6);
+      text-decoration: none;
+      transition: background var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard);
+    }
+    .empty-state-cta:hover { background: var(--md-sys-color-primary-container); color: var(--md-sys-color-on-primary-container); text-decoration: none; }
+
+  .work-card {
+    display: block; padding: var(--space-4) var(--space-6);
+    background: var(--md-sys-color-surface-container);
+    border: 1px solid var(--md-sys-color-outline-variant);
+    border-radius: var(--md-sys-shape-corner-large);
+    text-decoration: none; color: var(--md-sys-color-on-surface);
+    transition: background var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard);
+  }
+  .work-card:hover {
+    background: var(--md-sys-color-surface-container-high);
+    text-decoration: none;
+  }
+
+  .work-card__title { font: var(--md-sys-typescale-title-large); color: var(--md-sys-color-primary); margin: 0 0 var(--space-1); }
+  .work-card__author { font: var(--md-sys-typescale-body-medium); color: var(--md-sys-color-on-surface-variant); margin: 0 0 var(--space-2); }
+  .pseud-icon-sm { width: 20px; height: 20px; border-radius: 50%; object-fit: cover; vertical-align: middle; margin-right: 4px; }
+  .work-card__summary { font: var(--md-sys-typescale-body-medium); color: var(--md-sys-color-on-surface-variant); margin: 0 0 var(--space-2); }
+  .work-card__meta { font: var(--md-sys-typescale-body-small); color: var(--md-sys-color-outline); display: flex; gap: var(--space-2); flex-wrap: wrap; margin-bottom: var(--space-2); }
+  .work-card__tags { display: flex; flex-wrap: wrap; gap: var(--space-1); }
+
+  .tag-pill {
+    font: var(--md-sys-typescale-body-small);
+    background: var(--md-sys-color-secondary-container);
+    color: var(--md-sys-color-on-secondary-container);
+    padding: 2px var(--space-3);
+    border-radius: var(--md-sys-shape-corner-full);
+  }
+
+  .btn-secondary {
+    display: inline-block;
+    font: var(--md-sys-typescale-label-large);
+    color: var(--md-sys-color-primary);
+    background: transparent;
+    border: 1px solid var(--md-sys-color-outline);
+    border-radius: var(--md-sys-shape-corner-full);
+    padding: var(--space-3) var(--space-6);
+    cursor: pointer;
+    text-decoration: none;
+    margin: var(--space-4) var(--space-2) 0 0;
+  }
+</style>

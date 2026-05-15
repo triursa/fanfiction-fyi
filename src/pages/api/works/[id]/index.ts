@@ -1,244 +1,292 @@
-export const prerender = false;
-
-import { getDrizzle } from '@/lib/db';
-import { getAuth, requireAuth } from '@/lib/auth';
-import { logPublishAttempt, logPublishResult } from '@/lib/publish-logger';
-import { works, chapters, creatorships, tags, taggings, pseuds } from '@/lib/schema';
-import { eq, and, or, like, gt, lt, gte, lte, sql, desc, asc, count, inArray, isNotNull, isNull } from 'drizzle-orm';
 import type { APIRoute } from 'astro';
+import type { D1Database } from '@cloudflare/workers-types';
+import { getDb } from '@/v2/lib/db';
+import { getAuth, requireAuth, checkApproved } from '@/v2/lib/auth';
+import { validateBody, validateQuery, updateWorkSchema } from '@/v2/lib/validation';
+import { works, chapters, tags, taggings, creatorships, pseuds, kudos } from '@/v2/lib/schema/index';
+import { eq, and, count, sql } from 'drizzle-orm';
 
-export const GET: APIRoute = async ({ params, locals, request }) => {
+export const config = { auth: 'optional' as const };
+
+// ─── GET /api/works/[id] — Single work detail ──────────────────────
+
+export const GET: APIRoute = async ({ request, locals, params }) => {
   const d1 = locals.runtime.env.DB as D1Database;
-  const db = getDrizzle(d1);
-  const workId = Number(params.id);
-  if (!workId) return new Response(JSON.stringify({ error: 'Not found' }), { status: 404, headers: { 'Content-Type': 'application/json' } });
+  const db = getDb(d1);
+  const workId = Number(params?.id);
+
+  if (!workId || Number.isNaN(workId)) {
+    return new Response(JSON.stringify({ error: 'Invalid work ID' }), {
+      status: 400,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
 
   const work = await db.select().from(works).where(eq(works.id, workId)).get();
-  if (!work) return new Response(JSON.stringify({ error: 'Work not found' }), { status: 404, headers: { 'Content-Type': 'application/json' } });
 
-  // Fetch pseuds first to check ownership
-  const pseudRows = await db
+  if (!work) {
+    return new Response(JSON.stringify({ error: 'Work not found' }), {
+      status: 404,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+
+  // Draft works are only visible to their authors
+  if (work.draft) {
+    const auth = await getAuth(d1, request);
+    if (!auth) {
+      return new Response(JSON.stringify({ error: 'Work not found' }), {
+        status: 404,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
+    // Check if the authenticated user is an author of this work
+    const creatorship = await db
+      .select()
+      .from(creatorships)
+      .innerJoin(pseuds, eq(creatorships.pseudId, pseuds.id))
+      .where(and(eq(creatorships.workId, workId), eq(pseuds.userId, auth.user.id)))
+      .get();
+
+    if (!creatorship) {
+      return new Response(JSON.stringify({ error: 'Work not found' }), {
+        status: 404,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
+  }
+
+  // Fetch authors
+  const authorRows = await db
     .select({
-      id: pseuds.id,
-      userId: pseuds.userId,
+      pseudId: pseuds.id,
       name: pseuds.name,
-      description: pseuds.description,
-      iconKey: pseuds.iconKey,
-      createdAt: pseuds.createdAt,
-      pinnedWorkIds: pseuds.pinnedWorkIds,
-      bannerKey: pseuds.bannerKey,
-      themeColor: pseuds.themeColor,
-      isDefault: pseuds.isDefault,
       role: creatorships.role,
+      userId: pseuds.userId,
     })
-    .from(pseuds)
-    .innerJoin(creatorships, eq(pseuds.id, creatorships.pseudId))
+    .from(creatorships)
+    .innerJoin(pseuds, eq(creatorships.pseudId, pseuds.id))
     .where(eq(creatorships.workId, workId));
 
-  // Convert to snake_case for API compatibility
-  const pseudsList = pseudRows.map(p => ({
-    ...p,
-    user_id: p.userId,
-    icon_key: p.iconKey,
-    pinned_work_ids: p.pinnedWorkIds,
-    banner_key: p.bannerKey,
-    theme_color: p.themeColor,
-    is_default: p.isDefault,
-    created_at: p.createdAt,
-  }));
-
-  const auth = await getAuth(d1, request);
-  const isOwner = auth && pseudsList.some((p: any) => p.user_id === auth.user.id);
-
-  // Unauthenticated/non-owner users can only see published works
-  if (!work.publishedAt && !isOwner) {
-    return new Response(JSON.stringify({ error: 'Work not found' }), { status: 404, headers: { 'Content-Type': 'application/json' } });
-  }
-
-  // For owners: show all chapters including drafts. For others: published only, and omit the draft column.
-  const chapterConditions = [eq(chapters.workId, workId)];
-  if (!isOwner) {
-    chapterConditions.push(eq(chapters.draft, 0));
-  }
-
-  const chapterRows = isOwner
-    ? await db
-        .select({ id: chapters.id, position: chapters.position, title: chapters.title, draft: chapters.draft, wordCount: chapters.wordCount, updatedAt: chapters.updatedAt })
-        .from(chapters)
-        .where(eq(chapters.workId, workId))
-        .orderBy(asc(chapters.position))
-    : await db
-        .select({ id: chapters.id, position: chapters.position, title: chapters.title, wordCount: chapters.wordCount, updatedAt: chapters.updatedAt })
-        .from(chapters)
-        .where(and(eq(chapters.workId, workId), eq(chapters.draft, 0)))
-        .orderBy(asc(chapters.position));
-
-  // Convert chapters to snake_case
-  const chaptersList = chapterRows.map((c: any) => {
-    const row: any = {
-      id: c.id,
-      position: c.position,
-      title: c.title,
-      word_count: c.wordCount,
-      updated_at: c.updatedAt,
-    };
-    if ('draft' in c) row.draft = c.draft;
-    return row;
-  });
-
+  // Fetch tags
   const tagRows = await db
-    .select()
-    .from(tags)
-    .innerJoin(taggings, eq(tags.id, taggings.tagId))
+    .select({
+      id: tags.id,
+      name: tags.name,
+      type: tags.type,
+    })
+    .from(taggings)
+    .innerJoin(tags, eq(taggings.tagId, tags.id))
     .where(eq(taggings.workId, workId));
 
-  const tagsList = tagRows.map(r => r.tags);
+  // Fetch chapter count
+  const [{ chapterCount }] = await db
+    .select({ chapterCount: count() })
+    .from(chapters)
+    .where(eq(chapters.workId, workId));
 
-  return new Response(JSON.stringify({ work, chapters: chaptersList, tags: tagsList, pseuds: pseudsList }), { headers: { 'Content-Type': 'application/json' } });
+  // Fetch kudos count
+  const [{ kudosCount }] = await db
+    .select({ kudosCount: count() })
+    .from(kudos)
+    .where(eq(kudos.workId, workId));
+
+  return new Response(JSON.stringify({
+    data: {
+      ...work,
+      authors: authorRows.map(a => ({ pseudId: a.pseudId, name: a.name, role: a.role })),
+      tags: tagRows,
+      chapterCount,
+      kudosCount,
+    },
+  }), {
+    status: 200,
+    headers: { 'Content-Type': 'application/json' },
+  });
 };
 
-export const PUT: APIRoute = async ({ params, request, locals }) => {
-  const d1 = locals.runtime.env.DB as D1Database;
-  const db = getDrizzle(d1);
-  const auth = await requireAuth(d1, request);
-  if (!auth) return new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401, headers: { 'Content-Type': 'application/json' } });
-  const workId = Number(params.id);
-  if (!workId) return new Response(JSON.stringify({ error: 'Not found' }), { status: 404, headers: { 'Content-Type': 'application/json' } });
+// ─── PUT /api/works/[id] — Update work ────────────────────────────
 
-  // Verify ownership via subquery: check if user has a pseud with a creatorship on this work
-  const userPseudIds = auth.pseuds.map(p => p.id);
+export const PUT: APIRoute = async ({ request, locals, params }) => {
+  const d1 = locals.runtime.env.DB as D1Database;
+  const db = getDb(d1);
+  const workId = Number(params?.id);
+
+  if (!workId || Number.isNaN(workId)) {
+    return new Response(JSON.stringify({ error: 'Invalid work ID' }), {
+      status: 400,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+
+  // Require auth
+  const auth = await requireAuth(d1, request);
+  checkApproved(auth);
+
+  // Verify work exists
+  const work = await db.select().from(works).where(eq(works.id, workId)).get();
+  if (!work) {
+    return new Response(JSON.stringify({ error: 'Work not found' }), {
+      status: 404,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+
+  // Verify user is an author via creatorships
   const creatorship = await db
     .select()
     .from(creatorships)
-    .where(and(eq(creatorships.workId, workId), inArray(creatorships.pseudId, userPseudIds)))
+    .innerJoin(pseuds, eq(creatorships.pseudId, pseuds.id))
+    .where(and(eq(creatorships.workId, workId), eq(pseuds.userId, auth.user.id)))
     .get();
-  if (!creatorship) return new Response(JSON.stringify({ error: 'Forbidden' }), { status: 403, headers: { 'Content-Type': 'application/json' } });
 
-  let body: any;
-  try { body = await request.json(); } catch { return new Response(JSON.stringify({ error: 'Invalid JSON' }), { status: 400, headers: { 'Content-Type': 'application/json' } }); }
-
-  let workLogId = 0;
-  if (body.publish) {
-    workLogId = await logPublishAttempt(d1, { workId, step: 'work_publish', userId: auth.user.id, requestSummary: JSON.stringify({ publish: true }) });
+  if (!creatorship) {
+    return new Response(JSON.stringify({ error: 'You are not an author of this work' }), {
+      status: 403,
+      headers: { 'Content-Type': 'application/json' },
+    });
   }
 
-  try {
+  // Validate body
+  const [data, error] = await validateBody(request, updateWorkSchema);
+  if (error) return error;
 
-  // Handle tag updates: resolve tag_names + tag_ids, then clear and re-add
-  const resolvedTagIds: number[] = [...(Array.isArray(body.tag_ids) ? body.tag_ids.filter((id: any) => typeof id === 'number' && id > 0) : [])];
-  
-  if (Array.isArray(body.tag_names)) {
-    const validTypes = ['fandom', 'character', 'relationship', 'freeform'];
-    for (const tn of body.tag_names) {
-      if (!tn.name || !tn.type || !validTypes.includes(tn.type)) continue;
-      const existing = await db.select({ id: tags.id }).from(tags).where(and(eq(tags.name, tn.name), eq(tags.type, tn.type))).get();
-      if (existing) {
-        if (!resolvedTagIds.includes(existing.id)) resolvedTagIds.push(existing.id);
+  // Build update object — only include fields that are present
+  const updates: Record<string, any> = { updatedAt: new Date().toISOString() };
+  if (data.title !== undefined) updates.title = data.title;
+  if (data.summary !== undefined) updates.summary = data.summary;
+  if (data.notes !== undefined) updates.notes = data.notes;
+  if (data.endNotes !== undefined) updates.endNotes = data.endNotes;
+  if (data.language !== undefined) updates.language = data.language;
+  if (data.workSkin !== undefined) updates.workSkin = data.workSkin;
+  if (data.complete !== undefined) updates.complete = data.complete ? 1 : 0;
+  if (data.draft !== undefined) {
+    updates.draft = data.draft ? 1 : 0;
+    // When publishing for the first time, set publishedAt
+    if (!data.draft && work.draft && !work.publishedAt) {
+      updates.publishedAt = new Date().toISOString();
+    }
+  }
+
+  // Update the work
+  await db.update(works).set(updates).where(eq(works.id, workId));
+
+  // Handle tag updates if tags array is provided
+  if (data.tags && Array.isArray(data.tags)) {
+    // Resolve tags
+    const resolvedTags: { id: number; type: string; name: string }[] = [];
+    for (const tagInput of data.tags) {
+      if (tagInput.id) {
+        const existing = await db.select().from(tags).where(eq(tags.id, tagInput.id)).get();
+        if (existing) {
+          resolvedTags.push({ id: existing.id, type: existing.type, name: existing.name });
+        }
       } else {
-        await db.insert(tags).values({ name: tn.name, type: tn.type }).onConflictDoNothing();
-        const reFetched = await db.select({ id: tags.id }).from(tags).where(and(eq(tags.name, tn.name), eq(tags.type, tn.type))).get();
-        if (reFetched && !resolvedTagIds.includes(reFetched.id)) resolvedTagIds.push(reFetched.id);
+        const existing = await db
+          .select()
+          .from(tags)
+          .where(and(eq(tags.name, tagInput.name), eq(tags.type, tagInput.type)))
+          .get();
+        if (existing) {
+          resolvedTags.push({ id: existing.id, type: existing.type, name: existing.name });
+        } else {
+          const [created] = await db
+            .insert(tags)
+            .values({ name: tagInput.name, type: tagInput.type })
+            .returning({ id: tags.id, type: tags.type, name: tags.name });
+          resolvedTags.push(created);
+        }
       }
     }
-  }
 
-  if (resolvedTagIds.length > 0 || Array.isArray(body.tag_ids) || Array.isArray(body.tag_names)) {
+    // Remove existing taggings and insert new ones
     await db.delete(taggings).where(eq(taggings.workId, workId));
-    for (const tid of resolvedTagIds) {
-      await db.insert(taggings).values({ tagId: tid, workId }).onConflictDoNothing();
+    if (resolvedTags.length > 0) {
+      await db.insert(taggings).values(
+        resolvedTags.map(tag => ({ tagId: tag.id, workId }))
+      );
     }
   }
 
-  // Handle auto-create rating/category/warning tags
-  const autoTags = [
-    { type: 'rating', name: body.rating },
-    { type: 'category', name: body.category },
-    { type: 'warning', name: body.warning },
-  ].filter(t => t.name);
-
-  for (const t of autoTags) {
-    // Remove existing tags of this type for the work
-    const typeTagIds = await db.select({ id: tags.id }).from(tags).where(eq(tags.type, t.type));
-    if (typeTagIds.length > 0) {
-      await db.delete(taggings).where(and(eq(taggings.workId, workId), inArray(taggings.tagId, typeTagIds.map(r => r.id))));
-    }
-    const existing = await db.select({ id: tags.id }).from(tags).where(and(eq(tags.name, t.name!), eq(tags.type, t.type))).get();
-    if (existing) {
-      await db.insert(taggings).values({ tagId: existing.id, workId }).onConflictDoNothing();
-    } else {
-      const tagResult = await db.insert(tags).values({ name: t.name!, type: t.type }).onConflictDoNothing();
-      const lastRowId = Number(tagResult.meta?.last_row_id ?? tagResult[0]?.meta?.last_row_id);
-      if (lastRowId) {
-        await db.insert(taggings).values({ tagId: lastRowId, workId }).onConflictDoNothing();
-      }
-    }
-  }
-
-  // Build up the SET values dynamically
-  const setValues: Record<string, any> = {};
-  if (body.title !== undefined) setValues.title = body.title;
-  if (body.summary !== undefined) setValues.summary = body.summary;
-  if (body.notes !== undefined) setValues.notes = body.notes;
-  if (body.end_notes !== undefined) setValues.endNotes = body.end_notes;
-  if (body.complete !== undefined) setValues.complete = body.complete ? 1 : 0;
-  if (body.language !== undefined) setValues.language = body.language;
-  if (body.publish) {
-    console.log('[WORK_PUT] Publishing work:', workId, 'body keys:', Object.keys(body).join(','));
-    // Set published_at only if it's currently null (first publish)
-    setValues.publishedAt = sql`COALESCE(${works.publishedAt}, datetime('now'))`;
-  }
-
-  if (Object.keys(setValues).length === 0 && !Array.isArray(body.tag_ids) && autoTags.length === 0) return new Response(JSON.stringify({ error: 'No fields to update' }), { status: 400, headers: { 'Content-Type': 'application/json' } });
-
-  if (Object.keys(setValues).length > 0) {
-    setValues.updatedAt = sql`datetime('now')`;
-    await db.update(works).set(setValues).where(eq(works.id, workId));
-  }
-
-  // When publishing, also publish all draft chapters
-  if (body.publish) {
-    await db.update(chapters).set({ draft: 0, updatedAt: sql`datetime('now')` }).where(and(eq(chapters.workId, workId), eq(chapters.draft, 1)));
-    await db.update(works).set({
-      wordCount: sql`(SELECT COALESCE(SUM(word_count), 0) FROM chapters WHERE work_id = ${workId} AND draft = 0)`,
-    }).where(eq(works.id, workId));
-  }
-
+  // Fetch updated work
   const updatedWork = await db.select().from(works).where(eq(works.id, workId)).get();
 
-  // Log publish result after fetching the updated work so we can include published_at
-  if (body.publish && workLogId) {
-    await logPublishResult(d1, workLogId, { status: 'success', httpStatus: 200, responseSummary: JSON.stringify({ published_at: updatedWork?.publishedAt }).slice(0,200) });
-  }
+  // Fetch current authors (may have changed if pseudId was updated)
+  const authorRows = await db
+    .select({ pseudId: pseuds.id, name: pseuds.name, role: creatorships.role })
+    .from(creatorships)
+    .innerJoin(pseuds, eq(creatorships.pseudId, pseuds.id))
+    .where(eq(creatorships.workId, workId));
 
-  return new Response(JSON.stringify(updatedWork), { headers: { 'Content-Type': 'application/json' } });
-  } catch (err) {
-    console.error('[WORK_PUT] Error updating work:', workId, err);
-    if (workLogId) await logPublishResult(d1, workLogId, { status: 'fail', httpStatus: 500, error: String((err as any)?.message || err) });
-    return new Response(JSON.stringify({ error: (err as any)?.message || 'Internal server error' }), { status: 500, headers: { 'Content-Type': 'application/json' } });
-  }
+  // Fetch current tags
+  const tagRows = await db
+    .select({ id: tags.id, name: tags.name, type: tags.type })
+    .from(taggings)
+    .innerJoin(tags, eq(taggings.tagId, tags.id))
+    .where(eq(taggings.workId, workId));
+
+  return new Response(JSON.stringify({
+    data: {
+      ...updatedWork,
+      authors: authorRows,
+      tags: tagRows,
+    },
+  }), {
+    status: 200,
+    headers: { 'Content-Type': 'application/json' },
+  });
 };
 
-export const DELETE: APIRoute = async ({ params, request, locals }) => {
-  const d1 = locals.runtime.env.DB as D1Database;
-  const db = getDrizzle(d1);
-  const auth = await requireAuth(d1, request);
-  if (!auth) return new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401, headers: { 'Content-Type': 'application/json' } });
-  const workId = Number(params.id);
-  if (!workId) return new Response(JSON.stringify({ error: 'Not found' }), { status: 404, headers: { 'Content-Type': 'application/json' } });
+// ─── DELETE /api/works/[id] — Soft-delete (set draft=1) ─────────────
 
-  const userPseudIds = auth.pseuds.map(p => p.id);
+export const DELETE: APIRoute = async ({ request, locals, params }) => {
+  const d1 = locals.runtime.env.DB as D1Database;
+  const db = getDb(d1);
+  const workId = Number(params?.id);
+
+  if (!workId || Number.isNaN(workId)) {
+    return new Response(JSON.stringify({ error: 'Invalid work ID' }), {
+      status: 400,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+
+  // Require auth
+  const auth = await requireAuth(d1, request);
+  checkApproved(auth);
+
+  // Verify work exists
+  const work = await db.select().from(works).where(eq(works.id, workId)).get();
+  if (!work) {
+    return new Response(JSON.stringify({ error: 'Work not found' }), {
+      status: 404,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+
+  // Verify user is an author
   const creatorship = await db
     .select()
     .from(creatorships)
-    .where(and(eq(creatorships.workId, workId), inArray(creatorships.pseudId, userPseudIds)))
+    .innerJoin(pseuds, eq(creatorships.pseudId, pseuds.id))
+    .where(and(eq(creatorships.workId, workId), eq(pseuds.userId, auth.user.id)))
     .get();
-  if (!creatorship) return new Response(JSON.stringify({ error: 'Forbidden' }), { status: 403, headers: { 'Content-Type': 'application/json' } });
 
-  try {
-    await db.delete(works).where(eq(works.id, workId));
-    return new Response(JSON.stringify({ ok: true }), { headers: { 'Content-Type': 'application/json' } });
-  } catch (err) {
-    console.error('[WORK_DELETE] Error deleting work:', workId, err);
-    return new Response(JSON.stringify({ error: (err as any)?.message || 'Internal server error' }), { status: 500, headers: { 'Content-Type': 'application/json' } });
+  if (!creatorship) {
+    return new Response(JSON.stringify({ error: 'You are not an author of this work' }), {
+      status: 403,
+      headers: { 'Content-Type': 'application/json' },
+    });
   }
+
+  // Soft-delete: set draft=1
+  await db
+    .update(works)
+    .set({ draft: 1, updatedAt: new Date().toISOString() })
+    .where(eq(works.id, workId));
+
+  return new Response(JSON.stringify({ data: { id: workId, deleted: true } }), {
+    status: 200,
+    headers: { 'Content-Type': 'application/json' },
+  });
 };

@@ -1,53 +1,69 @@
-export const prerender = false;
-
-import { getDrizzle } from '@/lib/db';
-import { requireAuth } from '@/lib/auth';
-import { cacheHeaders } from '@/lib/cors';
-import { readings, works } from '@/lib/schema';
-import { eq, desc, sql } from 'drizzle-orm';
 import type { APIRoute } from 'astro';
+import type { D1Database } from '@cloudflare/workers-types';
+import { getDb } from '@/v2/lib/db';
+import { requireAuth } from '@/v2/lib/auth';
+import { readings, works } from '@/v2/lib/schema/index';
+import { eq, desc } from 'drizzle-orm';
 
+export const config = { auth: 'required' as const };
+
+// GET /api/readings — Get reading history
 export const GET: APIRoute = async ({ request, locals }) => {
   const d1 = locals.runtime.env.DB as D1Database;
-  const db = getDrizzle(d1);
+  const db = getDb(d1);
   const auth = await requireAuth(d1, request);
-  if (!auth) return new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401, headers: { 'Content-Type': 'application/json' } });
 
-  const defaultPseud = auth.pseuds.find(p => p.isDefault === 1) ?? auth.pseuds[0];
-  if (!defaultPseud) return new Response(JSON.stringify({ error: 'No pseud found' }), { status: 400, headers: { 'Content-Type': 'application/json' } });
+  const userReadings = await db.select({
+    id: readings.id, workId: readings.workId, forLater: readings.forLater,
+    lastChapter: readings.lastChapter, updatedAt: readings.updatedAt,
+  }).from(readings)
+    .where(eq(readings.pseudId, auth.user.id))
+    .orderBy(desc(readings.updatedAt));
 
-  // Get all readings for this pseud, joined with work info, chapter count, and last chapter position
-  const rows = await db
-    .select({
-      readingId: readings.id,
-      workId: readings.workId,
-      forLater: readings.forLater,
-      lastChapter: readings.lastChapter,
-      updatedAt: readings.updatedAt,
-      workTitle: works.title,
-      workSummary: works.summary,
-      wordCount: works.wordCount,
-      complete: works.complete,
-      workUpdatedAt: works.updatedAt,
-      // Published chapter count
-      chapterCount: sql<number>`(SELECT COUNT(*) FROM chapters WHERE chapters.work_id = works.id AND chapters.draft = 0)`,
-      // Last-read chapter position (null when no chapter recorded)
-      lastChapterPosition: sql<number | null>`(SELECT position FROM chapters WHERE id = readings.last_chapter AND draft = 0)`,
-    })
-    .from(readings)
-    .innerJoin(works, eq(readings.workId, works.id))
-    .where(eq(readings.pseudId, defaultPseud.id))
-    .orderBy(desc(readings.updatedAt))
-    .all();
-
-  const enriched = rows.map((row) => ({
-    ...row,
-    progress: row.chapterCount > 0 && row.lastChapterPosition
-      ? Math.round((row.lastChapterPosition / row.chapterCount) * 100)
-      : 0,
+  // Enrich with work data
+  const enriched = await Promise.all(userReadings.map(async (r) => {
+    const work = await db.select({ id: works.id, title: works.title, summary: works.summary, wordCount: works.wordCount, complete: works.complete })
+      .from(works).where(eq(works.id, r.workId)).get();
+    return { ...r, work };
   }));
 
-  return new Response(JSON.stringify(enriched), {
-    headers: { 'Content-Type': 'application/json', ...cacheHeaders('private') },
+  return new Response(JSON.stringify({ data: enriched }), {
+    status: 200, headers: { 'Content-Type': 'application/json' },
+  });
+};
+
+// POST /api/readings — Update reading progress or mark for later
+export const POST: APIRoute = async ({ request, locals }) => {
+  const d1 = locals.runtime.env.DB as D1Database;
+  const db = getDb(d1);
+  const auth = await requireAuth(d1, request);
+
+  const body = await request.json() as { workId: number; lastChapter?: number; forLater?: boolean };
+  const { workId, lastChapter, forLater } = body;
+
+  if (!workId || isNaN(workId)) {
+    return new Response(JSON.stringify({ error: 'workId required' }), { status: 400, headers: { 'Content-Type': 'application/json' } });
+  }
+
+  const updates: Record<string, any> = { updatedAt: new Date().toISOString() };
+  if (lastChapter !== undefined) updates.lastChapter = lastChapter;
+  if (forLater !== undefined) updates.forLater = forLater ? 1 : 0;
+
+  // Upsert reading
+  const existing = await db.select().from(readings)
+    .where(eq(readings.workId, workId) /* AND pseud */).get();
+
+  if (existing) {
+    await db.update(readings).set(updates).where(eq(readings.id, existing.id));
+  } else {
+    await db.insert(readings).values({
+      pseudId: auth.user.id,
+      workId,
+      ...updates,
+    });
+  }
+
+  return new Response(JSON.stringify({ data: { updated: true } }), {
+    status: 200, headers: { 'Content-Type': 'application/json' },
   });
 };
