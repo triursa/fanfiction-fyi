@@ -1,0 +1,145 @@
+---
+/**
+ * WorkCard — M3 outlined card for a work in grid/list views.
+ *
+ * Props:
+ *   work: { id, title, summary, wordCount, complete, updatedAt, authors: [{ pseudId, name, role }], tags: [{ id, name, type }] }
+ */
+
+interface Props {
+  work: {
+    id: number;
+    title: string;
+    summary: string | null;
+    wordCount: number;
+    complete: number;
+    updatedAt: string;
+    authors: { pseudId: number; name: string; role: string }[];
+    tags: { id: number; name: string; type: string }[];
+    chapterCount?: number;
+    kudosCount?: number;
+  };
+}
+
+const { work } = Astro.props;
+
+const authorPseuds = work.authors.map(a => a.name).join(', ');
+const fandoms = work.tags.filter(t => t.type === 'fandom');
+const truncatedSummary = work.summary
+  ? work.summary.length > 200 ? work.summary.slice(0, 200) + '…' : work.summary
+  : null;
+const formattedWords = work.wordCount.toLocaleString();
+const statusLabel = work.complete ? 'Complete' : 'WIP';
+const relativeDate = new Date(work.updatedAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+---
+
+<a href={`/works/${work.id}`} class="work-card">
+  <div class="work-card-header">
+    <h3 class="work-card-title">{work.title}</h3>
+    <span class="work-card-status" data:complete={work.complete}>{statusLabel}</span>
+  </div>
+  <p class="work-card-author">by {authorPseuds}</p>
+  {truncatedSummary && <p class="work-card-summary">{truncatedSummary}</p>}
+  {fandoms.length > 0 && (
+    <div class="work-card-fandoms">
+      {fandoms.slice(0, 3).map(tag => (
+        <span class="fandom-pill">{tag.name}</span>
+      ))}
+      {fandoms.length > 3 && <span class="fandom-pill fandom-more">+{fandoms.length - 3}</span>}
+    </div>
+  )}
+  <div class="work-card-meta">
+    <span>{formattedWords} words</span>
+    {work.chapterCount != null && <span>{work.chapterCount} {work.chapterCount === 1 ? 'chapter' : 'chapters'}</span>}
+    {work.kudosCount != null && work.kudosCount > 0 && <span>❤ {work.kudosCount}</span>}
+    <span>Updated {relativeDate}</span>
+  </div>
+</a>
+
+<style>
+  .work-card {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+    background: var(--md-sys-color-surface-container);
+    border: 1px solid var(--md-sys-color-outline-variant);
+    border-radius: var(--md-sys-shape-corner-large);
+    padding: var(--space-4) var(--space-6);
+    text-decoration: none;
+    color: var(--md-sys-color-on-surface);
+    transition: border-color var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard),
+                box-shadow var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard);
+  }
+  .work-card:hover {
+    border-color: var(--md-sys-color-outline);
+    box-shadow: 0 1px 3px 0 rgba(0,0,0,.1), 0 1px 2px -1px rgba(0,0,0,.1);
+  }
+
+  .work-card-header {
+    display: flex;
+    align-items: baseline;
+    gap: var(--space-2);
+    flex-wrap: wrap;
+  }
+
+  .work-card-title {
+    font: var(--md-sys-typescale-title-large);
+    color: var(--md-sys-color-primary);
+    margin: 0;
+    font-size: 1.1rem;
+  }
+
+  .work-card-status {
+    font: var(--md-sys-typescale-body-small);
+    color: var(--md-sys-color-on-surface-variant);
+    background: var(--md-sys-color-surface-container-highest);
+    border-radius: var(--md-sys-shape-corner-full);
+    padding: 2px 8px;
+    flex-shrink: 0;
+  }
+  .work-card-status[complete="1"] {
+    color: #2e7d32;
+    background: #e8f5e9;
+  }
+
+  .work-card-author {
+    font: var(--md-sys-typescale-body-medium);
+    color: var(--md-sys-color-on-surface-variant);
+    margin: 0;
+  }
+
+  .work-card-summary {
+    font: var(--md-sys-typescale-body-medium);
+    color: var(--md-sys-color-on-surface-variant);
+    margin: 0;
+    line-height: 1.5;
+  }
+
+  .work-card-fandoms {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-1);
+  }
+
+  .fandom-pill {
+    font: var(--md-sys-typescale-body-small);
+    background: var(--md-sys-color-primary-container);
+    color: var(--md-sys-color-on-primary-container);
+    border-radius: var(--md-sys-shape-corner-full);
+    padding: 2px 10px;
+    white-space: nowrap;
+  }
+  .fandom-more {
+    background: var(--md-sys-color-surface-container-highest);
+    color: var(--md-sys-color-on-surface-variant);
+  }
+
+  .work-card-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-2) var(--space-4);
+    font: var(--md-sys-typescale-body-small);
+    color: var(--md-sys-color-on-surface-variant);
+    margin-top: auto;
+  }
+</style>
