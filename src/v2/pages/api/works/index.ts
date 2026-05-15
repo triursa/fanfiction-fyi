@@ -23,6 +23,9 @@ export const GET: APIRoute = async ({ request, url, locals }) => {
   const limit = Math.min(100, Math.max(1, Number(url.searchParams.get('limit')) || 20));
   const offset = (page - 1) * limit;
 
+  // "mine=true" returns the authenticated user's works (including drafts)
+  const mine = url.searchParams.get('mine') === 'true';
+
   // Optional tag type filters (fandom=...&rating=... etc)
   const tagFilters: Record<string, string> = {};
   for (const [key, val] of url.searchParams.entries()) {
@@ -31,8 +34,36 @@ export const GET: APIRoute = async ({ request, url, locals }) => {
     }
   }
 
-  // Base condition: only published (draft=0) works
-  const conditions = [eq(works.draft, 0)];
+  // Base condition: published works OR the user's own (including drafts)
+  const conditions = mine ? [] : [eq(works.draft, 0)];
+
+  // If mine=true, require auth and filter to user's works
+  if (mine) {
+    const auth = await getAuth(d1, request);
+    if (!auth) {
+      return new Response(JSON.stringify({ error: 'Unauthorized' }), {
+        status: 401,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
+    const userPseuds = await db.select().from(pseuds).where(eq(pseuds.userId, auth.user.id));
+    const pseudIds = userPseuds.map(p => p.id);
+    if (pseudIds.length > 0) {
+      const mineWorkIds = (await db
+        .select({ workId: creatorships.workId })
+        .from(creatorships)
+        .where(sql`${creatorships.pseudId} IN (${sql.join(pseudIds.map(id => sql`${id}`), sql`, `)})`)
+      ).map(r => r.workId);
+      const uniqueWorkIds = [...new Set(mineWorkIds)];
+      if (uniqueWorkIds.length > 0) {
+        conditions.push(sql`${works.id} IN (${sql.join(uniqueWorkIds.map(id => sql`${id}`), sql`, `)})`);
+      } else {
+        conditions.push(sql`1 = 0`);
+      }
+    } else {
+      conditions.push(sql`1 = 0`);
+    }
+  }
 
   // If tag filters are present, find matching work IDs first
   let filteredWorkIds: number[] | null = null;

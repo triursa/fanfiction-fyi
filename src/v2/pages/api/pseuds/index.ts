@@ -4,25 +4,37 @@ import { getDb } from '../../../../lib/db';
 import { requireAuth, checkApproved } from '../../../../lib/auth';
 import { validateBody, validateQuery, createPseudSchema, paginationSchema } from '../../../../lib/validation';
 import { pseuds } from '../../../../lib/schema/index';
-import { eq, like, or, asc, count } from 'drizzle-orm';
+import { eq, like, and, asc, count } from 'drizzle-orm';
+import { z } from 'zod';
 
 export const config = { auth: 'public' as const };
 
-// GET /api/pseuds — List pseuds (with optional search)
+// GET /api/pseuds — List pseuds (with optional search and user filter)
 export const GET: APIRoute = async ({ url, locals }) => {
   const d1 = locals.runtime.env.DB as D1Database;
   const db = getDb(d1);
-  const params = validateQuery(url, paginationSchema.extend({ q: z.string().optional() }));
+
+  const params = validateQuery(url, paginationSchema.extend({
+    q: z.string().optional(),
+    userId: z.coerce.number().int().positive().optional(),
+  }));
+
   const offset = (params.page - 1) * params.limit;
 
-  let query = db.select().from(pseuds).orderBy(asc(pseuds.name)).limit(params.limit).offset(offset);
-  
+  const conditions = [];
+  if (params.userId) {
+    conditions.push(eq(pseuds.userId, params.userId));
+  }
   if (params.q) {
-    query = db.select().from(pseuds).where(like(pseuds.name, `%${params.q}%`)).orderBy(asc(pseuds.name)).limit(params.limit).offset(offset);
+    conditions.push(like(pseuds.name, `%${params.q}%`));
   }
 
-  const pseudList = await query;
-  const [{ value: total }] = await db.select({ value: count() }).from(pseuds);
+  const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
+
+  const [pseudList, [{ value: total }]] = await Promise.all([
+    db.select().from(pseuds).where(whereClause).orderBy(asc(pseuds.name)).limit(params.limit).offset(offset),
+    db.select({ value: count() }).from(pseuds).where(whereClause),
+  ]);
 
   return new Response(JSON.stringify({ data: pseudList, total, page: params.page, limit: params.limit }), {
     status: 200,
