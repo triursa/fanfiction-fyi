@@ -1,0 +1,293 @@
+---
+/**
+ * Create Location Page — Auth Required
+ * Form: name, description, type dropdown, parent location selector, pseud selector.
+ */
+export const prerender = false;
+// Auth required — default middleware enforces login
+import Base from '@/v2/layouts/Base.astro';
+
+const user = Astro.locals.user;
+
+// Fetch user's pseuds
+let pseuds: any[] = [];
+try {
+  const res = await fetch(new URL(`/api/pseuds?limit=100&userId=${user.id}`, Astro.url), {
+    headers: { cookie: Astro.request.headers.get('cookie') || '' },
+  });
+  if (res.ok) {
+    const json = await res.json();
+    pseuds = json.data ?? [];
+  }
+} catch {
+  // Non-fatal
+}
+
+// Fetch existing locations for parent selector
+let parentLocations: any[] = [];
+try {
+  const res = await fetch(new URL('/api/canon/locations?limit=100', Astro.url), {
+    headers: { cookie: Astro.request.headers.get('cookie') || '' },
+  });
+  if (res.ok) {
+    const json = await res.json();
+    parentLocations = json.data ?? [];
+  }
+} catch {
+  // Non-fatal
+}
+
+const locationTypes = [
+  { value: 'city', label: 'City' },
+  { value: 'country', label: 'Country' },
+  { value: 'region', label: 'Region' },
+  { value: 'building', label: 'Building' },
+  { value: 'landmark', label: 'Landmark' },
+  { value: 'natural', label: 'Natural Feature' },
+  { value: 'planet', label: 'Planet' },
+  { value: 'other', label: 'Other' },
+];
+---
+
+<Base title="New Location — fanfiction.fyi" description="Create a new location on fanfiction.fyi">
+  <section class="form-page">
+    <div class="form-header">
+      <a href="/canon?tab=locations" class="back-link">← Back to Canon</a>
+      <h1 class="form-title">New Location</h1>
+    </div>
+
+    <form id="new-location-form" class="location-form">
+      <div class="form-field">
+        <label for="name">Name</label>
+        <input type="text" id="name" name="name" required maxlength="200" placeholder="The Crystal Citadel" />
+      </div>
+
+      <div class="form-field">
+        <label for="description">Description <span class="optional-label">(optional)</span></label>
+        <textarea id="description" name="description" rows="8" maxlength="5000" placeholder="Describe this location…"></textarea>
+      </div>
+
+      <div class="form-field">
+        <label for="type">Type</label>
+        <select id="type" name="type" required>
+          <option value="">Select a type…</option>
+          {locationTypes.map(t => (
+            <option value={t.value}>{t.label}</option>
+          ))}
+        </select>
+      </div>
+
+      <div class="form-field">
+        <label for="parentId">Parent Location <span class="optional-label">(optional)</span></label>
+        <select id="parentId" name="parentId">
+          <option value="">No parent location</option>
+          {parentLocations.map((loc: any) => (
+            <option value={loc.id}>{loc.name}{loc.type ? ` (${loc.type})` : ''}</option>
+          ))}
+        </select>
+        <p class="field-hint">Select a parent location for hierarchical organization (e.g., a city within a country).</p>
+      </div>
+
+      <div class="form-field">
+        <label for="pseudId">Post As</label>
+        <select id="pseudId" name="pseudId" required>
+          {pseuds.length === 0 ? (
+            <option value="">No pseuds available</option>
+          ) : (
+            pseuds.map((p: any) => (
+              <option value={p.id} selected={p.isDefault}>{p.name}</option>
+            ))
+          )}
+        </select>
+        {pseuds.length === 0 && (
+          <p class="field-hint">You need a pseud to post. <a href="/settings">Create one in settings</a>.</p>
+        )}
+      </div>
+
+      <div class="form-actions">
+        <button type="submit" class="btn-filled" id="submit-btn">
+          <span class="btn-text">Create Location</span>
+          <span class="btn-loading" style="display:none;">Creating…</span>
+        </button>
+        <a href="/canon?tab=locations" class="btn-outlined">Cancel</a>
+      </div>
+
+      <div id="form-error" class="form-error" role="alert"></div>
+    </form>
+  </section>
+</Base>
+
+<script>
+  const form = document.getElementById('new-location-form') as HTMLFormElement;
+  const errorEl = document.getElementById('form-error') as HTMLElement;
+  const submitBtn = document.getElementById('submit-btn') as HTMLButtonElement;
+
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    errorEl.textContent = '';
+    submitBtn.disabled = true;
+    (submitBtn.querySelector('.btn-text') as HTMLElement).style.display = 'none';
+    (submitBtn.querySelector('.btn-loading') as HTMLElement).style.display = 'inline';
+
+    const name = (document.getElementById('name') as HTMLInputElement).value.trim();
+    const description = (document.getElementById('description') as HTMLTextAreaElement).value || undefined;
+    const type = (document.getElementById('type') as HTMLSelectElement).value;
+    const parentId = (document.getElementById('parentId') as HTMLSelectElement).value;
+    const pseudId = Number((document.getElementById('pseudId') as HTMLSelectElement).value);
+
+    if (!pseudId) {
+      errorEl.textContent = 'Please select a pseudonym to post as.';
+      submitBtn.disabled = false;
+      (submitBtn.querySelector('.btn-text') as HTMLElement).style.display = 'inline';
+      (submitBtn.querySelector('.btn-loading') as HTMLElement).style.display = 'none';
+      return;
+    }
+
+    const body: Record<string, any> = { name, type, pseudId };
+    if (description) body.description = description;
+    if (parentId) body.parentId = Number(parentId);
+
+    try {
+      const res = await fetch('/api/canon/locations', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+
+      const data = await res.json();
+      if (!res.ok) {
+        errorEl.textContent = data.error || data.fields?.map((f: any) => `${f.field}: ${f.message}`).join(', ') || 'Failed to create location.';
+        submitBtn.disabled = false;
+        (submitBtn.querySelector('.btn-text') as HTMLElement).style.display = 'inline';
+        (submitBtn.querySelector('.btn-loading') as HTMLElement).style.display = 'none';
+        return;
+      }
+
+      window.location.href = `/canon/locations/${data.data.id}`;
+    } catch {
+      errorEl.textContent = 'Network error. Please try again.';
+      submitBtn.disabled = false;
+      (submitBtn.querySelector('.btn-text') as HTMLElement).style.display = 'inline';
+      (submitBtn.querySelector('.btn-loading') as HTMLElement).style.display = 'none';
+    }
+  });
+</script>
+
+<style is:global>
+  .form-page {
+    max-width: 48rem;
+    margin: 0 auto;
+    padding: var(--space-8) var(--space-4);
+  }
+
+  .form-header {
+    margin-bottom: var(--space-8);
+  }
+
+  .back-link {
+    font: var(--md-sys-typescale-body-medium);
+    color: var(--md-sys-color-primary);
+    text-decoration: none;
+    display: inline-block;
+    margin-bottom: var(--space-2);
+  }
+
+  .form-title {
+    font: var(--md-sys-typescale-headline-medium);
+    margin: 0 0 var(--space-4) 0;
+  }
+
+  .location-form {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-6);
+  }
+
+  .form-field {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+  }
+  .form-field label {
+    font: var(--md-sys-typescale-label-large);
+    color: var(--md-sys-color-on-surface-variant);
+  }
+  .form-field input,
+  .form-field select,
+  .form-field textarea {
+    font: var(--md-sys-typescale-body-large);
+    color: var(--md-sys-color-on-surface);
+    background: var(--md-sys-color-surface-container);
+    border: 1px solid var(--md-sys-color-outline-variant);
+    border-radius: var(--md-sys-shape-corner-small);
+    padding: var(--space-3) var(--space-4);
+    outline: none;
+    transition: border-color var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard);
+  }
+  .form-field input:focus,
+  .form-field select:focus,
+  .form-field textarea:focus {
+    border-color: var(--md-sys-color-primary);
+  }
+  .form-field textarea {
+    resize: vertical;
+    min-height: 100px;
+  }
+
+  .optional-label {
+    font: var(--md-sys-typescale-body-small);
+    color: var(--md-sys-color-on-surface-variant);
+    font-weight: normal;
+  }
+
+  .field-hint {
+    font: var(--md-sys-typescale-body-small);
+    color: var(--md-sys-color-on-surface-variant);
+    margin: var(--space-1) 0 0 0;
+  }
+  .field-hint a { color: var(--md-sys-color-primary); }
+
+  .form-actions {
+    display: flex;
+    gap: var(--space-4);
+    align-items: center;
+    flex-wrap: wrap;
+  }
+
+  .btn-filled {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font: var(--md-sys-typescale-label-large);
+    color: var(--md-sys-color-on-primary);
+    background: var(--md-sys-color-primary);
+    border: none;
+    border-radius: var(--md-sys-shape-corner-full);
+    padding: var(--space-3) var(--space-8);
+    cursor: pointer;
+    transition: opacity var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard);
+  }
+  .btn-filled:hover { opacity: 0.88; }
+  .btn-filled:disabled { opacity: 0.5; cursor: not-allowed; }
+
+  .btn-outlined {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font: var(--md-sys-typescale-label-large);
+    color: var(--md-sys-color-primary);
+    background: transparent;
+    border: 1px solid var(--md-sys-color-outline);
+    border-radius: var(--md-sys-shape-corner-full);
+    padding: var(--space-3) var(--space-8);
+    text-decoration: none;
+    transition: background var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard);
+  }
+  .btn-outlined:hover { background: var(--md-sys-color-primary-container); }
+
+  .form-error {
+    font: var(--md-sys-typescale-body-small);
+    color: var(--md-sys-color-error);
+    min-height: 1.2em;
+  }
+</style>

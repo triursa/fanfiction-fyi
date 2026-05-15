@@ -1,0 +1,516 @@
+---
+/**
+ * Canon Hub Page — Public
+ * Browse lore entries and locations with tab navigation, search, category/type chips.
+ */
+export const prerender = false;
+export const config = { auth: 'public' };
+import Base from '@/v2/layouts/Base.astro';
+
+const activeTab = Astro.url.searchParams.get('tab') || 'lore';
+const searchQuery = Astro.url.searchParams.get('q') || '';
+const page = Math.max(1, Number(Astro.url.searchParams.get('page')) || 1);
+const activeCategory = Astro.url.searchParams.get('category') || '';
+const activeType = Astro.url.searchParams.get('type') || '';
+const user = Astro.locals.user;
+
+// Fetch lore entries
+let loreEntries: any[] = [];
+let loreTotal = 0;
+let loreErrorMsg: string | null = null;
+
+try {
+  const params = new URLSearchParams({ page: String(page), limit: '20' });
+  if (activeCategory && activeTab === 'lore') params.set('category', activeCategory);
+  if (searchQuery && activeTab === 'lore') params.set('q', searchQuery);
+
+  const res = await fetch(new URL(`/api/canon/lore?${params.toString()}`, Astro.url));
+  if (res.ok) {
+    const json = await res.json();
+    loreEntries = json.data || [];
+    loreTotal = json.total || 0;
+  } else {
+    loreErrorMsg = 'Failed to load lore entries.';
+  }
+} catch {
+  loreErrorMsg = 'Network error loading lore entries.';
+}
+
+// Fetch locations
+let locations: any[] = [];
+let locTotal = 0;
+let locErrorMsg: string | null = null;
+
+try {
+  const params = new URLSearchParams({ page: String(page), limit: '20' });
+  if (activeType && activeTab === 'locations') params.set('type', activeType);
+  if (searchQuery && activeTab === 'locations') params.set('q', searchQuery);
+
+  const res = await fetch(new URL(`/api/canon/locations?${params.toString()}`, Astro.url));
+  if (res.ok) {
+    const json = await res.json();
+    locations = json.data || [];
+    locTotal = json.total || 0;
+  } else {
+    locErrorMsg = 'Failed to load locations.';
+  }
+} catch {
+  locErrorMsg = 'Network error loading locations.';
+}
+
+const totalPages = Math.max(1, Math.ceil((activeTab === 'lore' ? loreTotal : locTotal) / 20));
+
+function pageUrl(p: number): string {
+  const u = new URL(Astro.url);
+  u.searchParams.set('page', String(p));
+  return u.pathname + u.search;
+}
+
+const loreCategories = [
+  { value: '', label: 'All' },
+  { value: 'history', label: 'History' },
+  { value: 'magic', label: 'Magic' },
+  { value: 'culture', label: 'Culture' },
+  { value: 'technology', label: 'Technology' },
+  { value: 'politics', label: 'Politics' },
+  { value: 'religion', label: 'Religion' },
+  { value: 'nature', label: 'Nature' },
+  { value: 'other', label: 'Other' },
+];
+
+const locationTypes = [
+  { value: '', label: 'All' },
+  { value: 'city', label: 'City' },
+  { value: 'country', label: 'Country' },
+  { value: 'region', label: 'Region' },
+  { value: 'building', label: 'Building' },
+  { value: 'landmark', label: 'Landmark' },
+  { value: 'natural', label: 'Natural Feature' },
+  { value: 'planet', label: 'Planet' },
+  { value: 'other', label: 'Other' },
+];
+---
+
+<Base title="Canon — fanfiction.fyi" description="Browse lore entries and locations on fanfiction.fyi">
+  <section class="canon-page">
+    <div class="page-header">
+      <h1 class="page-title">Canon</h1>
+      <div class="page-actions">
+        {user && (
+          <>
+            <a href="/canon/lore/new" class="btn-filled btn-sm">+ New Lore</a>
+            <a href="/canon/locations/new" class="btn-outlined btn-sm">+ New Location</a>
+          </>
+        )}
+      </div>
+    </div>
+
+    {(loreErrorMsg && activeTab === 'lore') && <div class="error-banner" role="alert">{loreErrorMsg}</div>}
+    {(locErrorMsg && activeTab === 'locations') && <div class="error-banner" role="alert">{locErrorMsg}</div>}
+
+    <!-- ── Tab Navigation ─────────────────────────────────────── -->
+    <div class="tab-bar">
+      <a href="/canon?tab=lore" class:list={['tab-btn', activeTab === 'lore' && 'tab-btn--active']}>Lore</a>
+      <a href="/canon?tab=locations" class:list={['tab-btn', activeTab === 'locations' && 'tab-btn--active']}>Locations</a>
+    </div>
+
+    <!-- ── Search + Filter ────────────────────────────────────── -->
+    <div class="filter-bar">
+      <form method="GET" class="filter-form">
+        <input type="hidden" name="tab" value={activeTab} />
+        <div class="search-row">
+          <input
+            type="text"
+            name="q"
+            class="search-input"
+            placeholder={activeTab === 'lore' ? 'Search lore entries…' : 'Search locations…'}
+            value={searchQuery}
+            aria-label="Search canon"
+          />
+          <button type="submit" class="btn-filled btn-sm">Search</button>
+        </div>
+        {activeTab === 'lore' && (
+          <div class="chip-row">
+            {loreCategories.map(opt => (
+              <button
+                type="submit"
+                name="category"
+                value={opt.value}
+                class:list={['chip', activeCategory === opt.value && 'chip--active']}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
+        )}
+        {activeTab === 'locations' && (
+          <div class="chip-row">
+            {locationTypes.map(opt => (
+              <button
+                type="submit"
+                name="type"
+                value={opt.value}
+                class:list={['chip', activeType === opt.value && 'chip--active']}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
+        )}
+      </form>
+    </div>
+
+    <!-- ── Lore Entries ───────────────────────────────────────── -->
+    {activeTab === 'lore' && (
+      <>
+        {loreTotal > 0 && (
+          <p class="results-meta">{loreTotal} lore entr{loreTotal !== 1 ? 'ies' : 'y'} found</p>
+        )}
+        {loreEntries.length > 0 ? (
+          <div class="entries-grid">
+            {loreEntries.map((entry: any) => (
+              <a href={`/canon/lore/${entry.id}`} class="entry-card">
+                <div class="entry-card-header">
+                  <h2 class="entry-card-title">{entry.title}</h2>
+                  {entry.category && <span class="category-badge">{entry.category}</span>}
+                </div>
+                {entry.content && (
+                  <p class="entry-card-preview">
+                    {entry.content.length > 200 ? entry.content.slice(0, 200).replace(/[#*_~`]/g, '') + '…' : entry.content.replace(/[#*_~`]/g, '')}
+                  </p>
+                )}
+                <div class="entry-card-meta">
+                  {entry.pseudName && <span>by {entry.pseudName}</span>}
+                  {entry.workId && <span class="meta-link">→ linked work</span>}
+                  <span>{new Date(entry.updatedAt || entry.createdAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</span>
+                </div>
+              </a>
+            ))}
+          </div>
+        ) : !loreErrorMsg ? (
+          <p class="empty-msg">No lore entries found. Try a different search or filter.</p>
+        ) : null}
+      </>
+    )}
+
+    <!-- ── Locations ──────────────────────────────────────────── -->
+    {activeTab === 'locations' && (
+      <>
+        {locTotal > 0 && (
+          <p class="results-meta">{locTotal} location{locTotal !== 1 ? 's' : ''} found</p>
+        )}
+        {locations.length > 0 ? (
+          <div class="entries-grid">
+            {locations.map((loc: any) => (
+              <a href={`/canon/locations/${loc.id}`} class="entry-card">
+                <div class="entry-card-header">
+                  <h2 class="entry-card-title">{loc.name}</h2>
+                  {loc.type && <span class="type-badge">{loc.type}</span>}
+                </div>
+                {loc.description && (
+                  <p class="entry-card-preview">
+                    {loc.description.length > 200 ? loc.description.slice(0, 200) + '…' : loc.description}
+                  </p>
+                )}
+                <div class="entry-card-meta">
+                  {loc.pseudName && <span>by {loc.pseudName}</span>}
+                  {loc.parentName && <span class="meta-link">↑ {loc.parentName}</span>}
+                  <span>{new Date(loc.updatedAt || loc.createdAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</span>
+                </div>
+              </a>
+            ))}
+          </div>
+        ) : !locErrorMsg ? (
+          <p class="empty-msg">No locations found. Try a different search or filter.</p>
+        ) : null}
+      </>
+    )}
+
+    <!-- ── Pagination ──────────────────────────────────────────── -->
+    {totalPages > 1 && (
+      <nav class="pagination" aria-label="Canon pagination">
+        {page > 1 && (
+          <a href={pageUrl(page - 1)} class="page-link" rel="prev">← Prev</a>
+        )}
+        <span class="page-info">Page {page} of {totalPages}</span>
+        {page < totalPages && (
+          <a href={pageUrl(page + 1)} class="page-link" rel="next">Next →</a>
+        )}
+      </nav>
+    )}
+  </section>
+</Base>
+
+<style is:global>
+  .canon-page {
+    max-width: 72rem;
+    margin: 0 auto;
+    padding: var(--space-8) var(--space-4);
+  }
+
+  .page-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: var(--space-4);
+    margin-bottom: var(--space-6);
+  }
+
+  .page-title {
+    font: var(--md-sys-typescale-headline-medium);
+    margin: 0;
+  }
+
+  .page-actions {
+    display: flex;
+    gap: var(--space-2);
+    flex-wrap: wrap;
+  }
+
+  .error-banner {
+    background: var(--md-sys-color-error);
+    color: var(--md-sys-color-on-error);
+    border-radius: var(--md-sys-shape-corner-small);
+    padding: var(--space-3) var(--space-4);
+    margin-bottom: var(--space-6);
+    font: var(--md-sys-typescale-body-medium);
+  }
+
+  /* ── Tab Bar ─────────────────────────────────────────────── */
+  .tab-bar {
+    display: flex;
+    gap: var(--space-1);
+    margin-bottom: var(--space-6);
+    border-bottom: 2px solid var(--md-sys-color-outline-variant);
+  }
+
+  .tab-btn {
+    font: var(--md-sys-typescale-label-large);
+    color: var(--md-sys-color-on-surface-variant);
+    background: transparent;
+    border: none;
+    border-bottom: 2px solid transparent;
+    padding: var(--space-3) var(--space-6);
+    cursor: pointer;
+    text-decoration: none;
+    margin-bottom: -2px;
+    transition: color var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard),
+                border-color var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard);
+  }
+  .tab-btn:hover {
+    color: var(--md-sys-color-primary);
+    background: var(--md-sys-color-surface-container);
+  }
+  .tab-btn--active {
+    color: var(--md-sys-color-primary);
+    border-bottom-color: var(--md-sys-color-primary);
+  }
+
+  /* ── Filter Bar ──────────────────────────────────────────── */
+  .filter-bar {
+    margin-bottom: var(--space-6);
+  }
+
+  .filter-form {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-3);
+  }
+
+  .search-row {
+    display: flex;
+    gap: var(--space-2);
+  }
+
+  .search-input {
+    flex: 1;
+    font: var(--md-sys-typescale-body-large);
+    color: var(--md-sys-color-on-surface);
+    background: var(--md-sys-color-surface-container);
+    border: 1px solid var(--md-sys-color-outline-variant);
+    border-radius: var(--md-sys-shape-corner-small);
+    padding: var(--space-3) var(--space-4);
+    outline: none;
+    transition: border-color var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard);
+  }
+  .search-input:focus { border-color: var(--md-sys-color-primary); }
+
+  .chip-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-2);
+  }
+
+  .chip {
+    font: var(--md-sys-typescale-label-large);
+    color: var(--md-sys-color-on-surface-variant);
+    background: var(--md-sys-color-surface-container);
+    border: 1px solid var(--md-sys-color-outline-variant);
+    border-radius: var(--md-sys-shape-corner-full);
+    padding: var(--space-2) var(--space-4);
+    cursor: pointer;
+    text-decoration: none;
+    transition: background var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard),
+                border-color var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard);
+  }
+  .chip:hover {
+    background: var(--md-sys-color-surface-container-high);
+  }
+  .chip--active {
+    background: var(--md-sys-color-primary);
+    color: var(--md-sys-color-on-primary);
+    border-color: var(--md-sys-color-primary);
+  }
+
+  .btn-sm {
+    padding: var(--space-2) var(--space-6);
+  }
+
+  .results-meta {
+    font: var(--md-sys-typescale-body-medium);
+    color: var(--md-sys-color-on-surface-variant);
+    margin: 0 0 var(--space-4) 0;
+  }
+
+  /* ── Entries Grid ─────────────────────────────────────────── */
+  .entries-grid {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: var(--space-4);
+  }
+
+  @media (min-width: 640px) {
+    .entries-grid {
+      grid-template-columns: repeat(2, 1fr);
+    }
+  }
+
+  @media (min-width: 960px) {
+    .entries-grid {
+      grid-template-columns: repeat(3, 1fr);
+    }
+  }
+
+  .entry-card {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+    background: var(--md-sys-color-surface-container);
+    border: 1px solid var(--md-sys-color-outline-variant);
+    border-radius: var(--md-sys-shape-corner-large);
+    padding: var(--space-4) var(--space-6);
+    text-decoration: none;
+    color: var(--md-sys-color-on-surface);
+    transition: border-color var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard),
+                box-shadow var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard);
+  }
+  .entry-card:hover {
+    border-color: var(--md-sys-color-outline);
+    box-shadow: 0 1px 3px 0 rgba(0,0,0,.1), 0 1px 2px -1px rgba(0,0,0,.1);
+  }
+
+  .entry-card-header {
+    display: flex;
+    align-items: baseline;
+    gap: var(--space-2);
+    flex-wrap: wrap;
+  }
+
+  .entry-card-title {
+    font: var(--md-sys-typescale-title-large);
+    color: var(--md-sys-color-primary);
+    margin: 0;
+    font-size: 1.1rem;
+  }
+
+  .category-badge,
+  .type-badge {
+    font: var(--md-sys-typescale-body-small);
+    background: var(--md-sys-color-tertiary-container);
+    color: var(--md-sys-color-on-tertiary-container);
+    border-radius: var(--md-sys-shape-corner-full);
+    padding: 2px 10px;
+    text-transform: capitalize;
+  }
+
+  .entry-card-preview {
+    font: var(--md-sys-typescale-body-medium);
+    color: var(--md-sys-color-on-surface-variant);
+    margin: 0;
+    line-height: 1.5;
+  }
+
+  .entry-card-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-2) var(--space-4);
+    font: var(--md-sys-typescale-body-small);
+    color: var(--md-sys-color-on-surface-variant);
+    margin-top: auto;
+  }
+
+  .meta-link {
+    color: var(--md-sys-color-primary);
+  }
+
+  .empty-msg {
+    color: var(--md-sys-color-on-surface-variant);
+    font: var(--md-sys-typescale-body-large);
+  }
+
+  /* ── Pagination ──────────────────────────────────────────── */
+  .pagination {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: var(--space-4);
+    margin-top: var(--space-8);
+  }
+
+  .page-link {
+    font: var(--md-sys-typescale-label-large);
+    color: var(--md-sys-color-primary);
+    text-decoration: none;
+    padding: var(--space-2) var(--space-3);
+    border-radius: var(--md-sys-shape-corner-small);
+    transition: background var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard);
+  }
+  .page-link:hover { background: var(--md-sys-color-surface-container); }
+
+  .page-info {
+    font: var(--md-sys-typescale-body-medium);
+    color: var(--md-sys-color-on-surface-variant);
+  }
+
+  .btn-filled {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font: var(--md-sys-typescale-label-large);
+    color: var(--md-sys-color-on-primary);
+    background: var(--md-sys-color-primary);
+    border: none;
+    border-radius: var(--md-sys-shape-corner-full);
+    padding: var(--space-3) var(--space-8);
+    cursor: pointer;
+    text-decoration: none;
+    transition: opacity var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard);
+  }
+  .btn-filled:hover { opacity: 0.88; }
+
+  .btn-outlined {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font: var(--md-sys-typescale-label-large);
+    color: var(--md-sys-color-primary);
+    background: transparent;
+    border: 1px solid var(--md-sys-color-outline);
+    border-radius: var(--md-sys-shape-corner-full);
+    padding: var(--space-3) var(--space-8);
+    text-decoration: none;
+    transition: background var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard);
+  }
+  .btn-outlined:hover { background: var(--md-sys-color-primary-container); }
+</style>

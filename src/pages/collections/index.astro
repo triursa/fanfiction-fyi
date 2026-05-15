@@ -1,0 +1,372 @@
+---
+/**
+ * Collections Browse Page — Public
+ * Fetches collections from /api/collections, supports privacy filter + search by name.
+ */
+export const prerender = false;
+export const config = { auth: 'public' };
+import Base from '@/v2/layouts/Base.astro';
+
+// Read query params
+const activePrivacy = Astro.url.searchParams.get('privacy') || '';
+const searchQuery = Astro.url.searchParams.get('q') || '';
+const page = Math.max(1, Number(Astro.url.searchParams.get('page')) || 1);
+const user = Astro.locals.user;
+
+// Fetch collections from API
+let collections: any[] = [];
+let total = 0;
+let errorMsg: string | null = null;
+
+try {
+  const params = new URLSearchParams({
+    page: String(page),
+    limit: '20',
+  });
+  if (activePrivacy) params.set('privacy', activePrivacy);
+
+  const res = await fetch(new URL(`/api/collections?${params.toString()}`, Astro.url));
+  if (res.ok) {
+    const json = await res.json();
+    collections = json.data || [];
+    total = json.total || 0;
+  } else {
+    errorMsg = 'Failed to load collections.';
+  }
+} catch {
+  errorMsg = 'Network error loading collections.';
+}
+
+const totalPages = Math.max(1, Math.ceil(total / 20));
+
+function pageUrl(p: number): string {
+  const u = new URL(Astro.url);
+  u.searchParams.set('page', String(p));
+  return u.pathname + u.search;
+}
+
+const privacyOptions = [
+  { value: '', label: 'All' },
+  { value: 'public', label: 'Public' },
+  { value: 'open', label: 'Open' },
+  { value: 'moderated', label: 'Moderated' },
+  { value: 'closed', label: 'Closed' },
+  { value: 'private', label: 'Private' },
+  { value: 'unrevealed', label: 'Unrevealed' },
+];
+---
+
+<Base title="Collections — fanfiction.fyi" description="Browse collections on fanfiction.fyi">
+  <section class="collections-page">
+    <div class="page-header">
+      <h1 class="page-title">Collections</h1>
+      {user && (
+        <a href="/collections/new" class="btn-filled">+ New Collection</a>
+      )}
+    </div>
+
+    {errorMsg && <div class="error-banner" role="alert">{errorMsg}</div>}
+
+    <!-- ── Search + Privacy Filter ────────────────────────────── -->
+    <div class="filter-bar">
+      <form method="GET" class="filter-form">
+        <div class="search-row">
+          <input
+            type="text"
+            name="q"
+            class="search-input"
+            placeholder="Search collections by name…"
+            value={searchQuery}
+            aria-label="Search collections"
+          />
+          <button type="submit" class="btn-filled btn-sm">Search</button>
+        </div>
+        <div class="privacy-chips">
+          {privacyOptions.map(opt => (
+            <button
+              type="submit"
+              name="privacy"
+              value={opt.value}
+              class:list={['privacy-chip', activePrivacy === opt.value && 'privacy-chip--active']}
+            >
+              {opt.label}
+            </button>
+          ))}
+        </div>
+      </form>
+    </div>
+
+    {total > 0 && (
+      <p class="results-meta">{total} collection{total !== 1 ? 's' : ''} found</p>
+    )}
+
+    <!-- ── Collections Grid ───────────────────────────────────── -->
+    {collections.length > 0 ? (
+      <div class="collections-grid">
+        {collections.map((c: any) => (
+          <a href={`/collections/${c.id}`} class="collection-card">
+            <div class="collection-card-header">
+              <h2 class="collection-card-title">{c.title}</h2>
+              <span class={`privacy-badge privacy-badge--${c.privacy}`}>{c.privacy}</span>
+            </div>
+            {c.description && <p class="collection-card-desc">{c.description.length > 180 ? c.description.slice(0, 180) + '…' : c.description}</p>}
+            <div class="collection-card-meta">
+              {c.ownerName && <span>by {c.ownerName}</span>}
+              <span>{c.workCount ?? 0} work{(c.workCount ?? 0) !== 1 ? 's' : ''}</span>
+              <span>{new Date(c.updatedAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</span>
+            </div>
+          </a>
+        ))}
+      </div>
+    ) : !errorMsg ? (
+      <p class="empty-msg">No collections found. Try a different search or filter.</p>
+    ) : null}
+
+    <!-- ── Pagination ──────────────────────────────────────────── -->
+    {totalPages > 1 && (
+      <nav class="pagination" aria-label="Collections pagination">
+        {page > 1 && (
+          <a href={pageUrl(page - 1)} class="page-link" rel="prev">← Prev</a>
+        )}
+        <span class="page-info">Page {page} of {totalPages}</span>
+        {page < totalPages && (
+          <a href={pageUrl(page + 1)} class="page-link" rel="next">Next →</a>
+        )}
+      </nav>
+    )}
+  </section>
+</Base>
+
+<style is:global>
+  .collections-page {
+    max-width: 72rem;
+    margin: 0 auto;
+    padding: var(--space-8) var(--space-4);
+  }
+
+  .page-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: var(--space-4);
+    margin-bottom: var(--space-6);
+  }
+
+  .page-title {
+    font: var(--md-sys-typescale-headline-medium);
+    margin: 0;
+  }
+
+  .error-banner {
+    background: var(--md-sys-color-error);
+    color: var(--md-sys-color-on-error);
+    border-radius: var(--md-sys-shape-corner-small);
+    padding: var(--space-3) var(--space-4);
+    margin-bottom: var(--space-6);
+    font: var(--md-sys-typescale-body-medium);
+  }
+
+  /* ── Filter Bar ──────────────────────────────────────────── */
+  .filter-bar {
+    margin-bottom: var(--space-6);
+  }
+
+  .filter-form {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-3);
+  }
+
+  .search-row {
+    display: flex;
+    gap: var(--space-2);
+  }
+
+  .search-input {
+    flex: 1;
+    font: var(--md-sys-typescale-body-large);
+    color: var(--md-sys-color-on-surface);
+    background: var(--md-sys-color-surface-container);
+    border: 1px solid var(--md-sys-color-outline-variant);
+    border-radius: var(--md-sys-shape-corner-small);
+    padding: var(--space-3) var(--space-4);
+    outline: none;
+    transition: border-color var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard);
+  }
+  .search-input:focus { border-color: var(--md-sys-color-primary); }
+
+  .privacy-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-2);
+  }
+
+  .privacy-chip {
+    font: var(--md-sys-typescale-label-large);
+    color: var(--md-sys-color-on-surface-variant);
+    background: var(--md-sys-color-surface-container);
+    border: 1px solid var(--md-sys-color-outline-variant);
+    border-radius: var(--md-sys-shape-corner-full);
+    padding: var(--space-2) var(--space-4);
+    cursor: pointer;
+    text-decoration: none;
+    transition: background var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard),
+                border-color var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard);
+  }
+  .privacy-chip:hover {
+    background: var(--md-sys-color-surface-container-high);
+  }
+  .privacy-chip--active {
+    background: var(--md-sys-color-primary);
+    color: var(--md-sys-color-on-primary);
+    border-color: var(--md-sys-color-primary);
+  }
+
+  .btn-sm {
+    padding: var(--space-2) var(--space-6);
+  }
+
+  .results-meta {
+    font: var(--md-sys-typescale-body-medium);
+    color: var(--md-sys-color-on-surface-variant);
+    margin: 0 0 var(--space-4) 0;
+  }
+
+  /* ── Collections Grid ─────────────────────────────────────── */
+  .collections-grid {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: var(--space-4);
+  }
+
+  @media (min-width: 640px) {
+    .collections-grid {
+      grid-template-columns: repeat(2, 1fr);
+    }
+  }
+
+  @media (min-width: 960px) {
+    .collections-grid {
+      grid-template-columns: repeat(3, 1fr);
+    }
+  }
+
+  .collection-card {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+    background: var(--md-sys-color-surface-container);
+    border: 1px solid var(--md-sys-color-outline-variant);
+    border-radius: var(--md-sys-shape-corner-large);
+    padding: var(--space-4) var(--space-6);
+    text-decoration: none;
+    color: var(--md-sys-color-on-surface);
+    transition: border-color var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard),
+                box-shadow var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard);
+  }
+  .collection-card:hover {
+    border-color: var(--md-sys-color-outline);
+    box-shadow: 0 1px 3px 0 rgba(0,0,0,.1), 0 1px 2px -1px rgba(0,0,0,.1);
+  }
+
+  .collection-card-header {
+    display: flex;
+    align-items: baseline;
+    gap: var(--space-2);
+    flex-wrap: wrap;
+  }
+
+  .collection-card-title {
+    font: var(--md-sys-typescale-title-large);
+    color: var(--md-sys-color-primary);
+    margin: 0;
+    font-size: 1.1rem;
+  }
+
+  .privacy-badge {
+    font: var(--md-sys-typescale-body-small);
+    border-radius: var(--md-sys-shape-corner-full);
+    padding: 2px 10px;
+    text-transform: capitalize;
+  }
+  .privacy-badge--public,
+  .privacy-badge--open {
+    background: var(--md-sys-color-primary-container);
+    color: var(--md-sys-color-on-primary-container);
+  }
+  .privacy-badge--moderated {
+    background: var(--md-sys-color-tertiary-container);
+    color: var(--md-sys-color-on-tertiary-container);
+  }
+  .privacy-badge--closed,
+  .privacy-badge--private {
+    background: var(--md-sys-color-surface-container-highest);
+    color: var(--md-sys-color-on-surface-variant);
+  }
+  .privacy-badge--unrevealed {
+    background: var(--md-sys-color-secondary-container);
+    color: var(--md-sys-color-on-secondary-container);
+  }
+
+  .collection-card-desc {
+    font: var(--md-sys-typescale-body-medium);
+    color: var(--md-sys-color-on-surface-variant);
+    margin: 0;
+    line-height: 1.5;
+  }
+
+  .collection-card-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-2) var(--space-4);
+    font: var(--md-sys-typescale-body-small);
+    color: var(--md-sys-color-on-surface-variant);
+    margin-top: auto;
+  }
+
+  .empty-msg {
+    color: var(--md-sys-color-on-surface-variant);
+    font: var(--md-sys-typescale-body-large);
+  }
+
+  /* ── Pagination ──────────────────────────────────────────── */
+  .pagination {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: var(--space-4);
+    margin-top: var(--space-8);
+  }
+
+  .page-link {
+    font: var(--md-sys-typescale-label-large);
+    color: var(--md-sys-color-primary);
+    text-decoration: none;
+    padding: var(--space-2) var(--space-3);
+    border-radius: var(--md-sys-shape-corner-small);
+    transition: background var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard);
+  }
+  .page-link:hover { background: var(--md-sys-color-surface-container); }
+
+  .page-info {
+    font: var(--md-sys-typescale-body-medium);
+    color: var(--md-sys-color-on-surface-variant);
+  }
+
+  .btn-filled {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font: var(--md-sys-typescale-label-large);
+    color: var(--md-sys-color-on-primary);
+    background: var(--md-sys-color-primary);
+    border: none;
+    border-radius: var(--md-sys-shape-corner-full);
+    padding: var(--space-3) var(--space-8);
+    cursor: pointer;
+    text-decoration: none;
+    transition: opacity var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard);
+  }
+  .btn-filled:hover { opacity: 0.88; }
+</style>

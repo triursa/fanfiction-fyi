@@ -1,0 +1,330 @@
+---
+/**
+ * Series Browse Page — Public
+ * Fetches series from /api/series, supports complete filter + pagination.
+ */
+export const prerender = false;
+export const config = { auth: 'public' };
+import Base from '@/v2/layouts/Base.astro';
+
+const activeFilter = Astro.url.searchParams.get('complete') || '';
+const page = Math.max(1, Number(Astro.url.searchParams.get('page')) || 1);
+const user = Astro.locals.user;
+
+// Fetch series from API
+let seriesList: any[] = [];
+let total = 0;
+let errorMsg: string | null = null;
+
+try {
+  const params = new URLSearchParams({
+    page: String(page),
+    limit: '20',
+  });
+  if (activeFilter === 'true') params.set('complete', 'true');
+  if (activeFilter === 'false') params.set('complete', 'false');
+
+  const res = await fetch(new URL(`/api/series?${params.toString()}`, Astro.url));
+  if (res.ok) {
+    const json = await res.json();
+    seriesList = json.data || [];
+    total = json.total || 0;
+  } else {
+    errorMsg = 'Failed to load series.';
+  }
+} catch {
+  errorMsg = 'Network error loading series.';
+}
+
+const totalPages = Math.max(1, Math.ceil(total / 20));
+
+function pageUrl(p: number): string {
+  const u = new URL(Astro.url);
+  u.searchParams.set('page', String(p));
+  return u.pathname + u.search;
+}
+
+const filterOptions = [
+  { value: '', label: 'All' },
+  { value: 'false', label: 'WIP' },
+  { value: 'true', label: 'Complete' },
+];
+---
+
+<Base title="Browse Series — fanfiction.fyi" description="Browse series on fanfiction.fyi">
+  <section class="series-page">
+    <div class="page-header">
+      <h1 class="page-title">Series</h1>
+      {user && (
+        <a href="/series/new" class="btn-filled">+ New Series</a>
+      )}
+    </div>
+
+    {errorMsg && <div class="error-banner" role="alert">{errorMsg}</div>}
+
+    <!-- ── Filter Bar ────────────────────────────────────────── -->
+    <div class="filter-bar">
+      <form method="GET" class="filter-form">
+        <div class="filter-chips">
+          {filterOptions.map(opt => (
+            <button
+              type="submit"
+              name="complete"
+              value={opt.value}
+              class:list={['filter-chip', activeFilter === opt.value && 'filter-chip--active']}
+            >
+              {opt.label}
+            </button>
+          ))}
+        </div>
+      </form>
+    </div>
+
+    {total > 0 && (
+      <p class="results-meta">{total} series found</p>
+    )}
+
+    <!-- ── Series Grid ──────────────────────────────────────── -->
+    {seriesList.length > 0 ? (
+      <div class="series-grid">
+        {seriesList.map((s: any) => (
+          <a href={`/series/${s.id}`} class="series-card">
+            <div class="series-card-header">
+              <h2 class="series-card-title">{s.title}</h2>
+              <span class:list={['status-badge', s.complete ? 'status-badge--complete' : 'status-badge--wip']}>
+                {s.complete ? 'Complete' : 'WIP'}
+              </span>
+            </div>
+            {s.description && (
+              <p class="series-card-desc">
+                {s.description.length > 180 ? s.description.slice(0, 180) + '…' : s.description}
+              </p>
+            )}
+            <div class="series-card-meta">
+              {s.creatorName && <span>by {s.creatorName}</span>}
+              <span>{s.workCount ?? 0} work{(s.workCount ?? 0) !== 1 ? 's' : ''}</span>
+              <span>{new Date(s.updatedAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</span>
+            </div>
+          </a>
+        ))}
+      </div>
+    ) : !errorMsg ? (
+      <p class="empty-msg">No series found. Try a different filter.</p>
+    ) : null}
+
+    <!-- ── Pagination ──────────────────────────────────────────── -->
+    {totalPages > 1 && (
+      <nav class="pagination" aria-label="Series pagination">
+        {page > 1 && (
+          <a href={pageUrl(page - 1)} class="page-link" rel="prev">← Prev</a>
+        )}
+        <span class="page-info">Page {page} of {totalPages}</span>
+        {page < totalPages && (
+          <a href={pageUrl(page + 1)} class="page-link" rel="next">Next →</a>
+        )}
+      </nav>
+    )}
+  </section>
+</Base>
+
+<style is:global>
+  .series-page {
+    max-width: 72rem;
+    margin: 0 auto;
+    padding: var(--space-8) var(--space-4);
+  }
+
+  .page-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: var(--space-4);
+    margin-bottom: var(--space-6);
+  }
+
+  .page-title {
+    font: var(--md-sys-typescale-headline-medium);
+    margin: 0;
+  }
+
+  .error-banner {
+    background: var(--md-sys-color-error);
+    color: var(--md-sys-color-on-error);
+    border-radius: var(--md-sys-shape-corner-small);
+    padding: var(--space-3) var(--space-4);
+    margin-bottom: var(--space-6);
+    font: var(--md-sys-typescale-body-medium);
+  }
+
+  /* ── Filter Bar ──────────────────────────────────────────── */
+  .filter-bar {
+    margin-bottom: var(--space-6);
+  }
+
+  .filter-form {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-3);
+  }
+
+  .filter-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-2);
+  }
+
+  .filter-chip {
+    font: var(--md-sys-typescale-label-large);
+    color: var(--md-sys-color-on-surface-variant);
+    background: var(--md-sys-color-surface-container);
+    border: 1px solid var(--md-sys-color-outline-variant);
+    border-radius: var(--md-sys-shape-corner-full);
+    padding: var(--space-2) var(--space-4);
+    cursor: pointer;
+    text-decoration: none;
+    transition: background var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard),
+                border-color var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard);
+  }
+  .filter-chip:hover {
+    background: var(--md-sys-color-surface-container-high);
+  }
+  .filter-chip--active {
+    background: var(--md-sys-color-primary);
+    color: var(--md-sys-color-on-primary);
+    border-color: var(--md-sys-color-primary);
+  }
+
+  .results-meta {
+    font: var(--md-sys-typescale-body-medium);
+    color: var(--md-sys-color-on-surface-variant);
+    margin: 0 0 var(--space-4) 0;
+  }
+
+  /* ── Series Grid ─────────────────────────────────────────── */
+  .series-grid {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: var(--space-4);
+  }
+
+  @media (min-width: 640px) {
+    .series-grid {
+      grid-template-columns: repeat(2, 1fr);
+    }
+  }
+
+  @media (min-width: 960px) {
+    .series-grid {
+      grid-template-columns: repeat(3, 1fr);
+    }
+  }
+
+  .series-card {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+    background: var(--md-sys-color-surface-container);
+    border: 1px solid var(--md-sys-color-outline-variant);
+    border-radius: var(--md-sys-shape-corner-large);
+    padding: var(--space-4) var(--space-6);
+    text-decoration: none;
+    color: var(--md-sys-color-on-surface);
+    transition: border-color var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard),
+                box-shadow var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard);
+  }
+  .series-card:hover {
+    border-color: var(--md-sys-color-outline);
+    box-shadow: 0 1px 3px 0 rgba(0,0,0,.1), 0 1px 2px -1px rgba(0,0,0,.1);
+  }
+
+  .series-card-header {
+    display: flex;
+    align-items: baseline;
+    gap: var(--space-2);
+    flex-wrap: wrap;
+  }
+
+  .series-card-title {
+    font: var(--md-sys-typescale-title-large);
+    color: var(--md-sys-color-primary);
+    margin: 0;
+    font-size: 1.1rem;
+  }
+
+  .status-badge {
+    font: var(--md-sys-typescale-body-small);
+    border-radius: var(--md-sys-shape-corner-full);
+    padding: 2px 10px;
+    flex-shrink: 0;
+  }
+  .status-badge--complete {
+    color: #2e7d32;
+    background: #e8f5e9;
+  }
+  .status-badge--wip {
+    color: var(--md-sys-color-on-surface-variant);
+    background: var(--md-sys-color-surface-container-highest);
+  }
+
+  .series-card-desc {
+    font: var(--md-sys-typescale-body-medium);
+    color: var(--md-sys-color-on-surface-variant);
+    margin: 0;
+    line-height: 1.5;
+  }
+
+  .series-card-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-2) var(--space-4);
+    font: var(--md-sys-typescale-body-small);
+    color: var(--md-sys-color-on-surface-variant);
+    margin-top: auto;
+  }
+
+  .empty-msg {
+    color: var(--md-sys-color-on-surface-variant);
+    font: var(--md-sys-typescale-body-large);
+  }
+
+  /* ── Pagination ──────────────────────────────────────────── */
+  .pagination {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: var(--space-4);
+    margin-top: var(--space-8);
+  }
+
+  .page-link {
+    font: var(--md-sys-typescale-label-large);
+    color: var(--md-sys-color-primary);
+    text-decoration: none;
+    padding: var(--space-2) var(--space-3);
+    border-radius: var(--md-sys-shape-corner-small);
+    transition: background var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard);
+  }
+  .page-link:hover { background: var(--md-sys-color-surface-container); }
+
+  .page-info {
+    font: var(--md-sys-typescale-body-medium);
+    color: var(--md-sys-color-on-surface-variant);
+  }
+
+  .btn-filled {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font: var(--md-sys-typescale-label-large);
+    color: var(--md-sys-color-on-primary);
+    background: var(--md-sys-color-primary);
+    border: none;
+    border-radius: var(--md-sys-shape-corner-full);
+    padding: var(--space-3) var(--space-8);
+    cursor: pointer;
+    text-decoration: none;
+    transition: opacity var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard);
+  }
+  .btn-filled:hover { opacity: 0.88; }
+</style>

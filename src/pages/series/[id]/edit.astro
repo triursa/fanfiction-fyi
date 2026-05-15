@@ -1,0 +1,574 @@
+---
+/**
+ * Edit Series Page — Auth Required (owner only)
+ * Edit series title, description, mark complete. Manage works in series.
+ * Route: /series/[id]/edit
+ */
+export const prerender = false;
+// Auth required — default middleware enforces login
+import Base from '@/v2/layouts/Base.astro';
+
+const seriesId = Number(Astro.params.id);
+if (!seriesId || isNaN(seriesId)) {
+  return Astro.redirect('/series');
+}
+
+const user = Astro.locals.user;
+
+// Fetch series data
+let seriesData: any = null;
+let works: any[] = [];
+let errorMsg: string | null = null;
+
+try {
+  const res = await fetch(new URL(`/api/series/${seriesId}`, Astro.url));
+  if (res.ok) {
+    const json = await res.json();
+    seriesData = json.data;
+    works = json.data?.works || [];
+  } else if (res.status === 404) {
+    return Astro.redirect('/series');
+  } else {
+    errorMsg = 'Failed to load series.';
+  }
+} catch {
+  errorMsg = 'Network error loading series.';
+}
+
+// Fetch user's pseuds for ownership check
+let pseuds: any[] = [];
+let isOwner = false;
+try {
+  const pRes = await fetch(new URL(`/api/pseuds?limit=100&userId=${user.id}`, Astro.url), {
+    headers: { cookie: Astro.request.headers.get('cookie') || '' },
+  });
+  if (pRes.ok) {
+    const pJson = await pRes.json();
+    pseuds = pJson.data ?? [];
+    const pseudIds = pseuds.map((p: any) => p.id);
+    isOwner = seriesData ? pseudIds.includes(seriesData.creatorPseudId) : false;
+  }
+} catch {
+  // Non-fatal
+}
+
+// If not owner, redirect to view
+if (seriesData && !isOwner) {
+  return Astro.redirect(`/series/${seriesId}`);
+}
+---
+
+<Base title={`Edit: ${seriesData?.title || 'Series'} — fanfiction.fyi`} description="Edit this series on fanfiction.fyi">
+  <section class="form-page">
+    <div class="form-header">
+      <a href={`/series/${seriesId}`} class="back-link">← Back to Series</a>
+      <h1 class="form-title">Edit Series</h1>
+    </div>
+
+    {errorMsg && <div class="error-banner" role="alert">{errorMsg}</div>}
+
+    {seriesData && (
+      <>
+        <form id="edit-series-form" class="series-form">
+          <div class="form-field">
+            <label for="title">Title</label>
+            <input type="text" id="title" name="title" required maxlength="500" value={seriesData.title} />
+          </div>
+
+          <div class="form-field">
+            <label for="description">Description</label>
+            <textarea id="description" name="description" rows="5" maxlength="5000">{seriesData.description || ''}</textarea>
+          </div>
+
+          <div class="form-field">
+            <label class="checkbox-label">
+              <input type="checkbox" id="complete" name="complete" checked={seriesData.complete === 1} />
+              Mark as Complete
+            </label>
+            <p class="field-hint">Mark this series as finished when all works are included.</p>
+          </div>
+
+          <div class="form-field">
+            <label>Creator</label>
+            <input type="text" value={seriesData.creatorName || `Pseud #${seriesData.creatorPseudId}`} disabled readonly />
+            <p class="field-hint">Ownership cannot be transferred after creation.</p>
+          </div>
+
+          <div class="form-actions">
+            <button type="submit" class="btn-filled" id="submit-btn">
+              <span class="btn-text">Save Changes</span>
+              <span class="btn-loading" style="display:none;">Saving…</span>
+            </button>
+            <a href={`/series/${seriesId}`} class="btn-outlined">Cancel</a>
+            <button type="button" class="btn-danger" id="delete-btn">Delete Series</button>
+          </div>
+
+          <div id="form-error" class="form-error" role="alert"></div>
+        </form>
+
+        <!-- ── Manage Works ───────────────────────────────────────── -->
+        <div class="works-section">
+          <h2 class="section-heading">Works in Series {works.length > 0 && <span class="count-badge">{works.length}</span>}</h2>
+
+          <div id="works-list" class="works-list">
+            {works.length === 0 ? (
+              <p class="empty-msg" id="no-works-msg">No works in this series yet. Add one below.</p>
+            ) : (
+              works.map((w: any, i: number) => (
+                <div class="work-item" data-work-id={w.id} data-position={w.position ?? i + 1}>
+                  <span class="work-position">{w.position ?? i + 1}.</span>
+                  <a href={`/works/${w.id}`} class="work-title">{w.title}</a>
+                  {w.wordCount > 0 && <span class="work-words">{w.wordCount.toLocaleString()} words</span>}
+                  <button type="button" class="btn-icon btn-remove-work" data-work-id={w.id} title="Remove from series">✕</button>
+                </div>
+              ))
+            )}
+          </div>
+
+          <!-- ── Add Work ──────────────────────────────────────────── -->
+          <div class="add-work-section">
+            <h3 class="add-work-heading">Add a Work</h3>
+            <div class="add-work-row">
+              <input type="number" id="add-work-id" class="add-work-input" placeholder="Work ID" min="1" />
+              <button type="button" class="btn-filled btn-sm" id="add-work-btn">Add</button>
+            </div>
+            <p class="field-hint">Enter the numeric ID of a published work to add it to this series.</p>
+            <div id="add-work-error" class="form-error"></div>
+          </div>
+        </div>
+      </>
+    )}
+  </section>
+</Base>
+
+{seriesData && (
+  <script define:vars={{ seriesId }}>
+    // ─── Edit form ──────────────────────────────────────────────────
+    const form = document.getElementById('edit-series-form') as HTMLFormElement;
+    const errorEl = document.getElementById('form-error') as HTMLElement;
+    const submitBtn = document.getElementById('submit-btn') as HTMLButtonElement;
+
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      errorEl.textContent = '';
+      submitBtn.disabled = true;
+      (submitBtn.querySelector('.btn-text') as HTMLElement).style.display = 'none';
+      (submitBtn.querySelector('.btn-loading') as HTMLElement).style.display = 'inline';
+
+      const title = (document.getElementById('title') as HTMLInputElement).value.trim();
+      const description = (document.getElementById('description') as HTMLTextAreaElement).value || undefined;
+      const complete = (document.getElementById('complete') as HTMLInputElement).checked;
+
+      try {
+        const res = await fetch(`/api/series/${seriesId}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ title, description, complete }),
+        });
+
+        const data = await res.json();
+        if (!res.ok) {
+          errorEl.textContent = data.error || data.fields?.map((f: any) => `${f.field}: ${f.message}`).join(', ') || 'Failed to update series.';
+          submitBtn.disabled = false;
+          (submitBtn.querySelector('.btn-text') as HTMLElement).style.display = 'inline';
+          (submitBtn.querySelector('.btn-loading') as HTMLElement).style.display = 'none';
+          return;
+        }
+
+        window.location.href = `/series/${seriesId}`;
+      } catch {
+        errorEl.textContent = 'Network error. Please try again.';
+        submitBtn.disabled = false;
+        (submitBtn.querySelector('.btn-text') as HTMLElement).style.display = 'inline';
+        (submitBtn.querySelector('.btn-loading') as HTMLElement).style.display = 'none';
+      }
+    });
+
+    // ─── Delete ────────────────────────────────────────────────────
+    const deleteBtn = document.getElementById('delete-btn');
+    if (deleteBtn) {
+      deleteBtn.addEventListener('click', async () => {
+        if (!confirm('Are you sure you want to delete this series? This cannot be undone.')) return;
+        deleteBtn.disabled = true;
+        (deleteBtn as HTMLElement).textContent = 'Deleting…';
+        try {
+          const res = await fetch(`/api/series/${seriesId}`, { method: 'DELETE' });
+          if (res.ok) {
+            window.location.href = '/series';
+          } else {
+            const data = await res.json();
+            alert(data.error || 'Failed to delete series.');
+            deleteBtn.disabled = false;
+            (deleteBtn as HTMLElement).textContent = 'Delete Series';
+          }
+        } catch {
+          alert('Network error. Please try again.');
+          deleteBtn.disabled = false;
+          (deleteBtn as HTMLElement).textContent = 'Delete Series';
+        }
+      });
+    }
+
+    // ─── Remove work from series ───────────────────────────────────
+    document.querySelectorAll('.btn-remove-work').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const workId = Number((btn as HTMLElement).dataset.workId);
+        if (!workId || !confirm('Remove this work from the series?')) return;
+
+        try {
+          const res = await fetch(`/api/series/${seriesId}/works`, {
+            method: 'DELETE',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ workId }),
+          });
+          if (res.ok) {
+            const item = btn.closest('.work-item') as HTMLElement;
+            if (item) item.remove();
+            // Check if list is empty
+            const list = document.getElementById('works-list') as HTMLElement;
+            if (list && list.querySelectorAll('.work-item').length === 0) {
+              list.innerHTML = '<p class="empty-msg" id="no-works-msg">No works in this series yet. Add one below.</p>';
+            }
+          } else {
+            const data = await res.json();
+            alert(data.error || 'Failed to remove work.');
+          }
+        } catch {
+          alert('Network error. Please try again.');
+        }
+      });
+    });
+
+    // ─── Add work to series ─────────────────────────────────────────
+    const addWorkBtn = document.getElementById('add-work-btn') as HTMLButtonElement;
+    const addWorkInput = document.getElementById('add-work-id') as HTMLInputElement;
+    const addWorkError = document.getElementById('add-work-error') as HTMLElement;
+
+    addWorkBtn.addEventListener('click', async () => {
+      const workId = Number(addWorkInput.value);
+      addWorkError.textContent = '';
+
+      if (!workId || isNaN(workId) || workId < 1) {
+        addWorkError.textContent = 'Please enter a valid work ID.';
+        return;
+      }
+
+      addWorkBtn.disabled = true;
+      addWorkBtn.textContent = 'Adding…';
+
+      try {
+        const res = await fetch(`/api/series/${seriesId}/works`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ workId }),
+        });
+
+        const data = await res.json();
+        if (!res.ok) {
+          addWorkError.textContent = data.error || 'Failed to add work.';
+          addWorkBtn.disabled = false;
+          addWorkBtn.textContent = 'Add';
+          return;
+        }
+
+        // Reload the page to show updated works list
+        window.location.reload();
+      } catch {
+        addWorkError.textContent = 'Network error. Please try again.';
+        addWorkBtn.disabled = false;
+        addWorkBtn.textContent = 'Add';
+      }
+    });
+
+    // Allow Enter key to trigger add
+    addWorkInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        addWorkBtn.click();
+      }
+    });
+  </script>
+)}
+
+<style is:global>
+  .form-page {
+    max-width: 48rem;
+    margin: 0 auto;
+    padding: var(--space-8) var(--space-4);
+  }
+
+  .form-header {
+    margin-bottom: var(--space-8);
+  }
+
+  .back-link {
+    font: var(--md-sys-typescale-body-medium);
+    color: var(--md-sys-color-primary);
+    text-decoration: none;
+    display: inline-block;
+    margin-bottom: var(--space-2);
+  }
+
+  .form-title {
+    font: var(--md-sys-typescale-headline-medium);
+    margin: 0 0 var(--space-4) 0;
+  }
+
+  .error-banner {
+    background: var(--md-sys-color-error);
+    color: var(--md-sys-color-on-error);
+    border-radius: var(--md-sys-shape-corner-small);
+    padding: var(--space-3) var(--space-4);
+    margin-bottom: var(--space-6);
+    font: var(--md-sys-typescale-body-medium);
+  }
+
+  .series-form {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-6);
+  }
+
+  .form-field {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+  }
+  .form-field label {
+    font: var(--md-sys-typescale-label-large);
+    color: var(--md-sys-color-on-surface-variant);
+  }
+  .form-field input,
+  .form-field select,
+  .form-field textarea {
+    font: var(--md-sys-typescale-body-large);
+    color: var(--md-sys-color-on-surface);
+    background: var(--md-sys-color-surface-container);
+    border: 1px solid var(--md-sys-color-outline-variant);
+    border-radius: var(--md-sys-shape-corner-small);
+    padding: var(--space-3) var(--space-4);
+    outline: none;
+    transition: border-color var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard);
+  }
+  .form-field input:focus,
+  .form-field select:focus,
+  .form-field textarea:focus {
+    border-color: var(--md-sys-color-primary);
+  }
+  .form-field input[disabled],
+  .form-field input[readonly] {
+    opacity: 0.6;
+    cursor: not-allowed;
+    background: var(--md-sys-color-surface-container-highest);
+  }
+  .form-field textarea {
+    resize: vertical;
+    min-height: 100px;
+  }
+
+  .checkbox-label {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    font: var(--md-sys-typescale-body-large);
+    color: var(--md-sys-color-on-surface);
+    cursor: pointer;
+  }
+  .checkbox-label input[type="checkbox"] {
+    width: 18px;
+    height: 18px;
+    accent-color: var(--md-sys-color-primary);
+  }
+
+  .field-hint {
+    font: var(--md-sys-typescale-body-small);
+    color: var(--md-sys-color-on-surface-variant);
+    margin: var(--space-1) 0 0 0;
+  }
+  .field-hint a { color: var(--md-sys-color-primary); }
+
+  .form-actions {
+    display: flex;
+    gap: var(--space-4);
+    align-items: center;
+    flex-wrap: wrap;
+  }
+
+  .btn-filled {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font: var(--md-sys-typescale-label-large);
+    color: var(--md-sys-color-on-primary);
+    background: var(--md-sys-color-primary);
+    border: none;
+    border-radius: var(--md-sys-shape-corner-full);
+    padding: var(--space-3) var(--space-8);
+    cursor: pointer;
+    transition: opacity var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard);
+  }
+  .btn-filled:hover { opacity: 0.88; }
+  .btn-filled:disabled { opacity: 0.5; cursor: not-allowed; }
+
+  .btn-sm {
+    padding: var(--space-2) var(--space-6);
+  }
+
+  .btn-outlined {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font: var(--md-sys-typescale-label-large);
+    color: var(--md-sys-color-primary);
+    background: transparent;
+    border: 1px solid var(--md-sys-color-outline);
+    border-radius: var(--md-sys-shape-corner-full);
+    padding: var(--space-3) var(--space-8);
+    text-decoration: none;
+    transition: background var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard);
+  }
+  .btn-outlined:hover { background: var(--md-sys-color-primary-container); }
+
+  .btn-danger {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font: var(--md-sys-typescale-label-large);
+    color: var(--md-sys-color-on-error);
+    background: var(--md-sys-color-error);
+    border: none;
+    border-radius: var(--md-sys-shape-corner-full);
+    padding: var(--space-3) var(--space-8);
+    cursor: pointer;
+    margin-left: auto;
+    transition: opacity var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard);
+  }
+  .btn-danger:hover { opacity: 0.88; }
+
+  .form-error {
+    font: var(--md-sys-typescale-body-small);
+    color: var(--md-sys-color-error);
+    min-height: 1.2em;
+  }
+
+  /* ── Works Section ─────────────────────────────────────────────── */
+  .works-section {
+    margin-top: var(--space-10);
+    padding-top: var(--space-8);
+    border-top: 1px solid var(--md-sys-color-outline-variant);
+  }
+
+  .section-heading {
+    font: var(--md-sys-typescale-label-large);
+    color: var(--md-sys-color-on-surface-variant);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    font-size: 0.85rem;
+    margin: 0 0 var(--space-4) 0;
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+  }
+
+  .count-badge {
+    background: var(--md-sys-color-primary-container);
+    color: var(--md-sys-color-on-primary-container);
+    border-radius: var(--md-sys-shape-corner-full);
+    padding: 2px 8px;
+    font-size: 0.75rem;
+  }
+
+  .works-list {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+    margin-bottom: var(--space-6);
+  }
+
+  .work-item {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    padding: var(--space-3) var(--space-4);
+    background: var(--md-sys-color-surface-container);
+    border: 1px solid var(--md-sys-color-outline-variant);
+    border-radius: var(--md-sys-shape-corner-small);
+  }
+
+  .work-position {
+    font: var(--md-sys-typescale-label-large);
+    color: var(--md-sys-color-on-surface-variant);
+    min-width: 2ch;
+    text-align: right;
+  }
+
+  .work-title {
+    font: var(--md-sys-typescale-body-large);
+    color: var(--md-sys-color-primary);
+    text-decoration: none;
+    flex: 1;
+  }
+  .work-title:hover { text-decoration: underline; }
+
+  .work-words {
+    font: var(--md-sys-typescale-body-small);
+    color: var(--md-sys-color-on-surface-variant);
+  }
+
+  .btn-icon {
+    background: none;
+    border: none;
+    color: var(--md-sys-color-on-surface-variant);
+    cursor: pointer;
+    font-size: 1rem;
+    padding: var(--space-1) var(--space-2);
+    border-radius: var(--md-sys-shape-corner-small);
+    transition: background var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard),
+                color var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard);
+  }
+  .btn-icon:hover {
+    background: var(--md-sys-color-error);
+    color: var(--md-sys-color-on-error);
+  }
+
+  .btn-remove-work {
+    margin-left: auto;
+  }
+
+  .empty-msg {
+    color: var(--md-sys-color-on-surface-variant);
+    font: var(--md-sys-typescale-body-large);
+  }
+
+  /* ── Add Work ────────────────────────────────────────────────── */
+  .add-work-section {
+    padding: var(--space-4);
+    background: var(--md-sys-color-surface-container-low);
+    border-radius: var(--md-sys-shape-corner-small);
+  }
+
+  .add-work-heading {
+    font: var(--md-sys-typescale-title-small);
+    margin: 0 0 var(--space-3) 0;
+    color: var(--md-sys-color-on-surface);
+  }
+
+  .add-work-row {
+    display: flex;
+    gap: var(--space-2);
+    align-items: center;
+  }
+
+  .add-work-input {
+    font: var(--md-sys-typescale-body-large);
+    color: var(--md-sys-color-on-surface);
+    background: var(--md-sys-color-surface-container);
+    border: 1px solid var(--md-sys-color-outline-variant);
+    border-radius: var(--md-sys-shape-corner-small);
+    padding: var(--space-2) var(--space-4);
+    width: 120px;
+    outline: none;
+    transition: border-color var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard);
+  }
+  .add-work-input:focus { border-color: var(--md-sys-color-primary); }
+</style>

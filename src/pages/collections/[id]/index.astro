@@ -1,0 +1,313 @@
+---
+/**
+ * Collection Detail Page — Public
+ * Shows collection title, description, owner pseud, privacy badge, and work items.
+ * Route: /collections/[id]
+ */
+export const prerender = false;
+export const config = { auth: 'public' };
+import Base from '@/v2/layouts/Base.astro';
+import WorkCard from '@/v2/components/WorkCard.astro';
+
+const collectionId = Number(Astro.params.id);
+if (!collectionId || isNaN(collectionId)) {
+  return Astro.redirect('/collections');
+}
+
+let collection: any = null;
+let works: any[] = [];
+let errorMsg: string | null = null;
+
+try {
+  const res = await fetch(new URL(`/api/collections/${collectionId}`, Astro.url));
+  if (res.ok) {
+    const json = await res.json();
+    collection = json.data;
+    works = json.data?.works || [];
+  } else if (res.status === 404) {
+    return Astro.redirect('/collections');
+  } else {
+    errorMsg = 'Failed to load collection.';
+  }
+} catch {
+  errorMsg = 'Network error loading collection.';
+}
+const user = Astro.locals.user;
+const isOwner = user && collection && user.id === collection.ownerUserId;
+
+const privacyLabels: Record<string, string> = {
+  public: 'Public',
+  open: 'Open',
+  moderated: 'Moderated',
+  closed: 'Closed',
+  private: 'Private',
+  unrevealed: 'Unrevealed',
+};
+---
+
+<Base title={`${collection?.title || 'Collection'} — fanfiction.fyi`} description={collection?.description || 'View this collection on fanfiction.fyi'}>
+  <section class="collection-detail-page">
+    {errorMsg && <div class="error-banner" role="alert">{errorMsg}</div>}
+
+    {collection && (
+      <>
+        <a href="/collections" class="back-link">← All Collections</a>
+
+        <div class="collection-header">
+          <div class="collection-title-row">
+            <h1 class="collection-title">{collection.title}</h1>
+            <span class={`privacy-badge privacy-badge--${collection.privacy}`}>
+              {privacyLabels[collection.privacy] || collection.privacy}
+            </span>
+          </div>
+
+          <div class="collection-meta">
+            {collection.ownerName && (
+              <a href={`/pseuds/${collection.ownerPseudId}`} class="collection-owner">by {collection.ownerName}</a>
+            )}
+            <span class="collection-meta-item">{works.length} work{works.length !== 1 ? 's' : ''}</span>
+            <span class="collection-meta-item">Updated {new Date(collection.updatedAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</span>
+          </div>
+
+          {collection.description && (
+            <p class="collection-desc">{collection.description}</p>
+          )}
+
+          {isOwner && (
+            <div class="owner-actions">
+              <a href={`/collections/${collectionId}/edit`} class="btn-outlined">Edit Collection</a>
+              <button type="button" class="btn-danger" id="delete-btn">Delete Collection</button>
+            </div>
+          )}
+        </div>
+
+        <!-- ── Works ──────────────────────────────────────────────── -->
+        <div class="collection-works">
+          <h2 class="section-heading">Works {works.length > 0 && <span class="count-badge">{works.length}</span>}</h2>
+
+          {works.length === 0 ? (
+            <p class="empty-msg">This collection doesn't have any works yet.</p>
+          ) : (
+            <div class="works-grid">
+              {works.map((w: any) => (
+                <WorkCard work={{
+                  id: w.id,
+                  title: w.title,
+                  summary: w.summary,
+                  wordCount: w.wordCount,
+                  complete: w.complete ?? 0,
+                  updatedAt: w.updatedAt,
+                  authors: w.authors || [],
+                  tags: w.tags || [],
+                }} />
+              ))}
+            </div>
+          )}
+        </div>
+      </>
+    )}
+  </section>
+</Base>
+
+{isOwner && (
+  <script define:vars={{ collectionId }}>
+    const deleteBtn = document.getElementById('delete-btn');
+    if (deleteBtn) {
+      deleteBtn.addEventListener('click', async () => {
+        if (!confirm('Are you sure you want to delete this collection? This cannot be undone.')) return;
+        deleteBtn.disabled = true;
+        deleteBtn.textContent = 'Deleting…';
+        try {
+          const res = await fetch(`/api/collections/${collectionId}`, { method: 'DELETE' });
+          if (res.ok) {
+            window.location.href = '/collections';
+          } else {
+            const data = await res.json();
+            alert(data.error || 'Failed to delete collection.');
+            deleteBtn.disabled = false;
+            deleteBtn.textContent = 'Delete Collection';
+          }
+        } catch {
+          alert('Network error. Please try again.');
+          deleteBtn.disabled = false;
+          deleteBtn.textContent = 'Delete Collection';
+        }
+      });
+    }
+  </script>
+)}
+
+<style is:global>
+  .collection-detail-page {
+    max-width: 72rem;
+    margin: 0 auto;
+    padding: var(--space-8) var(--space-4);
+  }
+
+  .back-link {
+    font: var(--md-sys-typescale-label-large);
+    color: var(--md-sys-color-primary);
+    text-decoration: none;
+    display: inline-block;
+    margin-bottom: var(--space-4);
+    transition: opacity var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard);
+  }
+  .back-link:hover { opacity: 0.8; }
+
+  .error-banner {
+    background: var(--md-sys-color-error);
+    color: var(--md-sys-color-on-error);
+    border-radius: var(--md-sys-shape-corner-small);
+    padding: var(--space-3) var(--space-4);
+    margin-bottom: var(--space-6);
+    font: var(--md-sys-typescale-body-medium);
+  }
+
+  .collection-header {
+    margin-bottom: var(--space-8);
+  }
+
+  .collection-title-row {
+    display: flex;
+    align-items: baseline;
+    gap: var(--space-3);
+    flex-wrap: wrap;
+  }
+
+  .collection-title {
+    font: var(--md-sys-typescale-headline-medium);
+    margin: 0;
+  }
+
+  .privacy-badge {
+    font: var(--md-sys-typescale-body-small);
+    border-radius: var(--md-sys-shape-corner-full);
+    padding: 2px 10px;
+    text-transform: capitalize;
+    flex-shrink: 0;
+  }
+  .privacy-badge--public,
+  .privacy-badge--open {
+    background: var(--md-sys-color-primary-container);
+    color: var(--md-sys-color-on-primary-container);
+  }
+  .privacy-badge--moderated {
+    background: var(--md-sys-color-tertiary-container);
+    color: var(--md-sys-color-on-tertiary-container);
+  }
+  .privacy-badge--closed,
+  .privacy-badge--private {
+    background: var(--md-sys-color-surface-container-highest);
+    color: var(--md-sys-color-on-surface-variant);
+  }
+  .privacy-badge--unrevealed {
+    background: var(--md-sys-color-secondary-container);
+    color: var(--md-sys-color-on-secondary-container);
+  }
+
+  .collection-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-2) var(--space-4);
+    margin-top: var(--space-2);
+    font: var(--md-sys-typescale-body-medium);
+    color: var(--md-sys-color-on-surface-variant);
+  }
+
+  .collection-owner {
+    color: var(--md-sys-color-primary);
+    text-decoration: none;
+  }
+  .collection-owner:hover { text-decoration: underline; }
+
+  .collection-meta-item {
+    color: var(--md-sys-color-on-surface-variant);
+  }
+
+  .collection-desc {
+    font: var(--md-sys-typescale-body-large);
+    color: var(--md-sys-color-on-surface-variant);
+    margin: var(--space-4) 0 0 0;
+    line-height: 1.6;
+    white-space: pre-wrap;
+  }
+
+  .owner-actions {
+    display: flex;
+    gap: var(--space-4);
+    margin-top: var(--space-4);
+    flex-wrap: wrap;
+  }
+
+  .btn-outlined {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font: var(--md-sys-typescale-label-large);
+    color: var(--md-sys-color-primary);
+    background: transparent;
+    border: 1px solid var(--md-sys-color-outline);
+    border-radius: var(--md-sys-shape-corner-full);
+    padding: var(--space-3) var(--space-8);
+    text-decoration: none;
+    transition: background var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard);
+  }
+  .btn-outlined:hover { background: var(--md-sys-color-primary-container); }
+
+  .btn-danger {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font: var(--md-sys-typescale-label-large);
+    color: var(--md-sys-color-on-error);
+    background: var(--md-sys-color-error);
+    border: none;
+    border-radius: var(--md-sys-shape-corner-full);
+    padding: var(--space-3) var(--space-8);
+    cursor: pointer;
+    transition: opacity var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard);
+  }
+  .btn-danger:hover { opacity: 0.88; }
+
+  /* ── Works Section ───────────────────────────────────────────── */
+  .collection-works {
+    padding-top: var(--space-4);
+  }
+
+  .section-heading {
+    font: var(--md-sys-typescale-label-large);
+    color: var(--md-sys-color-on-surface-variant);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    font-size: 0.85rem;
+    margin: 0 0 var(--space-4) 0;
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+  }
+
+  .count-badge {
+    background: var(--md-sys-color-primary-container);
+    color: var(--md-sys-color-on-primary-container);
+    border-radius: var(--md-sys-shape-corner-full);
+    padding: 2px 8px;
+    font-size: 0.75rem;
+  }
+
+  .works-grid {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: var(--space-4);
+  }
+
+  @media (min-width: 640px) {
+    .works-grid {
+      grid-template-columns: repeat(2, 1fr);
+    }
+  }
+
+  .empty-msg {
+    color: var(--md-sys-color-on-surface-variant);
+    font: var(--md-sys-typescale-body-large);
+  }
+</style>
