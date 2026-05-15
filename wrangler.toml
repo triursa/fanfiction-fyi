@@ -18,34 +18,34 @@ bucket_name = "ffy-dev"
 [placement]
 mode = "smart"
 
-# ─── Staging environment ────────────────────────────────────
-[env.staging]
+# ─── Preview environment (staging) ──────────────────────────
+[env.preview]
 name = "fanfiction-fyi-staging"
 
-[[env.staging.d1_databases]]
+[[env.preview.d1_databases]]
 binding = "DB"
 database_name = "ffy-staging"
 database_id = "3ef61c14-917d-4d77-9bb2-76498bf4173e"
 
-[[env.staging.r2_buckets]]
+[[env.preview.r2_buckets]]
 binding = "MEDIA"
 bucket_name = "ffy-staging"
 
-[env.staging.placement]
+[env.preview.placement]
 mode = "smart"
 
 # ─── Production environment ─────────────────────────────────
-[env.prod]
+[env.production]
 name = "fanfiction-fyi-prod"
 
-[[env.prod.d1_databases]]
+[[env.production.d1_databases]]
 binding = "DB"
 database_name = "ffy-prod"
 database_id = "9f22ddcb-c003-4c5a-9065-7c30368e7978"
 
-[[env.prod.r2_buckets]]
+[[env.production.r2_buckets]]
 binding = "MEDIA"
 bucket_name = "ffy-prod"
 
-[env.prod.placement]
+[env.production.placement]
 mode = "smart"
