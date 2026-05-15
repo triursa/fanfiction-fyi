@@ -1,0 +1,527 @@
+---
+/**
+ * Character Detail Page — Public
+ * Shows character name, description, group badge, appearances list with role badges.
+ * Edit/delete controls shown for owners only.
+ */
+export const prerender = false;
+export const config = { auth: 'public' };
+import Base from '@/v2/layouts/Base.astro';
+
+const characterId = Number(Astro.params.id);
+if (!characterId || isNaN(characterId)) {
+  return Astro.redirect('/characters');
+}
+
+const user = Astro.locals.user;
+
+let character: any = null;
+let errorMsg: string | null = null;
+
+try {
+  const res = await fetch(new URL(`/api/characters/${characterId}`, Astro.url));
+  if (res.ok) {
+    const json = await res.json();
+    character = json.data;
+  } else if (res.status === 404) {
+    return Astro.redirect('/characters');
+  } else {
+    errorMsg = 'Failed to load character.';
+  }
+} catch {
+  errorMsg = 'Network error loading character.';
+}
+
+// Determine if current user owns this character
+const isOwner = user && character && user.pseudIds?.includes(character.pseudId);
+
+const ROLE_LABELS: Record<string, string> = {
+  protagonist: 'Protagonist',
+  deuteragonist: 'Deuteragonist',
+  antagonist: 'Antagonist',
+  side: 'Side Character',
+  cameo: 'Cameo',
+};
+
+const ROLE_COLORS: Record<string, string> = {
+  protagonist: 'primary',
+  deuteragonist: 'secondary',
+  antagonist: 'error',
+  side: 'surface',
+  cameo: 'outline',
+};
+
+const displayName = character?.name || 'Character';
+const description = character?.description;
+const groupName = character?.groupName;
+const appearances: any[] = character?.appearances || [];
+---
+
+<Base title={`${displayName} — fanfiction.fyi`} description={description || `Character profile for ${displayName} on fanfiction.fyi`}>
+  <section class="char-page">
+    {errorMsg && <div class="error-banner" role="alert">{errorMsg}</div>}
+
+    {character && (
+      <>
+        <!-- ── Profile Header ─────────────────────────────────────── -->
+        <div class="char-header">
+          <div class="char-meta">
+            <div class="char-header-row">
+              <h1 class="char-name">{character.name}</h1>
+              {groupName && <span class="group-badge">{groupName}</span>}
+            </div>
+            {description && <p class="char-description">{description}</p>}
+            <div class="char-creator">
+              {character.pseudName && <span>by {character.pseudName}</span>}
+              <span>{new Date(character.createdAt).toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}</span>
+            </div>
+          </div>
+
+          {isOwner && (
+            <div class="char-actions">
+              <button class="btn-outlined" id="edit-btn">Edit</button>
+              <button class="btn-tonal" id="delete-btn">Delete</button>
+            </div>
+          )}
+        </div>
+
+        <!-- ── Appearances ────────────────────────────────────────── -->
+        <div class="char-appearances">
+          <h2 class="section-heading">
+            Appearances
+            {appearances.length > 0 && <span class="count-badge">{appearances.length}</span>}
+          </h2>
+
+          {appearances.length === 0 ? (
+            <p class="empty-msg">This character hasn't appeared in any works yet.</p>
+          ) : (
+            <div class="appearances-list">
+              {appearances.map((a: any) => (
+                <a href={`/works/${a.workId}`} class="appearance-card">
+                  <div class="appearance-body">
+                    <span class="appearance-title">{a.workTitle}</span>
+                    {a.notes && <span class="appearance-notes">{a.notes}</span>}
+                  </div>
+                  {a.role && (
+                    <span class={`role-badge role-badge--${ROLE_COLORS[a.role] || 'surface'}`}>
+                      {ROLE_LABELS[a.role] || a.role}
+                    </span>
+                  )}
+                </a>
+              ))}
+            </div>
+          )}
+        </div>
+      </>
+    )}
+  </section>
+</Base>
+
+{/* ── Edit Modal ─────────────────────────────────────────────── */}
+{isOwner && character && (
+  <dialog class="edit-dialog" id="edit-dialog">
+    <form method="dialog" class="edit-form" id="edit-form">
+      <h3 class="dialog-title">Edit Character</h3>
+      <label class="field-label">
+        Name
+        <input type="text" name="name" class="field-input" value={character.name} required />
+      </label>
+      <label class="field-label">
+        Description
+        <textarea name="description" class="field-input field-textarea" rows="4">{character.description || ''}</textarea>
+      </label>
+      <div class="dialog-actions">
+        <button type="button" class="btn-tonal" id="edit-cancel">Cancel</button>
+        <button type="submit" class="btn-filled btn-sm">Save Changes</button>
+      </div>
+    </form>
+  </dialog>
+)}
+
+{/* ── Delete Confirmation ────────────────────────────────────── */}
+{isOwner && character && (
+  <dialog class="delete-dialog" id="delete-dialog">
+    <form method="dialog" class="delete-form">
+      <h3 class="dialog-title">Delete Character</h3>
+      <p>Are you sure you want to delete <strong>{character.name}</strong>? This action cannot be undone.</p>
+      <div class="dialog-actions">
+        <button type="button" class="btn-tonal" id="delete-cancel">Cancel</button>
+        <button type="submit" class="btn-danger" id="delete-confirm">Delete</button>
+      </div>
+    </form>
+  </dialog>
+)}
+
+{isOwner && (
+  <script define:vars={{ characterId }}>
+    const editBtn = document.getElementById('edit-btn');
+    const editDialog = document.getElementById('edit-dialog');
+    const editCancel = document.getElementById('edit-cancel');
+    const editForm = document.getElementById('edit-form');
+    const deleteBtn = document.getElementById('delete-btn');
+    const deleteDialog = document.getElementById('delete-dialog');
+    const deleteCancel = document.getElementById('delete-cancel');
+    const deleteConfirm = document.getElementById('delete-confirm');
+
+    if (editBtn && editDialog) {
+      editBtn.addEventListener('click', () => editDialog.showModal());
+      editCancel.addEventListener('click', () => editDialog.close());
+    }
+
+    if (editForm) {
+      editForm.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const formData = new FormData(editForm);
+        const body = {
+          name: formData.get('name'),
+          description: formData.get('description') || null,
+        };
+        try {
+          const res = await fetch(`/api/characters/${characterId}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body),
+          });
+          if (res.ok) {
+            window.location.reload();
+          } else {
+            const data = await res.json();
+            alert(data.error || 'Failed to update character.');
+          }
+        } catch {
+          alert('Network error updating character.');
+        }
+      });
+    }
+
+    if (deleteBtn && deleteDialog) {
+      deleteBtn.addEventListener('click', () => deleteDialog.showModal());
+      deleteCancel.addEventListener('click', () => deleteDialog.close());
+    }
+
+    if (deleteConfirm) {
+      deleteConfirm.addEventListener('click', async () => {
+        try {
+          const res = await fetch(`/api/characters/${characterId}`, { method: 'DELETE' });
+          if (res.ok) {
+            window.location.href = '/characters';
+          } else {
+            const data = await res.json();
+            alert(data.error || 'Failed to delete character.');
+          }
+        } catch {
+          alert('Network error deleting character.');
+        }
+      });
+    }
+  </script>
+)}
+
+<style is:global>
+  .char-page {
+    max-width: 72rem;
+    margin: 0 auto;
+    padding: var(--space-8) var(--space-4);
+  }
+
+  .error-banner {
+    background: var(--md-sys-color-error);
+    color: var(--md-sys-color-on-error);
+    border-radius: var(--md-sys-shape-corner-small);
+    padding: var(--space-3) var(--space-4);
+    margin-bottom: var(--space-6);
+    font: var(--md-sys-typescale-body-medium);
+  }
+
+  /* ── Character Header ─────────────────────────────────────── */
+  .char-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: var(--space-4);
+    margin-bottom: var(--space-8);
+    padding-bottom: var(--space-6);
+    border-bottom: 1px solid var(--md-sys-color-outline-variant);
+  }
+
+  .char-meta {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+  }
+
+  .char-header-row {
+    display: flex;
+    align-items: baseline;
+    gap: var(--space-3);
+    flex-wrap: wrap;
+  }
+
+  .char-name {
+    font: var(--md-sys-typescale-headline-medium);
+    color: var(--md-sys-color-on-surface);
+    margin: 0;
+  }
+
+  .group-badge {
+    font: var(--md-sys-typescale-body-small);
+    background: var(--md-sys-color-tertiary-container);
+    color: var(--md-sys-color-on-tertiary-container);
+    border-radius: var(--md-sys-shape-corner-full);
+    padding: 2px 10px;
+    text-transform: capitalize;
+    vertical-align: middle;
+  }
+
+  .char-description {
+    font: var(--md-sys-typescale-body-large);
+    color: var(--md-sys-color-on-surface-variant);
+    margin: 0;
+    line-height: 1.6;
+    max-width: 60ch;
+  }
+
+  .char-creator {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-2) var(--space-4);
+    font: var(--md-sys-typescale-body-small);
+    color: var(--md-sys-color-on-surface-variant);
+  }
+
+  .char-actions {
+    display: flex;
+    gap: var(--space-2);
+    align-items: flex-start;
+  }
+
+  /* ── Appearances ───────────────────────────────────────────── */
+  .char-appearances {
+    margin-top: 0;
+  }
+
+  .section-heading {
+    font: var(--md-sys-typescale-label-large);
+    color: var(--md-sys-color-on-surface-variant);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    font-size: 0.85rem;
+    margin: 0 0 var(--space-4) 0;
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+  }
+
+  .count-badge {
+    background: var(--md-sys-color-primary-container);
+    color: var(--md-sys-color-on-primary-container);
+    border-radius: var(--md-sys-shape-corner-full);
+    padding: 2px 8px;
+    font-size: 0.75rem;
+  }
+
+  .appearances-list {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+  }
+
+  .appearance-card {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-3);
+    background: var(--md-sys-color-surface-container);
+    border: 1px solid var(--md-sys-color-outline-variant);
+    border-radius: var(--md-sys-shape-corner-medium);
+    padding: var(--space-3) var(--space-4);
+    text-decoration: none;
+    color: var(--md-sys-color-on-surface);
+    transition: background var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard);
+  }
+  .appearance-card:hover {
+    background: var(--md-sys-color-surface-container-high);
+    text-decoration: none;
+  }
+
+  .appearance-body {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+  }
+
+  .appearance-title {
+    font: var(--md-sys-typescale-body-large);
+    font-weight: 500;
+    color: var(--md-sys-color-on-surface);
+  }
+
+  .appearance-notes {
+    font: var(--md-sys-typescale-body-small);
+    color: var(--md-sys-color-on-surface-variant);
+  }
+
+  /* ── Role Badges ──────────────────────────────────────────── */
+  .role-badge {
+    font: var(--md-sys-typescale-label-small);
+    padding: 2px var(--space-3);
+    border-radius: var(--md-sys-shape-corner-full);
+    white-space: nowrap;
+    flex-shrink: 0;
+  }
+
+  .role-badge--primary {
+    background: var(--md-sys-color-primary-container);
+    color: var(--md-sys-color-on-primary-container);
+  }
+
+  .role-badge--secondary {
+    background: var(--md-sys-color-secondary-container);
+    color: var(--md-sys-color-on-secondary-container);
+  }
+
+  .role-badge--error {
+    background: var(--md-sys-color-error-container);
+    color: var(--md-sys-color-on-error-container);
+  }
+
+  .role-badge--surface {
+    background: var(--md-sys-color-surface-container-highest);
+    color: var(--md-sys-color-on-surface-variant);
+  }
+
+  .role-badge--outline {
+    background: transparent;
+    color: var(--md-sys-color-outline);
+    border: 1px solid var(--md-sys-color-outline-variant);
+  }
+
+  .empty-msg {
+    color: var(--md-sys-color-on-surface-variant);
+    font: var(--md-sys-typescale-body-large);
+  }
+
+  /* ── Buttons ─────────────────────────────────────────────── */
+  .btn-filled {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font: var(--md-sys-typescale-label-large);
+    color: var(--md-sys-color-on-primary);
+    background: var(--md-sys-color-primary);
+    border: none;
+    border-radius: var(--md-sys-shape-corner-full);
+    padding: var(--space-3) var(--space-8);
+    cursor: pointer;
+    text-decoration: none;
+    transition: opacity var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard);
+  }
+  .btn-filled:hover { opacity: 0.88; }
+  .btn-sm { padding: var(--space-2) var(--space-6); }
+
+  .btn-outlined {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font: var(--md-sys-typescale-label-large);
+    color: var(--md-sys-color-primary);
+    background: transparent;
+    border: 1px solid var(--md-sys-color-outline);
+    border-radius: var(--md-sys-shape-corner-full);
+    padding: var(--space-3) var(--space-8);
+    cursor: pointer;
+    transition: background var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard);
+  }
+  .btn-outlined:hover {
+    background: var(--md-sys-color-surface-container);
+  }
+
+  .btn-tonal {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font: var(--md-sys-typescale-label-large);
+    color: var(--md-sys-color-on-secondary-container);
+    background: var(--md-sys-color-secondary-container);
+    border: none;
+    border-radius: var(--md-sys-shape-corner-full);
+    padding: var(--space-3) var(--space-8);
+    cursor: pointer;
+    transition: opacity var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard);
+  }
+  .btn-tonal:hover { opacity: 0.88; }
+
+  .btn-danger {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font: var(--md-sys-typescale-label-large);
+    color: var(--md-sys-color-on-error);
+    background: var(--md-sys-color-error);
+    border: none;
+    border-radius: var(--md-sys-shape-corner-full);
+    padding: var(--space-3) var(--space-8);
+    cursor: pointer;
+    transition: opacity var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard);
+  }
+  .btn-danger:hover { opacity: 0.88; }
+
+  /* ── Dialog ───────────────────────────────────────────────── */
+  .edit-dialog, .delete-dialog {
+    border: none;
+    border-radius: var(--md-sys-shape-corner-extra-large);
+    padding: var(--space-6);
+    background: var(--md-sys-color-surface-container-high);
+    color: var(--md-sys-color-on-surface);
+    max-width: 480px;
+    width: 100%;
+    box-shadow: var(--md-sys-elevation-3);
+  }
+  .edit-dialog::backdrop, .delete-dialog::backdrop {
+    background: rgba(0, 0, 0, 0.4);
+  }
+
+  .dialog-title {
+    font: var(--md-sys-typescale-headline-small);
+    margin: 0 0 var(--space-4) 0;
+  }
+
+  .edit-form, .delete-form {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-4);
+  }
+
+  .field-label {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+    font: var(--md-sys-typescale-label-medium);
+    color: var(--md-sys-color-on-surface-variant);
+  }
+
+  .field-input {
+    font: var(--md-sys-typescale-body-large);
+    color: var(--md-sys-color-on-surface);
+    background: var(--md-sys-color-surface-container);
+    border: 1px solid var(--md-sys-color-outline-variant);
+    border-radius: var(--md-sys-shape-corner-small);
+    padding: var(--space-3) var(--space-4);
+    outline: none;
+    transition: border-color var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard);
+  }
+  .field-input:focus { border-color: var(--md-sys-color-primary); }
+
+  .field-textarea {
+    resize: vertical;
+    min-height: 80px;
+  }
+
+  .dialog-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: var(--space-2);
+  }
+</style>

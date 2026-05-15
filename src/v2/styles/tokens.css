@@ -1,0 +1,231 @@
+/* ==========================================================================
+   M3 Design Token System — fanfiction.fyi v2
+   Defaults to obsidian dark theme. Reading skins layered on top.
+   ========================================================================== */
+
+/* --------------------------------------------------------------------------
+   Color tokens (obsidian dark as default)
+   -------------------------------------------------------------------------- */
+:root {
+  /* Primary */
+  --md-sys-color-primary: #B0C4D8;
+  --md-sys-color-on-primary: #1C2F3F;
+  --md-sys-color-primary-container: #374A5C;
+  --md-sys-color-on-primary-container: #D3E4F6;
+
+  /* Secondary */
+  --md-sys-color-secondary: #A3B8CC;
+  --md-sys-color-on-secondary: #0D1F30;
+  --md-sys-color-secondary-container: #2A3E52;
+  --md-sys-color-on-secondary-container: #C2D6EB;
+
+  /* Tertiary */
+  --md-sys-color-tertiary: #8FA8BF;
+  --md-sys-color-on-tertiary: #182A3C;
+  --md-sys-color-tertiary-container: #354A5E;
+  --md-sys-color-on-tertiary-container: #B8D1E9;
+
+  /* Error */
+  --md-sys-color-error: #FFB4AB;
+  --md-sys-color-on-error: #690005;
+  --md-sys-color-error-container: #93000A;
+  --md-sys-color-on-error-container: #FFDAD6;
+
+  /* Surface */
+  --md-sys-color-surface: #111418;
+  --md-sys-color-on-surface: #E1E2E6;
+  --md-sys-color-surface-variant: #42474E;
+  --md-sys-color-on-surface-variant: #C2C7CE;
+
+  /* Outline */
+  --md-sys-color-outline: #8C9199;
+  --md-sys-color-outline-variant: #42474E;
+
+  /* Inverse */
+  --md-sys-color-inverse-surface: #E1E2E6;
+  --md-sys-color-inverse-on-surface: #2E3035;
+  --md-sys-color-inverse-primary: #516375;
+
+  /* Surface container scale */
+  --md-sys-color-surface-dim: #111418;
+  --md-sys-color-surface-bright: #373940;
+  --md-sys-color-surface-container-lowest: #0C0F13;
+  --md-sys-color-surface-container-low: #191C20;
+  --md-sys-color-surface-container: #1D2024;
+  --md-sys-color-surface-container-high: #282A2F;
+  --md-sys-color-surface-container-highest: #33353A;
+
+  /* --------------------------------------------------------------------------
+     Typography (Inter)
+     -------------------------------------------------------------------------- */
+  --md-sys-typescale-display-large:   400 57px/64px 'Inter', sans-serif;
+  --md-sys-typescale-display-medium:  400 45px/52px 'Inter', sans-serif;
+  --md-sys-typescale-display-small:   400 36px/44px 'Inter', sans-serif;
+  --md-sys-typescale-headline-large:  400 32px/40px 'Inter', sans-serif;
+  --md-sys-typescale-headline-medium: 400 28px/36px 'Inter', sans-serif;
+  --md-sys-typescale-headline-small:  400 24px/32px 'Inter', sans-serif;
+  --md-sys-typescale-title-large:     500 22px/28px 'Inter', sans-serif;
+  --md-sys-typescale-title-medium:    500 16px/24px 'Inter', sans-serif;
+  --md-sys-typescale-title-small:     500 14px/20px 'Inter', sans-serif;
+  --md-sys-typescale-body-large:      400 16px/24px 'Inter', sans-serif;
+  --md-sys-typescale-body-medium:     400 14px/20px 'Inter', sans-serif;
+  --md-sys-typescale-body-small:      500 12px/16px 'Inter', sans-serif;
+  --md-sys-typescale-label-large:     500 14px/20px 'Inter', sans-serif;
+  --md-sys-typescale-label-medium:    500 12px/16px 'Inter', sans-serif;
+  --md-sys-typescale-label-small:     500 11px/16px 'Inter', sans-serif;
+
+  /* --------------------------------------------------------------------------
+     Elevation (box-shadow levels for dark surfaces)
+     -------------------------------------------------------------------------- */
+  --md-sys-elevation-0: none;
+  --md-sys-elevation-1: 0 1px 3px 0 rgba(0,0,0,0.30), 0 1px 1px 0 rgba(0,0,0,0.15);
+  --md-sys-elevation-2: 0 2px 6px 0 rgba(0,0,0,0.30), 0 1px 2px 0 rgba(0,0,0,0.15);
+  --md-sys-elevation-3: 0 4px 12px 0 rgba(0,0,0,0.30), 0 2px 4px 0 rgba(0,0,0,0.15);
+  --md-sys-elevation-4: 0 8px 24px 0 rgba(0,0,0,0.30), 0 4px 8px 0 rgba(0,0,0,0.15);
+
+  /* --------------------------------------------------------------------------
+     Shape corners
+     -------------------------------------------------------------------------- */
+  --md-sys-shape-corner-none:   0px;
+  --md-sys-shape-corner-extra-small: 4px;
+  --md-sys-shape-corner-small:  8px;
+  --md-sys-shape-corner-medium: 12px;
+  --md-sys-shape-corner-large:  16px;
+  --md-sys-shape-corner-extra-large: 28px;
+  --md-sys-shape-corner-full:   9999px;
+
+  /* --------------------------------------------------------------------------
+     Motion — easing
+     -------------------------------------------------------------------------- */
+  --md-sys-motion-easing-standard:       cubic-bezier(0.2, 0, 0, 1);
+  --md-sys-motion-easing-standard-accelerate: cubic-bezier(0.3, 0, 1, 1);
+  --md-sys-motion-easing-standard-decelerate: cubic-bezier(0, 0, 0, 1);
+  --md-sys-motion-easing-emphasized:     cubic-bezier(0.2, 0, 0, 1);
+  --md-sys-motion-easing-emphasized-accelerate: cubic-bezier(0.3, 0, 0.8, 0.15);
+  --md-sys-motion-easing-emphasized-decelerate: cubic-bezier(0.05, 0.7, 0.1, 1);
+  --md-sys-motion-easing-legacy:         cubic-bezier(0.4, 0, 0.2, 1);
+  --md-sys-motion-easing-linear:         cubic-bezier(0, 0, 1, 1);
+
+  /* --------------------------------------------------------------------------
+     Motion — duration
+     -------------------------------------------------------------------------- */
+  --md-sys-motion-duration-short1:  50ms;
+  --md-sys-motion-duration-short2:  100ms;
+  --md-sys-motion-duration-short3:  150ms;
+  --md-sys-motion-duration-short4:  200ms;
+  --md-sys-motion-duration-medium1: 250ms;
+  --md-sys-motion-duration-medium2: 300ms;
+  --md-sys-motion-duration-medium3: 350ms;
+  --md-sys-motion-duration-medium4: 400ms;
+  --md-sys-motion-duration-long1:    450ms;
+  --md-sys-motion-duration-long2:   500ms;
+
+  /* --------------------------------------------------------------------------
+     Spacing (4px grid, px values)
+     -------------------------------------------------------------------------- */
+  --space-0:   0px;
+  --space-1:   4px;
+  --space-2:   8px;
+  --space-3:   12px;
+  --space-4:   16px;
+  --space-5:   20px;
+  --space-6:   24px;
+  --space-7:   28px;
+  --space-8:   32px;
+  --space-10:  40px;
+  --space-12:  48px;
+  --space-16:  64px;
+
+  /* --------------------------------------------------------------------------
+     Layout
+     -------------------------------------------------------------------------- */
+  --reading-width: 65ch;
+  --font-mono: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', ui-monospace, monospace;
+}
+
+/* ==========================================================================
+   Reading Skins
+   Each skin overrides font + sets --reading-bg / --reading-fg for the
+   .reading-container. These are layered on top of whatever color theme is active.
+   ========================================================================== */
+
+/* -- default (Merriweather, theme surface) -------------------------------- */
+.reading-container[data-skin="default"],
+.reading-container:not([data-skin]) {
+  --reading-font: 'Merriweather', 'Noto Serif', Georgia, serif;
+  --reading-bg: var(--md-sys-color-surface);
+  --reading-fg: var(--md-sys-color-on-surface);
+  font-family: var(--reading-font);
+  color: var(--reading-fg);
+  background: var(--reading-bg);
+}
+
+/* -- parchment (warm serif on cream) -------------------------------------- */
+.reading-container[data-skin="parchment"] {
+  --reading-font: 'Merriweather', 'Noto Serif', Georgia, serif;
+  --reading-bg: #F5F0E6;
+  --reading-fg: #3C3226;
+  font-family: var(--reading-font);
+  color: var(--reading-fg);
+  background: var(--reading-bg);
+}
+
+/* -- night (sans-serif, OLED-black background) --------------------------- */
+.reading-container[data-skin="night"] {
+  --reading-font: 'Inter', sans-serif;
+  --reading-bg: #000000;
+  --reading-fg: #C8C8C8;
+  font-family: var(--reading-font);
+  color: var(--reading-fg);
+  background: var(--reading-bg);
+}
+
+/* -- sepia (Bitter on warm tan) ------------------------------------------- */
+.reading-container[data-skin="sepia"] {
+  --reading-font: 'Bitter', 'Noto Serif', Georgia, serif;
+  --reading-bg: #F1E4C8;
+  --reading-fg: #4A3F2F;
+  font-family: var(--reading-font);
+  color: var(--reading-fg);
+  background: var(--reading-bg);
+}
+
+/* -- typewriter (monospace, dark amber) ----------------------------------- */
+.reading-container[data-skin="typewriter"] {
+  --reading-font: 'Courier New', Courier, monospace;
+  --reading-bg: #141414;
+  --reading-fg: #C8C8C8;
+  font-family: var(--reading-font);
+  color: var(--reading-fg);
+  background: var(--reading-bg);
+  border-radius: var(--md-sys-shape-corner-none);
+  line-height: 1.75;
+}
+
+/* -- terminal (green-on-black, overrides M3 tokens for CRT feel) ---------- */
+.reading-container[data-skin="terminal"] {
+  --reading-font: var(--font-mono);
+  --reading-bg: #0A0A0A;
+  --reading-fg: #33FF33;
+  --md-sys-color-surface: #0A0A0A;
+  --md-sys-color-on-surface: #33FF33;
+  --md-sys-color-primary: #33FF33;
+  --md-sys-color-outline: #1A6B1A;
+  font-family: var(--reading-font);
+  color: var(--reading-fg);
+  background: var(--reading-bg);
+  border-radius: var(--md-sys-shape-corner-none);
+}
+
+/* -- open-dyslexic (accessibility-optimized) ------------------------------ */
+.reading-container[data-skin="open-dyslexic"] {
+  --reading-font: 'OpenDyslexic', 'Open Dyslexic', sans-serif;
+  --reading-bg: var(--md-sys-color-surface);
+  --reading-fg: var(--md-sys-color-on-surface);
+  font-family: var(--reading-font);
+  color: var(--reading-fg);
+  background: var(--reading-bg);
+  letter-spacing: 0.03em;
+  word-spacing: 0.12em;
+  line-height: 1.8;
+}

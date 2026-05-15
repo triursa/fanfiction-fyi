@@ -1,191 +1,332 @@
 ---
+/**
+ * Series Detail Page — Public
+ * Shows series title, description, creator pseud, status badge, and ordered works.
+ * Route: /series/[id]
+ */
 export const prerender = false;
-import Base from '../../../layouts/Base.astro';
-import { getDrizzle } from '../../../lib/db';
-import { sessions, pseuds as pseudsTable, series as seriesTable, serialWorks, works, tags, taggings, creatorships, kudos } from '../../../lib/schema';
-import { eq, and, gt, sql, count } from 'drizzle-orm';
-import { markdownToHtml } from '../../../lib/markdown';
+export const config = { auth: 'public' };
+import Base from '@/v2/layouts/Base.astro';
+import WorkCard from '@/v2/components/WorkCard.astro';
 
 const seriesId = Number(Astro.params.id);
-if (!seriesId) return Astro.redirect('/series');
-
-const d1 = Astro.locals.runtime.env.DB as D1Database;
-const db = getDrizzle(d1);
-
-// Series detail with creator name — raw D1 for JOIN + alias
-const series = await d1.prepare(
-  `SELECT s.*, p.name as creator_name, p.id as creator_pseud_id
-   FROM series s JOIN pseuds p ON s.creator_pseud_id = p.id
-   WHERE s.id = ?1`
-).bind(seriesId).first<any>();
-if (!series) return Astro.redirect('/series');
-
-// Get works in series order — raw D1 for JOIN + position
-const worksResult = await d1.prepare(
-  `SELECT w.*, sw.position as series_position
-   FROM serial_works sw
-   JOIN works w ON w.id = sw.work_id
-   WHERE sw.series_id = ?1
-   ORDER BY sw.position`
-).bind(seriesId).all<any>();
-const worksList = worksResult.results;
-
-// Enrich each work with tags, pseuds, and kudos
-for (const w of worksList) {
-  w.tags = await db.select({ name: tags.name, type: tags.type })
-    .from(taggings).innerJoin(tags, eq(tags.id, taggings.tagId))
-    .where(eq(taggings.workId, w.id));
-  w.pseuds = await db.select({ name: pseudsTable.name, role: creatorships.role })
-    .from(creatorships).innerJoin(pseudsTable, eq(pseudsTable.id, creatorships.pseudId))
-    .where(eq(creatorships.workId, w.id));
-  const [kudoRow] = await db.select({ cnt: count() }).from(kudos).where(eq(kudos.workId, w.id));
-  w.kudos_count = kudoRow?.cnt ?? 0;
+if (!seriesId || isNaN(seriesId)) {
+  return Astro.redirect('/series');
 }
 
-// Check auth for edit button
-let isOwner = false;
-const cookie = Astro.request.headers.get('cookie') ?? '';
-const sessionMatch = cookie.match(/session=([a-f0-9]+)/);
-if (sessionMatch) {
-  const session = await db.select({ userId: sessions.userId }).from(sessions)
-    .where(and(eq(sessions.token, sessionMatch[1]), gt(sessions.expiresAt, sql`datetime('now')`))).get();
-  if (session) {
-    const userPseuds = await db.select({ id: pseudsTable.id }).from(pseudsTable).where(eq(pseudsTable.userId, session.userId));
-    isOwner = userPseuds.some(p => p.id === series.creator_pseud_id);
+let seriesData: any = null;
+let works: any[] = [];
+let errorMsg: string | null = null;
+
+try {
+  const res = await fetch(new URL(`/api/series/${seriesId}`, Astro.url));
+  if (res.ok) {
+    const json = await res.json();
+    seriesData = json.data;
+    works = json.data?.works || [];
+  } else if (res.status === 404) {
+    return Astro.redirect('/series');
+  } else {
+    errorMsg = 'Failed to load series.';
   }
+} catch {
+  errorMsg = 'Network error loading series.';
 }
 
-const totalWords = worksList.reduce((sum: number, w: any) => sum + (w.word_count ?? 0), 0);
-const publishedWorks = worksList.filter((w: any) => w.published_at !== null);
+const user = Astro.locals.user;
+const isOwner = user && seriesData && user.pseudIds?.includes(seriesData.creatorPseudId);
+
+// Calculate total word count across works
+const totalWords = works.reduce((sum: number, w: any) => sum + (w.wordCount || 0), 0);
 ---
 
-<Base title={`${series.title} — fanfiction.fyi`}>
-  <article class="series-detail">
-    <header class="series-header">
-      <h1 class="series-title">{series.title}</h1>
-      <div class="series-meta">
-        <span class="series-creator">by <a href={`/pseuds/${series.creator_pseud_id}`} class="pseud-link">{series.creator_name}</a></span>
-        <span>·</span>
-        <span>{series.complete ? 'Complete' : 'Work in Progress'}</span>
-        <span>·</span>
-        <span>{worksList.length} work{worksList.length !== 1 ? 's' : ''}</span>
-        {totalWords > 0 && <><span>·</span><span>{totalWords.toLocaleString()} words</span></>}
-        <span>·</span>
-        <span>Updated {new Date(series.updated_at).toLocaleDateString()}</span>
-      </div>
+<Base title={`${seriesData?.title || 'Series'} — fanfiction.fyi`} description={seriesData?.description || 'View this series on fanfiction.fyi'}>
+  <section class="series-detail-page">
+    {errorMsg && <div class="error-banner" role="alert">{errorMsg}</div>}
 
-      {series.description && (
-        <div class="series-description" set:html={markdownToHtml(series.description)} />
-      )}
+    {seriesData && (
+      <>
+        <a href="/series" class="back-link">← All Series</a>
 
-      {isOwner && (
-        <div class="series-owner-actions">
-          <a href={`/series/${series.id}/edit`} class="btn-secondary">Edit Series</a>
-          <button id="delete-series-btn" class="btn-danger" data-series-id={series.id}>Delete Series</button>
-        </div>
-      )}
-    </header>
+        <div class="series-header">
+          <div class="series-title-row">
+            <h1 class="series-title">{seriesData.title}</h1>
+            <span class:list={['status-badge', seriesData.complete ? 'status-badge--complete' : 'status-badge--wip']}>
+              {seriesData.complete ? 'Complete' : 'WIP'}
+            </span>
+          </div>
 
-    {worksList.length === 0 ? (
-      <div class="empty-state" role="status">
-        <p>No works in this series yet.</p>
-        {isOwner && <a href={`/series/${series.id}/edit`} class="btn-primary">Add Works</a>}
-      </div>
-    ) : (
-      <ol class="series-works-list">
-        {worksList.map((w: any) => (
-          <li class="series-work-item">
-            <span class="series-position">Part {w.series_position}</span>
-            <div class="series-work-info">
-              <a href={`/works/${w.id}`} class="series-work-link">{w.title}</a>
-              {w.published_at === null && <span class="draft-badge">Draft</span>}
-              <div class="series-work-meta">
-                {w.pseuds.length > 0 && <span>by {w.pseuds.map((p: any) => p.name).join(', ')}</span>}
-                <span>·</span>
-                <span>{w.word_count?.toLocaleString()} words</span>
-                <span>·</span>
-                <span>{w.kudos_count} kudos</span>
-                <span>·</span>
-                <span>{w.complete ? 'Complete' : 'WIP'}</span>
-              </div>
-              {w.tags.filter((t: any) => t.type === 'fandom').length > 0 && (
-                <div class="series-work-fandoms">
-                  {w.tags.filter((t: any) => t.type === 'fandom').map((t: any) => <span class="tag-pill">{t.name}</span>)}
-                </div>
-              )}
-              {w.summary && <p class="series-work-summary">{w.summary.length > 200 ? w.summary.slice(0, 200) + '…' : w.summary}</p>}
+          <div class="series-meta">
+            {seriesData.creatorName && (
+              <a href={`/pseuds/${seriesData.creatorPseudId}`} class="series-creator">by {seriesData.creatorName}</a>
+            )}
+            <span class="series-meta-item">{works.length} work{works.length !== 1 ? 's' : ''}</span>
+            {totalWords > 0 && <span class="series-meta-item">{totalWords.toLocaleString()} words</span>}
+            <span class="series-meta-item">Updated {new Date(seriesData.updatedAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</span>
+          </div>
+
+          {seriesData.description && (
+            <p class="series-desc">{seriesData.description}</p>
+          )}
+
+          {isOwner && (
+            <div class="owner-actions">
+              <a href={`/series/${seriesId}/edit`} class="btn-outlined">Edit Series</a>
+              <button type="button" class="btn-danger" id="delete-btn">Delete Series</button>
             </div>
-          </li>
-        ))}
-      </ol>
+          )}
+        </div>
+
+        <!-- ── Works ──────────────────────────────────────────────── -->
+        <div class="series-works">
+          <h2 class="section-heading">Works {works.length > 0 && <span class="count-badge">{works.length}</span>}</h2>
+
+          {works.length === 0 ? (
+            <p class="empty-msg">This series doesn't have any works yet.</p>
+          ) : (
+            <div class="works-list">
+              {works.map((w: any, i: number) => (
+                <a href={`/works/${w.id}`} class="series-work-item">
+                  <span class="work-position">{w.position ?? i + 1}.</span>
+                  <div class="work-item-content">
+                    <span class="work-item-title">{w.title}</span>
+                    {w.wordCount > 0 && <span class="work-item-words">{w.wordCount.toLocaleString()} words</span>}
+                  </div>
+                </a>
+              ))}
+            </div>
+          )}
+        </div>
+      </>
     )}
-  </article>
+  </section>
 </Base>
 
-<style is:global>
-  @import '../../../styles/theme.css';
-
-  .series-detail { max-width: var(--reading-width); margin: 0 auto; padding: var(--space-6) 0; }
-  .series-title { font: var(--md-sys-typescale-display-small); color: var(--md-sys-color-on-surface); margin: 0 0 var(--space-4); }
-  .series-meta { font: var(--md-sys-typescale-body-medium); color: var(--md-sys-color-outline); display: flex; gap: var(--space-2); flex-wrap: wrap; margin-bottom: var(--space-4); }
-  .series-creator a, .pseud-link { color: var(--md-sys-color-primary); }
-  .series-description {
-    font: var(--md-sys-typescale-body-large); line-height: 1.8; color: var(--md-sys-color-on-surface);
-    background: var(--md-sys-color-surface-container); border-radius: var(--md-sys-shape-corner-medium); padding: var(--space-4); margin: var(--space-4) 0;
-  }
-  .series-description p { margin: var(--space-2) 0; }
-
-  .series-owner-actions { display: flex; gap: var(--space-3); margin-top: var(--space-4); }
-  .btn-danger {
-    font: var(--md-sys-typescale-label-large); color: var(--md-sys-color-on-error); background: var(--md-sys-color-error);
-    border: none; border-radius: var(--md-sys-shape-corner-full); padding: var(--space-3) var(--space-6); cursor: pointer;
-  }
-
-  .empty-state { text-align: center; padding: var(--space-12) 0; }
-  .empty-state p { font: var(--md-sys-typescale-body-large); color: var(--md-sys-color-outline); margin: 0 0 var(--space-4); }
-
-  .series-works-list { list-style: none; padding: 0; display: flex; flex-direction: column; gap: var(--space-3); margin-top: var(--space-6); }
-  .series-work-item {
-    display: flex; gap: var(--space-4); align-items: flex-start;
-    background: var(--md-sys-color-surface-container); border: 1px solid var(--md-sys-color-outline-variant);
-    border-radius: var(--md-sys-shape-corner-large); padding: var(--space-4) var(--space-5);
-  }
-  .series-position {
-    font: var(--md-sys-typescale-label-large); color: var(--md-sys-color-on-secondary-container);
-    background: var(--md-sys-color-secondary-container); padding: var(--space-1) var(--space-3);
-    border-radius: var(--md-sys-shape-corner-full); white-space: nowrap; min-width: fit-content;
-  }
-  .draft-badge {
-    font: var(--md-sys-typescale-label-small); color: var(--md-sys-color-on-error-container);
-    background: var(--md-sys-color-error-container); padding: 2px var(--space-2);
-    border-radius: var(--md-sys-shape-corner-full); margin-left: var(--space-2);
-  }
-  .series-work-info { flex: 1; }
-  .series-work-link { font: var(--md-sys-typescale-title-medium); color: var(--md-sys-color-primary); text-decoration: none; }
-  @media (hover: hover) { .series-work-link:hover { text-decoration: underline; } }
-  .series-work-meta { font: var(--md-sys-typescale-body-small); color: var(--md-sys-color-outline); display: flex; gap: var(--space-2); flex-wrap: wrap; margin-top: var(--space-1); }
-  .series-work-fandoms { display: flex; gap: var(--space-1); flex-wrap: wrap; margin-top: var(--space-1); }
-  .tag-pill { font: var(--md-sys-typescale-body-small); background: var(--md-sys-color-secondary-container); color: var(--md-sys-color-on-secondary-container); padding: 2px var(--space-3); border-radius: var(--md-sys-shape-corner-full); }
-  .series-work-summary { font: var(--md-sys-typescale-body-medium); color: var(--md-sys-color-on-surface-variant); margin: var(--space-1) 0 0; font-style: italic; }
-
-  .btn-primary { font: var(--md-sys-typescale-label-large); color: var(--md-sys-color-on-primary); background: var(--md-sys-color-primary); border: none; border-radius: var(--md-sys-shape-corner-full); padding: var(--space-3) var(--space-6); cursor: pointer; text-decoration: none; display: inline-block; }
-  .btn-secondary { font: var(--md-sys-typescale-label-large); color: var(--md-sys-color-primary); background: transparent; border: 1px solid var(--md-sys-color-outline); border-radius: var(--md-sys-shape-corner-full); padding: var(--space-3) var(--space-6); cursor: pointer; text-decoration: none; }
-</style>
-
-{isOwner && <script define:vars={{ seriesId }}>
-  const deleteBtn = document.getElementById('delete-series-btn');
-  if (deleteBtn) {
-    deleteBtn.addEventListener('click', async () => {
-      if (!confirm('Delete this series? Works will NOT be deleted — only the series grouping is removed.')) return;
-      try {
-        const res = await fetch(`/api/series/${seriesId}`, { method: 'DELETE' });
-        if (res.ok) {
-          window.location.href = '/series';
-        } else {
-          const data = await res.json();
-          alert(data.error || 'Failed to delete series');
+{isOwner && (
+  <script define:vars={{ seriesId }}>
+    const deleteBtn = document.getElementById('delete-btn');
+    if (deleteBtn) {
+      deleteBtn.addEventListener('click', async () => {
+        if (!confirm('Are you sure you want to delete this series? This cannot be undone.')) return;
+        deleteBtn.disabled = true;
+        deleteBtn.textContent = 'Deleting…';
+        try {
+          const res = await fetch(`/api/series/${seriesId}`, { method: 'DELETE' });
+          if (res.ok) {
+            window.location.href = '/series';
+          } else {
+            const data = await res.json();
+            alert(data.error || 'Failed to delete series.');
+            deleteBtn.disabled = false;
+            deleteBtn.textContent = 'Delete Series';
+          }
+        } catch {
+          alert('Network error. Please try again.');
+          deleteBtn.disabled = false;
+          deleteBtn.textContent = 'Delete Series';
         }
-      } catch { alert('Failed to delete series'); }
-    });
+      });
+    }
+  </script>
+)}
+
+<style is:global>
+  .series-detail-page {
+    max-width: 72rem;
+    margin: 0 auto;
+    padding: var(--space-8) var(--space-4);
   }
-</script>}
+
+  .back-link {
+    font: var(--md-sys-typescale-label-large);
+    color: var(--md-sys-color-primary);
+    text-decoration: none;
+    display: inline-block;
+    margin-bottom: var(--space-4);
+    transition: opacity var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard);
+  }
+  .back-link:hover { opacity: 0.8; }
+
+  .error-banner {
+    background: var(--md-sys-color-error);
+    color: var(--md-sys-color-on-error);
+    border-radius: var(--md-sys-shape-corner-small);
+    padding: var(--space-3) var(--space-4);
+    margin-bottom: var(--space-6);
+    font: var(--md-sys-typescale-body-medium);
+  }
+
+  .series-header {
+    margin-bottom: var(--space-8);
+  }
+
+  .series-title-row {
+    display: flex;
+    align-items: baseline;
+    gap: var(--space-3);
+    flex-wrap: wrap;
+  }
+
+  .series-title {
+    font: var(--md-sys-typescale-headline-medium);
+    margin: 0;
+  }
+
+  .status-badge {
+    font: var(--md-sys-typescale-body-small);
+    border-radius: var(--md-sys-shape-corner-full);
+    padding: 2px 10px;
+    flex-shrink: 0;
+  }
+  .status-badge--complete {
+    color: #2e7d32;
+    background: #e8f5e9;
+  }
+  .status-badge--wip {
+    color: var(--md-sys-color-on-surface-variant);
+    background: var(--md-sys-color-surface-container-highest);
+  }
+
+  .series-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-2) var(--space-4);
+    margin-top: var(--space-2);
+    font: var(--md-sys-typescale-body-medium);
+    color: var(--md-sys-color-on-surface-variant);
+  }
+
+  .series-creator {
+    color: var(--md-sys-color-primary);
+    text-decoration: none;
+  }
+  .series-creator:hover { text-decoration: underline; }
+
+  .series-meta-item {
+    color: var(--md-sys-color-on-surface-variant);
+  }
+
+  .series-desc {
+    font: var(--md-sys-typescale-body-large);
+    color: var(--md-sys-color-on-surface-variant);
+    margin: var(--space-4) 0 0 0;
+    line-height: 1.6;
+    white-space: pre-wrap;
+  }
+
+  .owner-actions {
+    display: flex;
+    gap: var(--space-4);
+    margin-top: var(--space-4);
+    flex-wrap: wrap;
+  }
+
+  .btn-outlined {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font: var(--md-sys-typescale-label-large);
+    color: var(--md-sys-color-primary);
+    background: transparent;
+    border: 1px solid var(--md-sys-color-outline);
+    border-radius: var(--md-sys-shape-corner-full);
+    padding: var(--space-3) var(--space-8);
+    text-decoration: none;
+    transition: background var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard);
+  }
+  .btn-outlined:hover { background: var(--md-sys-color-primary-container); }
+
+  .btn-danger {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font: var(--md-sys-typescale-label-large);
+    color: var(--md-sys-color-on-error);
+    background: var(--md-sys-color-error);
+    border: none;
+    border-radius: var(--md-sys-shape-corner-full);
+    padding: var(--space-3) var(--space-8);
+    cursor: pointer;
+    transition: opacity var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard);
+  }
+  .btn-danger:hover { opacity: 0.88; }
+
+  /* ── Works Section ─────────────────────────────────────────── */
+  .series-works {
+    padding-top: var(--space-4);
+  }
+
+  .section-heading {
+    font: var(--md-sys-typescale-label-large);
+    color: var(--md-sys-color-on-surface-variant);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    font-size: 0.85rem;
+    margin: 0 0 var(--space-4) 0;
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+  }
+
+  .count-badge {
+    background: var(--md-sys-color-primary-container);
+    color: var(--md-sys-color-on-primary-container);
+    border-radius: var(--md-sys-shape-corner-full);
+    padding: 2px 8px;
+    font-size: 0.75rem;
+  }
+
+  .works-list {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+  }
+
+  .series-work-item {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    padding: var(--space-3) var(--space-4);
+    background: var(--md-sys-color-surface-container);
+    border: 1px solid var(--md-sys-color-outline-variant);
+    border-radius: var(--md-sys-shape-corner-small);
+    text-decoration: none;
+    color: var(--md-sys-color-on-surface);
+    transition: border-color var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard),
+                background var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard);
+  }
+  .series-work-item:hover {
+    border-color: var(--md-sys-color-outline);
+    background: var(--md-sys-color-surface-container-high);
+  }
+
+  .work-position {
+    font: var(--md-sys-typescale-label-large);
+    color: var(--md-sys-color-on-surface-variant);
+    min-width: 2ch;
+    text-align: right;
+  }
+
+  .work-item-content {
+    display: flex;
+    align-items: baseline;
+    gap: var(--space-3);
+    flex: 1;
+    flex-wrap: wrap;
+  }
+
+  .work-item-title {
+    font: var(--md-sys-typescale-body-large);
+    color: var(--md-sys-color-primary);
+  }
+
+  .work-item-words {
+    font: var(--md-sys-typescale-body-small);
+    color: var(--md-sys-color-on-surface-variant);
+  }
+
+  .empty-msg {
+    color: var(--md-sys-color-on-surface-variant);
+    font: var(--md-sys-typescale-body-large);
+  }
+</style>

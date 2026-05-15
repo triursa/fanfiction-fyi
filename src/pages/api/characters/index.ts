@@ -1,98 +1,166 @@
-export const prerender = false;
-
-import { getDrizzle } from '@/lib/db';
-import { characters, characterGroups, characterAppearances } from '@/lib/schema';
-import { corsHeaders, handleCors, cacheHeaders } from '@/lib/cors';
-import { eq, and, like, sql, isNotNull, desc, asc, count } from 'drizzle-orm';
 import type { APIRoute } from 'astro';
+import type { D1Database } from '@cloudflare/workers-types';
+import { getDb } from '@/v2/lib/db';
+import { getAuth, requireAuth, checkApproved } from '@/v2/lib/auth';
+import { validateBody, validateQuery, createCharacterSchema, browseCharactersSchema } from '@/v2/lib/validation';
+import { characters, characterGroups, pseuds } from '@/v2/lib/schema/index';
+import { eq, and, desc, count } from 'drizzle-orm';
 
-export const OPTIONS: APIRoute = async ({ request }) => {
-  return handleCors(request) ?? new Response(null, { status: 405 });
-};
+export const config = { auth: 'optional' as const };
 
-export const GET: APIRoute = async ({ url, locals, request }) => {
-  const cors = corsHeaders(request);
-  const drz = getDrizzle(locals.runtime.env.DB as D1Database);
-  const params = url.searchParams;
+// ─── GET /api/characters — Browse characters (paginated, optional groupId filter) ──
 
-  const q = params.get('q') || '';
-  const fandom = params.get('fandom') || '';
-  const groupId = params.get('group_id') || '';
-  const hasGroup = params.get('has_group') === 'true';
-  const sort = params.get('sort') || 'name';
-  const page = Math.max(Number(params.get('page') || 1), 1);
-  const limit = Math.min(Number(params.get('limit') || 25), 100);
+export const GET: APIRoute = async ({ request, url, locals }) => {
+  const d1 = locals.runtime.env.DB as D1Database;
+  const db = getDb(d1);
+
+  const query = validateQuery(url, browseCharactersSchema);
+  const { page, limit, groupId } = query;
   const offset = (page - 1) * limit;
 
   // Build where conditions
   const conditions = [];
-  if (q) conditions.push(like(characters.name, `%${q}%`));
-  if (fandom) conditions.push(eq(characters.fandom, fandom));
-  if (groupId) conditions.push(eq(characters.groupId, Number(groupId)));
-  if (hasGroup) conditions.push(isNotNull(characters.groupId));
+  if (groupId) {
+    conditions.push(eq(characters.groupId, groupId));
+  }
 
-  const where = conditions.length > 0 ? and(...conditions) : undefined;
+  const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
 
-  // Count query
-  const countRow = await drz
+  // Count total
+  const [{ total }] = await db
     .select({ total: count() })
     .from(characters)
-    .where(where)
-    .get();
-  const total = countRow?.total ?? 0;
+    .where(whereClause);
 
-  // Data query with subquery for work_count and left join for group_name
-  const validSorts: Record<string, any> = {
-    name: asc(characters.name),
-    recent: desc(characters.createdAt),
-    works: desc(sql`work_count`),
-  };
-
-  const charRows = await drz
+  // Fetch characters with pseud name and group name
+  const characterRows = await db
     .select({
       id: characters.id,
       name: characters.name,
-      fandom: characters.fandom,
-      groupId: characters.groupId,
-      tagId: characters.tagId,
       description: characters.description,
-      shortDesc: characters.shortDesc,
-      avatarKey: characters.avatarKey,
-      aliases: characters.aliases,
-      createdBy: characters.createdBy,
-      updatedBy: characters.updatedBy,
+      groupId: characters.groupId,
+      pseudId: characters.pseudId,
       createdAt: characters.createdAt,
       updatedAt: characters.updatedAt,
-      workCount: sql<number>`(SELECT COUNT(*) FROM character_appearances ca WHERE ca.character_id = ${characters.id})`.as('work_count'),
+      pseudName: pseuds.name,
       groupName: characterGroups.name,
     })
     .from(characters)
+    .innerJoin(pseuds, eq(characters.pseudId, pseuds.id))
     .leftJoin(characterGroups, eq(characters.groupId, characterGroups.id))
-    .where(where)
-    .orderBy(validSorts[sort] || validSorts.name)
+    .where(whereClause)
+    .orderBy(desc(characters.createdAt))
     .limit(limit)
     .offset(offset);
 
-  // Convert camelCase keys to snake_case for API compatibility
-  const charactersResult = charRows.map(c => ({
+  const data = characterRows.map(c => ({
     id: c.id,
     name: c.name,
-    fandom: c.fandom,
-    group_id: c.groupId,
-    tag_id: c.tagId,
     description: c.description,
-    short_desc: c.shortDesc,
-    avatar_key: c.avatarKey,
-    aliases: c.aliases,
-    created_by: c.createdBy,
-    updated_by: c.updatedBy,
-    created_at: c.createdAt,
-    updated_at: c.updatedAt,
-    work_count: c.workCount,
-    group_name: c.groupName,
+    groupId: c.groupId,
+    pseudId: c.pseudId,
+    pseudName: c.pseudName,
+    groupName: c.groupName,
+    createdAt: c.createdAt,
+    updatedAt: c.updatedAt,
   }));
 
-  return new Response(JSON.stringify({ characters: charactersResult, total, page, limit }), {
-    headers: { 'Content-Type': 'application/json', ...cors, ...cacheHeaders('public') },
+  return new Response(JSON.stringify({ data, total, page, limit }), {
+    status: 200,
+    headers: { 'Content-Type': 'application/json' },
   });
+};
+
+// ─── POST /api/characters — Create a character (auth required) ─────
+
+export const POST: APIRoute = async ({ request, locals }) => {
+  const d1 = locals.runtime.env.DB as D1Database;
+  const db = getDb(d1);
+
+  const auth = await requireAuth(d1, request);
+  checkApproved(auth);
+
+  const [data, error] = await validateBody(request, createCharacterSchema);
+  if (error) return error;
+
+  // Verify the pseud belongs to this user
+  const pseud = await db
+    .select()
+    .from(pseuds)
+    .where(and(eq(pseuds.id, data.pseudId), eq(pseuds.userId, auth.user.id)))
+    .get();
+
+  if (!pseud) {
+    return new Response(JSON.stringify({ error: 'Pseud not found or does not belong to you' }), {
+      status: 403,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+
+  // If groupId provided, verify it exists and belongs to user
+  if (data.groupId) {
+    const group = await db
+      .select()
+      .from(characterGroups)
+      .where(eq(characterGroups.id, data.groupId))
+      .get();
+
+    if (!group) {
+      return new Response(JSON.stringify({ error: 'Character group not found' }), {
+        status: 404,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
+  }
+
+  try {
+    const [inserted] = await db
+      .insert(characters)
+      .values({
+        name: data.name,
+        description: data.description ?? null,
+        groupId: data.groupId ?? null,
+        pseudId: data.pseudId,
+      })
+      .returning();
+
+    // Fetch with pseud name and group name
+    const pseudData = await db
+      .select({ name: pseuds.name })
+      .from(pseuds)
+      .where(eq(pseuds.id, inserted.pseudId))
+      .get();
+
+    let groupName: string | null = null;
+    if (inserted.groupId) {
+      const groupData = await db
+        .select({ name: characterGroups.name })
+        .from(characterGroups)
+        .where(eq(characterGroups.id, inserted.groupId))
+        .get();
+      groupName = groupData?.name ?? null;
+    }
+
+    return new Response(JSON.stringify({
+      data: {
+        id: inserted.id,
+        name: inserted.name,
+        description: inserted.description,
+        groupId: inserted.groupId,
+        pseudId: inserted.pseudId,
+        pseudName: pseudData?.name ?? null,
+        groupName,
+        createdAt: inserted.createdAt,
+        updatedAt: inserted.updatedAt,
+      },
+    }), {
+      status: 201,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  } catch (e: any) {
+    return new Response(JSON.stringify({ error: 'Failed to create character' }), {
+      status: 500,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
 };

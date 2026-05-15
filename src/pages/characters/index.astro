@@ -1,392 +1,375 @@
 ---
+/**
+ * Characters Browse Page — Public
+ * Fetches characters from /api/characters, supports group filter chips + search by name.
+ */
 export const prerender = false;
-import Base from '../../layouts/Base.astro';
-import { getDrizzle } from '../../lib/db';
-import { characters, characterGroups, characterAppearances } from '../../lib/schema';
-import { eq, asc, isNotNull, sql } from 'drizzle-orm';
+export const config = { auth: 'public' };
+import Base from '@/v2/layouts/Base.astro';
 
-const drz = getDrizzle(Astro.locals.runtime.env.DB as D1Database);
+// Read query params
+const activeGroupId = Astro.url.searchParams.get('groupId') || '';
+const searchQuery = Astro.url.searchParams.get('q') || '';
+const page = Math.max(1, Number(Astro.url.searchParams.get('page')) || 1);
+const user = Astro.locals.user;
 
-const charRows = await drz
-  .select({
-    id: characters.id,
-    name: characters.name,
-    fandom: characters.fandom,
-    shortDesc: characters.shortDesc,
-    avatarKey: characters.avatarKey,
-    groupId: characters.groupId,
-    groupName: characterGroups.name,
-    workCount: sql<number>`(SELECT COUNT(*) FROM character_appearances ca WHERE ca.character_id = ${characters.id})`.as('work_count'),
-  })
-  .from(characters)
-  .leftJoin(characterGroups, eq(characters.groupId, characterGroups.id))
-  .orderBy(asc(characters.name))
-  .limit(100)
-  .all();
+// Fetch character groups for filter chips
+let groups: any[] = [];
+let groupsError = false;
+try {
+  const groupsRes = await fetch(new URL('/api/characters/groups?limit=100', Astro.url));
+  if (groupsRes.ok) {
+    const groupsJson = await groupsRes.json();
+    groups = groupsJson.data || [];
+  } else {
+    groupsError = true;
+  }
+} catch {
+  groupsError = true;
+}
 
-// Convert camelCase keys to snake_case for API/template compatibility
-const initialCharacters = charRows.map(c => ({
-  id: c.id,
-  name: c.name,
-  fandom: c.fandom,
-  short_desc: c.shortDesc,
-  avatar_key: c.avatarKey,
-  group_id: c.groupId,
-  group_name: c.groupName,
-  work_count: c.workCount,
-}));
+// Fetch characters from API
+let characters: any[] = [];
+let total = 0;
+let errorMsg: string | null = null;
 
-// Get unique fandoms for filter
-const fandomRows = await drz
-  .selectDistinct({ fandom: characters.fandom })
-  .from(characters)
-  .where(isNotNull(characters.fandom))
-  .orderBy(asc(characters.fandom))
-  .all();
-const fandoms = fandomRows.map(r => r.fandom);
+try {
+  const params = new URLSearchParams({
+    page: String(page),
+    limit: '20',
+  });
+  if (activeGroupId) params.set('groupId', activeGroupId);
+
+  const res = await fetch(new URL(`/api/characters?${params.toString()}`, Astro.url));
+  if (res.ok) {
+    const json = await res.json();
+    characters = json.data || [];
+    total = json.total || 0;
+  } else {
+    errorMsg = 'Failed to load characters.';
+  }
+} catch {
+  errorMsg = 'Network error loading characters.';
+}
+
+const totalPages = Math.max(1, Math.ceil(total / 20));
+
+function pageUrl(p: number): string {
+  const u = new URL(Astro.url);
+  u.searchParams.set('page', String(p));
+  return u.pathname + u.search;
+}
 ---
 
-<Base title="Character Library — fanfiction.fyi">
-  <div class="characters-page">
-    <header class="characters-header">
-      <div class="characters-header-row">
-        <h1 class="characters-title">Character Library</h1>
-        <a href="/characters/new" class="btn-create">+ New Character</a>
-      </div>
+<Base title="Characters — fanfiction.fyi" description="Browse characters on fanfiction.fyi">
+  <section class="characters-page">
+    <div class="page-header">
+      <h1 class="page-title">Characters</h1>
+      {user && (
+        <a href="/characters/new" class="btn-filled">+ New Character</a>
+      )}
+    </div>
 
-      <!-- Fandom filter chips -->
-      <div class="filter-chips" id="filter-chips" role="tablist" aria-label="Filter by fandom" aria-controls="char-grid">
-        <button class="chip active" data-fandom="" role="tab" aria-selected="true">All</button>
-        {fandoms.map(f => (
-          <button class="chip" data-fandom={f} role="tab" aria-selected="false">{f}</button>
+    {errorMsg && <div class="error-banner" role="alert">{errorMsg}</div>}
+
+    <!-- ── Search + Group Filter ────────────────────────────── -->
+    <div class="filter-bar">
+      <form method="GET" class="filter-form">
+        <div class="search-row">
+          <input
+            type="text"
+            name="q"
+            class="search-input"
+            placeholder="Search characters by name…"
+            value={searchQuery}
+            aria-label="Search characters"
+          />
+          <button type="submit" class="btn-filled btn-sm">Search</button>
+        </div>
+        {groups.length > 0 && (
+          <div class="group-chips">
+            <button
+              type="submit"
+              name="groupId"
+              value=""
+              class:list={['group-chip', !activeGroupId && 'group-chip--active']}
+            >
+              All
+            </button>
+            {groups.map((g: any) => (
+              <button
+                type="submit"
+                name="groupId"
+                value={String(g.id)}
+                class:list={['group-chip', activeGroupId === String(g.id) && 'group-chip--active']}
+              >
+                {g.name}
+              </button>
+            ))}
+          </div>
+        )}
+      </form>
+    </div>
+
+    {total > 0 && (
+      <p class="results-meta">{total} character{total !== 1 ? 's' : ''} found</p>
+    )}
+
+    <!-- ── Characters Grid ───────────────────────────────────── -->
+    {characters.length > 0 ? (
+      <div class="characters-grid">
+        {characters.map((c: any) => (
+          <a href={`/characters/${c.id}`} class="character-card">
+            <div class="character-card-header">
+              <h2 class="character-card-name">{c.name}</h2>
+              {c.groupName && (
+                <span class="group-badge">{c.groupName}</span>
+              )}
+            </div>
+            {c.description && (
+              <p class="character-card-desc">
+                {c.description.length > 160 ? c.description.slice(0, 160) + '…' : c.description}
+              </p>
+            )}
+            <div class="character-card-meta">
+              {c.pseudName && <span>by {c.pseudName}</span>}
+              <span>{new Date(c.createdAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</span>
+            </div>
+          </a>
         ))}
       </div>
+    ) : !errorMsg ? (
+      <p class="empty-msg">No characters found. Try a different search or filter.</p>
+    ) : null}
 
-      <!-- Search input -->
-      <div class="search-bar">
-        <label for="char-search" class="sr-only">Search characters</label>
-        <input
-          type="text"
-          id="char-search"
-          class="search-input"
-          placeholder="Search characters by name…"
-          autocomplete="off"
-        />
-      </div>
-    </header>
-
-    <!-- Character grid -->
-    <div class="char-grid" id="char-grid" role="tabpanel" aria-label="Character results">
-      {initialCharacters.map(c => (
-        <a href={`/characters/${c.id}`} class="char-card" data-fandom={c.fandom || ''}>
-          <div class="char-card-avatar">
-            {c.avatar_key
-              ? <img src={`/api/storage/${c.avatar_key}`} alt={c.name} />
-              : <div class="char-avatar-placeholder">{c.name.charAt(0).toUpperCase()}</div>
-            }
-          </div>
-          <div class="char-card-body">
-            <span class="char-card-name">{c.name}</span>
-            {c.fandom && <span class="char-card-fandom">{c.fandom}</span>}
-            {c.short_desc && <span class="char-card-desc">{c.short_desc}</span>}
-            {c.group_name && <span class="char-card-group">↔ {c.group_name}</span>}
-          </div>
-          <span class="char-card-works">{c.work_count} {c.work_count === 1 ? 'work' : 'works'}</span>
-        </a>
-      ))}
-    </div>
-
-    <div class="char-empty" id="char-empty" style="display:none;" role="status">
-      <p>No characters found matching your filters.</p>
-    </div>
-  </div>
+    <!-- ── Pagination ──────────────────────────────────────────── -->
+    {totalPages > 1 && (
+      <nav class="pagination" aria-label="Characters pagination">
+        {page > 1 && (
+          <a href={pageUrl(page - 1)} class="page-link" rel="prev">← Prev</a>
+        )}
+        <span class="page-info">Page {page} of {totalPages}</span>
+        {page < totalPages && (
+          <a href={pageUrl(page + 1)} class="page-link" rel="next">Next →</a>
+        )}
+      </nav>
+    )}
+  </section>
 </Base>
 
 <style is:global>
-  @import '../../styles/theme.css';
-
   .characters-page {
-    padding: var(--space-4) 0;
+    max-width: 72rem;
+    margin: 0 auto;
+    padding: var(--space-8) var(--space-4);
   }
 
-  .characters-header {
-    margin-bottom: var(--space-6);
-  }
-
-  .characters-header-row {
+  .page-header {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    margin-bottom: var(--space-4);
+    flex-wrap: wrap;
+    gap: var(--space-4);
+    margin-bottom: var(--space-6);
   }
 
-  .characters-title {
-    font: var(--md-sys-typescale-headline-large);
-    color: var(--md-sys-color-on-surface);
+  .page-title {
+    font: var(--md-sys-typescale-headline-medium);
     margin: 0;
   }
 
-  .btn-create {
-    font: var(--md-sys-typescale-label-large);
-    color: var(--md-sys-color-on-primary);
-    background: var(--md-sys-color-primary);
-    padding: var(--space-2) var(--space-4);
-    border-radius: var(--md-sys-shape-corner-full);
-    text-decoration: none;
-    border: none;
-    cursor: pointer;
-    white-space: nowrap;
-  }
-
-  .btn-create:hover {
-    background: var(--md-sys-color-primary-container);
-    color: var(--md-sys-color-on-primary-container);
-  }
-
-  /* ── Filter Chips ── */
-  .filter-chips {
-    display: flex;
-    flex-wrap: wrap;
-    gap: var(--space-2);
-    margin-bottom: var(--space-4);
-  }
-
-  .chip {
-    font: var(--md-sys-typescale-label-large);
-    color: var(--md-sys-color-on-surface-variant);
-    background: var(--md-sys-color-surface-container-low);
-    border: 1px solid var(--md-sys-color-outline-variant);
+  .error-banner {
+    background: var(--md-sys-color-error);
+    color: var(--md-sys-color-on-error);
     border-radius: var(--md-sys-shape-corner-small);
-    padding: var(--space-2) var(--space-4);
-    cursor: pointer;
-    transition: background var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard),
-                color var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard),
-                border-color var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard);
-    user-select: none;
+    padding: var(--space-3) var(--space-4);
+    margin-bottom: var(--space-6);
+    font: var(--md-sys-typescale-body-medium);
   }
 
-  .chip:hover {
-    background: var(--md-sys-color-surface-container-high);
+  /* ── Filter Bar ──────────────────────────────────────────── */
+  .filter-bar {
+    margin-bottom: var(--space-6);
   }
 
-  .chip.active {
-    background: var(--md-sys-color-secondary-container);
-    color: var(--md-sys-color-on-secondary-container);
-    border-color: transparent;
+  .filter-form {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-3);
   }
 
-  /* ── Search ── */
-  .search-bar {
-    max-width: 480px;
+  .search-row {
+    display: flex;
+    gap: var(--space-2);
   }
 
   .search-input {
-    width: 100%;
+    flex: 1;
     font: var(--md-sys-typescale-body-large);
     color: var(--md-sys-color-on-surface);
-    background: var(--md-sys-color-surface-container-high);
+    background: var(--md-sys-color-surface-container);
     border: 1px solid var(--md-sys-color-outline-variant);
-    border-radius: var(--md-sys-shape-corner-medium);
+    border-radius: var(--md-sys-shape-corner-small);
     padding: var(--space-3) var(--space-4);
     outline: none;
     transition: border-color var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard);
   }
+  .search-input:focus { border-color: var(--md-sys-color-primary); }
 
-  .search-input::placeholder {
-    color: var(--md-sys-color-outline);
-  }
-
-  .search-input:focus {
-    border-color: var(--md-sys-color-primary);
-  }
-
-  /* ── Character Grid ── */
-  .char-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-    gap: var(--space-3);
-  }
-
-  .char-card {
+  .group-chips {
     display: flex;
-    align-items: flex-start;
-    gap: var(--space-3);
+    flex-wrap: wrap;
+    gap: var(--space-2);
+  }
+
+  .group-chip {
+    font: var(--md-sys-typescale-label-large);
+    color: var(--md-sys-color-on-surface-variant);
     background: var(--md-sys-color-surface-container);
     border: 1px solid var(--md-sys-color-outline-variant);
-    border-radius: var(--md-sys-shape-corner-medium);
-    padding: var(--space-3) var(--space-4);
+    border-radius: var(--md-sys-shape-corner-full);
+    padding: var(--space-2) var(--space-4);
+    cursor: pointer;
+    transition: background var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard),
+                border-color var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard);
+  }
+  .group-chip:hover {
+    background: var(--md-sys-color-surface-container-high);
+  }
+  .group-chip--active {
+    background: var(--md-sys-color-secondary-container);
+    color: var(--md-sys-color-on-secondary-container);
+    border-color: var(--md-sys-color-secondary-container);
+  }
+
+  .btn-sm {
+    padding: var(--space-2) var(--space-6);
+  }
+
+  .results-meta {
+    font: var(--md-sys-typescale-body-medium);
+    color: var(--md-sys-color-on-surface-variant);
+    margin: 0 0 var(--space-4) 0;
+  }
+
+  /* ── Characters Grid ─────────────────────────────────────── */
+  .characters-grid {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: var(--space-4);
+  }
+
+  @media (min-width: 640px) {
+    .characters-grid {
+      grid-template-columns: repeat(2, 1fr);
+    }
+  }
+
+  @media (min-width: 960px) {
+    .characters-grid {
+      grid-template-columns: repeat(3, 1fr);
+    }
+  }
+
+  .character-card {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+    background: var(--md-sys-color-surface-container);
+    border: 1px solid var(--md-sys-color-outline-variant);
+    border-radius: var(--md-sys-shape-corner-large);
+    padding: var(--space-4) var(--space-6);
     text-decoration: none;
     color: var(--md-sys-color-on-surface);
-    transition: background var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard),
+    transition: border-color var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard),
                 box-shadow var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard);
   }
-
-  .char-card:hover {
-    background: var(--md-sys-color-surface-container-high);
-    box-shadow: var(--md-sys-elevation-1);
-    text-decoration: none;
+  .character-card:hover {
+    border-color: var(--md-sys-color-outline);
+    box-shadow: 0 1px 3px 0 rgba(0,0,0,.1), 0 1px 2px -1px rgba(0,0,0,.1);
   }
 
-  .char-card-avatar {
-    flex-shrink: 0;
-    width: 48px;
-    height: 48px;
+  .character-card-header {
+    display: flex;
+    align-items: baseline;
+    gap: var(--space-2);
+    flex-wrap: wrap;
+  }
+
+  .character-card-name {
+    font: var(--md-sys-typescale-title-large);
+    color: var(--md-sys-color-primary);
+    margin: 0;
+    font-size: 1.1rem;
+  }
+
+  .group-badge {
+    font: var(--md-sys-typescale-body-small);
+    background: var(--md-sys-color-tertiary-container);
+    color: var(--md-sys-color-on-tertiary-container);
     border-radius: var(--md-sys-shape-corner-full);
-    overflow: hidden;
+    padding: 2px 10px;
+    text-transform: capitalize;
   }
 
-  .char-card-avatar img {
-    width: 100%;
-    height: 100%;
-    object-fit: cover;
+  .character-card-desc {
+    font: var(--md-sys-typescale-body-medium);
+    color: var(--md-sys-color-on-surface-variant);
+    margin: 0;
+    line-height: 1.5;
   }
 
-  .char-avatar-placeholder {
-    width: 100%;
-    height: 100%;
+  .character-card-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-2) var(--space-4);
+    font: var(--md-sys-typescale-body-small);
+    color: var(--md-sys-color-on-surface-variant);
+    margin-top: auto;
+  }
+
+  .empty-msg {
+    color: var(--md-sys-color-on-surface-variant);
+    font: var(--md-sys-typescale-body-large);
+  }
+
+  /* ── Pagination ──────────────────────────────────────────── */
+  .pagination {
     display: flex;
     align-items: center;
     justify-content: center;
-    background: var(--md-sys-color-secondary-container);
-    color: var(--md-sys-color-on-secondary-container);
-    font: var(--md-sys-typescale-headline-small);
+    gap: var(--space-4);
+    margin-top: var(--space-8);
   }
 
-  .char-card-body {
-    flex: 1;
-    min-width: 0;
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
-  }
-
-  .char-card-name {
-    font: var(--md-sys-typescale-body-large);
-    font-weight: 600;
-    color: var(--md-sys-color-on-surface);
-    word-break: break-word;
-  }
-
-  .char-card-fandom {
-    font: var(--md-sys-typescale-body-small);
+  .page-link {
+    font: var(--md-sys-typescale-label-large);
     color: var(--md-sys-color-primary);
+    text-decoration: none;
+    padding: var(--space-2) var(--space-3);
+    border-radius: var(--md-sys-shape-corner-small);
+    transition: background var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard);
   }
+  .page-link:hover { background: var(--md-sys-color-surface-container); }
 
-  .char-card-desc {
-    font: var(--md-sys-typescale-body-small);
+  .page-info {
+    font: var(--md-sys-typescale-body-medium);
     color: var(--md-sys-color-on-surface-variant);
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
   }
 
-  .char-card-group {
-    font: var(--md-sys-typescale-body-small);
-    color: var(--md-sys-color-tertiary);
+  .btn-filled {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font: var(--md-sys-typescale-label-large);
+    color: var(--md-sys-color-on-primary);
+    background: var(--md-sys-color-primary);
+    border: none;
+    border-radius: var(--md-sys-shape-corner-full);
+    padding: var(--space-3) var(--space-8);
+    cursor: pointer;
+    text-decoration: none;
+    transition: opacity var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard);
   }
-
-  .char-card-works {
-    font: var(--md-sys-typescale-body-small);
-    color: var(--md-sys-color-outline);
-    white-space: nowrap;
-    align-self: center;
-  }
-
-  /* ── Empty state ── */
-  .char-empty {
-    text-align: center;
-    padding: var(--space-10);
-    font: var(--md-sys-typescale-body-large);
-    color: var(--md-sys-color-outline);
-  }
-
-  /* ── Responsive ── */
-  @media (max-width: 640px) {
-    .char-grid {
-      grid-template-columns: 1fr;
-    }
-    .characters-header-row {
-      flex-wrap: wrap;
-      gap: var(--space-2);
-    }
-  }
+  .btn-filled:hover { opacity: 0.88; }
 </style>
-
-<script define:vars={{ initialCharacters, fandoms }}>
-  const charGrid = document.getElementById('char-grid');
-  const charEmpty = document.getElementById('char-empty');
-  const searchInput = document.getElementById('char-search');
-  const chips = document.querySelectorAll('#filter-chips .chip');
-
-  let currentFandom = '';
-  let currentQ = '';
-  let debounceTimer = null;
-
-  function escapeHtml(str) {
-    const div = document.createElement('div');
-    div.textContent = str;
-    return div.innerHTML;
-  }
-
-  function renderCharacters(chars) {
-    if (chars.length === 0) {
-      charGrid.innerHTML = '';
-      charEmpty.style.display = '';
-      return;
-    }
-    charEmpty.style.display = 'none';
-    charGrid.innerHTML = chars.map(c => `
-      <a href="/characters/${encodeURIComponent(c.id)}" class="char-card" data-fandom="${escapeHtml(c.fandom || '')}">
-        <div class="char-card-avatar">
-          ${c.avatar_key
-            ? `<img src="/api/storage/${encodeURIComponent(c.avatar_key)}" alt="${escapeHtml(c.name)}" />`
-            : `<div class="char-avatar-placeholder">${escapeHtml(c.name.charAt(0).toUpperCase())}</div>`
-          }
-        </div>
-        <div class="char-card-body">
-          <span class="char-card-name">${escapeHtml(c.name)}</span>
-          ${c.fandom ? `<span class="char-card-fandom">${escapeHtml(c.fandom)}</span>` : ''}
-          ${c.short_desc ? `<span class="char-card-desc">${escapeHtml(c.short_desc)}</span>` : ''}
-          ${c.group_name ? `<span class="char-card-group">↔ ${escapeHtml(c.group_name)}</span>` : ''}
-        </div>
-        <span class="char-card-works">${c.work_count} ${c.work_count === 1 ? 'work' : 'works'}</span>
-      </a>
-    `).join('');
-  }
-
-  async function fetchCharacters() {
-    const params = new URLSearchParams();
-    if (currentFandom) params.set('fandom', currentFandom);
-    if (currentQ) params.set('q', currentQ);
-    try {
-      const res = await fetch('/api/characters?' + params.toString());
-      if (res.ok) {
-        const data = await res.json();
-        renderCharacters(data.characters);
-      }
-    } catch {
-      // silently fail
-    }
-  }
-
-  chips.forEach(chip => {
-    chip.addEventListener('click', () => {
-      chips.forEach(c => {
-        c.classList.remove('active');
-        c.setAttribute('aria-selected', 'false');
-      });
-      chip.classList.add('active');
-      chip.setAttribute('aria-selected', 'true');
-      currentFandom = chip.dataset.fandom;
-      fetchCharacters();
-    });
-  });
-
-  searchInput.addEventListener('input', () => {
-    clearTimeout(debounceTimer);
-    debounceTimer = setTimeout(() => {
-      currentQ = searchInput.value.trim();
-      fetchCharacters();
-    }, 300);
-  });
-</script>

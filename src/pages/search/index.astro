@@ -1,153 +1,609 @@
 ---
 export const prerender = false;
-import Base from '../../layouts/Base.astro';
-import BrowseKeyboardNav from '../../components/BrowseKeyboardNav';
-import { getDrizzle } from '../../lib/db';
-import { tags, taggings, pseuds, creatorships } from '../../lib/schema';
-import { eq, sql, inArray } from 'drizzle-orm';
-import SearchPage from '../../components/SearchPage';
+export const config = { auth: 'public' };
+import Base from '@/v2/layouts/Base.astro';
+import WorkCard from '@/v2/components/WorkCard.astro';
 
-const d1 = Astro.locals.runtime.env.DB as D1Database;
-const db = getDrizzle(d1);
+// SSR: read initial search params from URL
+const initialQuery = Astro.url.searchParams.get('q') || '';
+const initialFandom = Astro.url.searchParams.get('fandom') || '';
+const initialCharacter = Astro.url.searchParams.get('character') || '';
+const initialRelationship = Astro.url.searchParams.get('relationship') || '';
+const initialRating = Astro.url.searchParams.get('rating') || '';
+const initialWarning = Astro.url.searchParams.get('warning') || '';
+const initialCategory = Astro.url.searchParams.get('category') || '';
+const initialComplete = Astro.url.searchParams.get('complete') || '';
+const initialSort = Astro.url.searchParams.get('sort') || 'updated';
+const initialPage = Math.max(1, Number(Astro.url.searchParams.get('page')) || 1);
 
-const query = Astro.url.searchParams.get('q')?.trim() || '';
-const type = Astro.url.searchParams.get('type')?.trim() || '';
-const complete = Astro.url.searchParams.get('complete')?.trim() || '';
-const word_min = Number(Astro.url.searchParams.get('word_min')) || 0;
-const word_max = Number(Astro.url.searchParams.get('word_max')) || 0;
-const page = Math.max(Number(Astro.url.searchParams.get('page')) || 1, 1);
-const limit = 20;
-const offset = (page - 1) * limit;
+// SSR data fetch for initial page load
+let initialWorks: any[] = [];
+let initialTotal = 0;
+let errorMsg: string | null = null;
 
-// Build SSR query — FTS5 and dynamic SQL require raw D1
-let results: any[] = [];
-let total = 0;
+if (initialQuery.trim().length > 0) {
+  try {
+    const params = new URLSearchParams({
+      q: initialQuery,
+      sort: initialSort,
+      page: String(initialPage),
+      limit: '20',
+    });
+    if (initialFandom) params.set('fandom', initialFandom);
+    if (initialCharacter) params.set('character', initialCharacter);
+    if (initialRelationship) params.set('relationship', initialRelationship);
+    if (initialRating) params.set('rating', initialRating);
+    if (initialWarning) params.set('warning', initialWarning);
+    if (initialCategory) params.set('category', initialCategory);
+    if (initialComplete) params.set('complete', initialComplete);
 
-const hasQuery = query.length > 0;
-const words = query.split(/\s+/).filter(w => /^[\w\u4e00-\u9fff\u3040-\u309f\u30a0-\u30ff\uac00-\ud7af]+$/.test(w));
-const sanitizedQ = words.join(' ').trim();
-
-const conditions: string[] = ['w.published_at IS NOT NULL'];
-const bindings: any[] = [];
-const countBindings: any[] = [];
-
-if (type) {
-  conditions.push(`w.id IN (SELECT tg.work_id FROM taggings tg JOIN tags t ON t.id = tg.tag_id WHERE t.type = ?)`);
-  bindings.push(type);
-  countBindings.push(type);
-}
-if (complete === '1') { conditions.push('w.complete = 1'); }
-if (complete === '0') { conditions.push('w.complete = 0'); }
-if (word_min > 0) { conditions.push('w.word_count >= ?'); bindings.push(word_min); countBindings.push(word_min); }
-if (word_max > 0) { conditions.push('w.word_count <= ?'); bindings.push(word_max); countBindings.push(word_max); }
-
-const whereClause = 'WHERE ' + conditions.join(' AND ');
-
-if (hasQuery && sanitizedQ) {
-  const ftsJoin = `JOIN works_fts f ON f.rowid = w.id`;
-  const allConditions = ' AND ' + conditions.join(' AND ');
-
-  const dataSql = `SELECT w.id, w.title, w.summary, w.word_count, w.complete, w.published_at, w.updated_at FROM works w ${ftsJoin} WHERE works_fts MATCH ?${allConditions} ORDER BY rank LIMIT ? OFFSET ?`;
-  const countSql = `SELECT COUNT(*) as total FROM works w ${ftsJoin} WHERE works_fts MATCH ?${allConditions}`;
-
-  const dataResult = await d1.prepare(dataSql).bind(sanitizedQ, ...bindings, limit, offset).all<any>();
-  results = dataResult.results;
-  const totalRow = await d1.prepare(countSql).bind(sanitizedQ, ...countBindings).first<{ total: number }>();
-  total = totalRow?.total ?? 0;
-} else if (conditions.length > 1 || !hasQuery) {
-  const dataSql = `SELECT w.id, w.title, w.summary, w.word_count, w.complete, w.published_at, w.updated_at FROM works w ${whereClause} ORDER BY w.updated_at DESC LIMIT ? OFFSET ?`;
-  const countSql = `SELECT COUNT(*) as total FROM works w ${whereClause}`;
-
-  const dataResult = await d1.prepare(dataSql).bind(...bindings, limit, offset).all<any>();
-  results = dataResult.results;
-  const totalRow = await d1.prepare(countSql).bind(...countBindings).first<{ total: number }>();
-  total = totalRow?.total ?? 0;
-}
-
-// Enrich with pseuds and tags
-const workIds = results.map((w: any) => w.id);
-
-if (workIds.length > 0) {
-  const pseudRows = await db.select({
-    workId: creatorships.workId,
-    pseudName: pseuds.name,
-  }).from(creatorships)
-    .innerJoin(pseuds, eq(pseuds.id, creatorships.pseudId))
-    .where(inArray(creatorships.workId, workIds));
-
-  const pseudByWorkId = new Map<number, string | null>();
-  for (const row of pseudRows) {
-    if (!pseudByWorkId.has(row.workId)) pseudByWorkId.set(row.workId, row.pseudName);
-  }
-
-  const tagRows = await db.select({
-    workId: taggings.workId,
-    id: tags.id,
-    name: tags.name,
-    type: tags.type,
-  }).from(taggings)
-    .innerJoin(tags, eq(tags.id, taggings.tagId))
-    .where(inArray(taggings.workId, workIds));
-
-  const tagsByWorkId = new Map<number, any[]>();
-  for (const row of tagRows) {
-    const tagList = tagsByWorkId.get(row.workId) ?? [];
-    tagList.push({ id: row.id, name: row.name, type: row.type });
-    tagsByWorkId.set(row.workId, tagList);
-  }
-
-  for (const w of results) {
-    w.pseud_name = pseudByWorkId.get(w.id) ?? null;
-    w.tags = tagsByWorkId.get(w.id) ?? [];
-  }
-} else {
-  for (const w of results) {
-    w.pseud_name = null;
-    w.tags = [];
+    const res = await fetch(new URL(`/api/search?${params.toString()}`, Astro.url));
+    if (res.ok) {
+      const json = await res.json();
+      initialWorks = json.data ?? [];
+      initialTotal = json.total ?? 0;
+    } else {
+      errorMsg = 'Search failed. Please try again.';
+    }
+  } catch {
+    errorMsg = 'Network error. Please try again.';
   }
 }
 
-const initialFilters = { type, complete, word_min, word_max };
+const totalPages = Math.max(1, Math.ceil(initialTotal / 20));
+
+// Build a pagination URL preserving all current filter state
+function pageUrl(p: number): string {
+  const u = new URL(Astro.url);
+  u.searchParams.set('page', String(p));
+  u.searchParams.set('sort', initialSort);
+  if (initialQuery) u.searchParams.set('q', initialQuery);
+  if (initialFandom) u.searchParams.set('fandom', initialFandom);
+  if (initialCharacter) u.searchParams.set('character', initialCharacter);
+  if (initialRelationship) u.searchParams.set('relationship', initialRelationship);
+  if (initialRating) u.searchParams.set('rating', initialRating);
+  if (initialWarning) u.searchParams.set('warning', initialWarning);
+  if (initialCategory) u.searchParams.set('category', initialCategory);
+  if (initialComplete) u.searchParams.set('complete', initialComplete);
+  return u.pathname + u.search;
+}
+
+const ratingOptions = ['General Audiences', 'Teen And Up Audiences', 'Mature', 'Explicit', 'Not Rated'];
+const warningOptions = ['No Archive Warnings Apply', 'Graphic Depictions Of Violence', 'Major Character Death', 'Rape/Non-Con', 'Underage'];
+const categoryOptions = ['F/F', 'F/M', 'Gen', 'M/M', 'Multi', 'Other'];
+const sortOptions = [
+  { value: 'updated', label: 'Recently Updated' },
+  { value: 'published', label: 'Recently Published' },
+  { value: 'words', label: 'Word Count' },
+  { value: 'kudos', label: 'Most Kudos' },
+];
+
+// Serialize for client-side hydration
+const ssrState = JSON.stringify({
+  query: initialQuery,
+  fandom: initialFandom,
+  character: initialCharacter,
+  relationship: initialRelationship,
+  rating: initialRating,
+  warning: initialWarning,
+  category: initialCategory,
+  complete: initialComplete,
+  sort: initialSort,
+  page: initialPage,
+  total: initialTotal,
+});
 ---
 
-<Base title={query ? `Search: ${query} — fanfiction.fyi` : 'Search — fanfiction.fyi'}>
-  <SearchPage
-    client:load
-    initialQuery={query}
-    initialFilters={initialFilters}
-    initialPage={page}
-    initialResults={results}
-    initialTotal={total}
-  />
+<Base title={initialQuery ? `Search: ${initialQuery} — fanfiction.fyi` : 'Search — fanfiction.fyi'}>
+  <section class="search-page">
+    <!-- ── Search Input ──────────────────────────────────── -->
+    <div class="search-bar">
+      <div class="search-input-wrapper" id="search-wrapper">
+        <svg class="search-icon" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+        <input
+          type="text"
+          id="search-input"
+          class="search-input"
+          placeholder="Search works by title, summary…"
+          value={initialQuery}
+          autocomplete="off"
+          aria-label="Search works"
+        />
+        <button type="button" id="clear-btn" class="clear-btn" aria-label="Clear search" style={initialQuery ? '' : 'display:none'}>
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+        </button>
+      </div>
+    </div>
 
-  <BrowseKeyboardNav client:load />
+    <!-- ── Filter Chips ──────────────────────────────────── -->
+    <div class="filter-chips-container">
+      <!-- Sort -->
+      <div class="filter-row">
+        <span class="filter-row__label">Sort</span>
+        <div class="filter-row__chips" id="sort-chips">
+          {sortOptions.map(opt => (
+            <button
+              type="button"
+              class:list={['filter-chip', initialSort === opt.value ? 'filter-chip--active' : '']}
+              data-filter="sort"
+              data-value={opt.value}
+            >
+              {opt.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <!-- Rating -->
+      <div class="filter-row">
+        <span class="filter-row__label">Rating</span>
+        <div class="filter-row__chips" id="rating-chips">
+          {ratingOptions.map(opt => (
+            <button
+              type="button"
+              class:list={['filter-chip', initialRating === opt ? 'filter-chip--active' : '']}
+              data-filter="rating"
+              data-value={opt}
+            >
+              {opt}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <!-- Warnings -->
+      <div class="filter-row">
+        <span class="filter-row__label">Warnings</span>
+        <div class="filter-row__chips" id="warning-chips">
+          {warningOptions.map(opt => (
+            <button
+              type="button"
+              class:list={['filter-chip', initialWarning === opt ? 'filter-chip--active' : '']}
+              data-filter="warning"
+              data-value={opt}
+            >
+              {opt === 'No Archive Warnings Apply' ? 'None' : opt}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <!-- Category -->
+      <div class="filter-row">
+        <span class="filter-row__label">Category</span>
+        <div class="filter-row__chips" id="category-chips">
+          {categoryOptions.map(opt => (
+            <button
+              type="button"
+              class:list={['filter-chip', initialCategory === opt ? 'filter-chip--active' : '']}
+              data-filter="category"
+              data-value={opt}
+            >
+              {opt}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <!-- Complete toggle -->
+      <div class="filter-row">
+        <span class="filter-row__label">Status</span>
+        <div class="filter-row__chips" id="complete-chips">
+          <button
+            type="button"
+            class:list={['filter-chip', initialComplete === '' ? 'filter-chip--active' : '']}
+            data-filter="complete"
+            data-value=""
+          >
+            All
+          </button>
+          <button
+            type="button"
+            class:list={['filter-chip', initialComplete === 'true' ? 'filter-chip--active' : '']}
+            data-filter="complete"
+            data-value="true"
+          >
+            Complete Only
+          </button>
+          <button
+            type="button"
+            class:list={['filter-chip', initialComplete === 'false' ? 'filter-chip--active' : '']}
+            data-filter="complete"
+            data-value="false"
+          >
+            WIP Only
+          </button>
+        </div>
+      </div>
+
+      <!-- Fandom & Character typed filters -->
+      <div class="filter-row">
+        <span class="filter-row__label">Fandom</span>
+        <div class="filter-row__chips">
+          <input
+            type="text"
+            id="fandom-input"
+            class="filter-input"
+            placeholder="e.g. Harry Potter"
+            value={initialFandom}
+            aria-label="Filter by fandom"
+          />
+        </div>
+      </div>
+
+      <div class="filter-row">
+        <span class="filter-row__label">Character</span>
+        <div class="filter-row__chips">
+          <input
+            type="text"
+            id="character-input"
+            class="filter-input"
+            placeholder="e.g. Hermione Granger"
+            value={initialCharacter}
+            aria-label="Filter by character"
+          />
+        </div>
+      </div>
+
+      <div class="filter-row">
+        <span class="filter-row__label">Relationship</span>
+        <div class="filter-row__chips">
+          <input
+            type="text"
+            id="relationship-input"
+            class="filter-input"
+            placeholder="e.g. Draco Malfoy/Harry Potter"
+            value={initialRelationship}
+            aria-label="Filter by relationship"
+          />
+        </div>
+      </div>
+    </div>
+
+    <!-- ── Results ─────────────────────────────────────────── -->
+    <div id="results-area">
+      {errorMsg && <p class="error-msg">{errorMsg}</p>}
+
+      {!errorMsg && initialQuery.trim().length === 0 && (
+        <p class="placeholder-text">Type a query to start searching.</p>
+      )}
+
+      {!errorMsg && initialQuery.trim().length > 0 && initialWorks.length === 0 && (
+        <p class="no-results">No works found for "<span class="query-highlight">{initialQuery}</span>"</p>
+      )}
+
+      {!errorMsg && initialWorks.length > 0 && (
+        <>
+          <p class="results-meta" id="results-meta">
+            {initialTotal} {initialTotal === 1 ? 'work' : 'works'} found
+          </p>
+          <div class="works-grid" id="works-grid">
+            {initialWorks.map((w: any) => (
+              <WorkCard work={w} />
+            ))}
+          </div>
+        </>
+      )}
+    </div>
+
+    <!-- ── Loading skeleton (hidden by default) ──────────── -->
+    <div id="loading-skeleton" class="loading-skeleton" style="display:none">
+      <div class="skeleton-card"></div>
+      <div class="skeleton-card"></div>
+      <div class="skeleton-card"></div>
+      <div class="skeleton-card"></div>
+      <div class="skeleton-card"></div>
+      <div class="skeleton-card"></div>
+    </div>
+
+    <!-- ── Pagination ─────────────────────────────────────── -->
+    {initialTotal > 0 && totalPages > 1 && (
+      <nav class="pagination" id="pagination" aria-label="Search results pagination">
+        {initialPage > 1 && (
+          <a href={pageUrl(initialPage - 1)} class="page-link" rel="prev" id="prev-link">← Prev</a>
+        )}
+        <span class="page-info" id="page-info">Page {initialPage} of {totalPages}</span>
+        {initialPage < totalPages && (
+          <a href={pageUrl(initialPage + 1)} class="page-link" rel="next" id="next-link">Next →</a>
+        )}
+      </nav>
+    )}
+  </section>
 </Base>
 
-<style is:global>
-  @import '../../styles/theme.css';
+<script define:vars={{ ssrState, totalPages }}>
+  // ─── State ─────────────────────────────────────────────────────
+  const state = {
+    query: ssrState.query,
+    fandom: ssrState.fandom,
+    character: ssrState.character,
+    relationship: ssrState.relationship,
+    rating: ssrState.rating,
+    warning: ssrState.warning,
+    category: ssrState.category,
+    complete: ssrState.complete,
+    sort: ssrState.sort,
+    page: ssrState.page,
+    total: ssrState.total,
+    loading: false,
+  };
 
-  .search-page { max-width: 960px; margin: 0 auto; padding: 0 var(--space-4); }
-  .page-title {
-    font: var(--md-sys-typescale-headline-medium);
-    color: var(--md-sys-color-on-surface);
-    margin: 0 0 var(--space-6);
+  let debounceTimer = null;
+
+  // ─── DOM refs ───────────────────────────────────────────────────
+  const searchInput = document.getElementById('search-input');
+  const clearBtn = document.getElementById('clear-btn');
+  const resultsArea = document.getElementById('results-area');
+  const loadingSkeleton = document.getElementById('loading-skeleton');
+  const resultsMeta = document.getElementById('results-meta');
+  const worksGrid = document.getElementById('works-grid');
+  const pagination = document.getElementById('pagination');
+  const pageInfo = document.getElementById('page-info');
+  const prevLink = document.getElementById('prev-link');
+  const nextLink = document.getElementById('next-link');
+  const fandomInput = document.getElementById('fandom-input');
+  const characterInput = document.getElementById('character-input');
+  const relationshipInput = document.getElementById('relationship-input');
+
+  // ─── Chip click handlers ────────────────────────────────────────
+  document.querySelectorAll('.filter-chip[data-filter]').forEach(chip => {
+    chip.addEventListener('click', () => {
+      const filterType = chip.dataset.filter;
+      const value = chip.dataset.value;
+
+      // For chips in the same filter group, toggle: clicking active deactivates,
+      // clicking inactive activates (and deactivates siblings)
+      const siblings = chip.parentElement.querySelectorAll(`.filter-chip[data-filter="${filterType}"]`);
+      const isActive = chip.classList.contains('filter-chip--active');
+
+      if (filterType === 'complete') {
+        // Complete is a single-select radio
+        siblings.forEach(s => s.classList.remove('filter-chip--active'));
+        chip.classList.add('filter-chip--active');
+        state.complete = value;
+      } else if (filterType === 'sort') {
+        // Sort is single-select
+        siblings.forEach(s => s.classList.remove('filter-chip--active'));
+        chip.classList.add('filter-chip--active');
+        state.sort = value;
+      } else {
+        // Rating, warning, category: toggleable single-select
+        if (isActive) {
+          chip.classList.remove('filter-chip--active');
+          state[filterType] = '';
+        } else {
+          siblings.forEach(s => s.classList.remove('filter-chip--active'));
+          chip.classList.add('filter-chip--active');
+          state[filterType] = value;
+        }
+      }
+
+      state.page = 1;
+      fetchResults();
+    });
+  });
+
+  // ─── Text filter inputs ─────────────────────────────────────────
+  function setupTextFilter(input, field) {
+    if (!input) return;
+    input.addEventListener('input', () => {
+      state[field] = input.value.trim();
+      state.page = 1;
+      debouncedFetch();
+    });
+  }
+  setupTextFilter(fandomInput, 'fandom');
+  setupTextFilter(characterInput, 'character');
+  setupTextFilter(relationshipInput, 'relationship');
+
+  // ─── Search input ───────────────────────────────────────────────
+  searchInput.addEventListener('input', () => {
+    state.query = searchInput.value;
+    state.page = 1;
+    clearBtn.style.display = state.query ? '' : 'none';
+    debouncedFetch();
+  });
+
+  clearBtn.addEventListener('click', () => {
+    searchInput.value = '';
+    state.query = '';
+    state.page = 1;
+    clearBtn.style.display = 'none';
+    fetchResults();
+  });
+
+  // ─── Debounce ───────────────────────────────────────────────────
+  function debouncedFetch() {
+    clearTimeout(debounceTimer);
+    debounceTimer = setTimeout(fetchResults, 350);
+  }
+
+  // ─── Fetch results ──────────────────────────────────────────────
+  async function fetchResults() {
+    if (state.query.trim().length === 0) {
+      resultsArea.innerHTML = '<p class="placeholder-text">Type a query to start searching.</p>';
+      if (loadingSkeleton) loadingSkeleton.style.display = 'none';
+      if (pagination) pagination.style.display = 'none';
+      updateURL();
+      return;
+    }
+
+    // Show skeleton
+    if (loadingSkeleton) loadingSkeleton.style.display = '';
+    resultsArea.innerHTML = '';
+    state.loading = true;
+
+    const params = new URLSearchParams({
+      q: state.query,
+      sort: state.sort,
+      page: String(state.page),
+      limit: '20',
+    });
+    if (state.fandom) params.set('fandom', state.fandom);
+    if (state.character) params.set('character', state.character);
+    if (state.relationship) params.set('relationship', state.relationship);
+    if (state.rating) params.set('rating', state.rating);
+    if (state.warning) params.set('warning', state.warning);
+    if (state.category) params.set('category', state.category);
+    if (state.complete) params.set('complete', state.complete);
+
+    try {
+      const res = await fetch(`/api/search?${params.toString()}`);
+      if (!res.ok) throw new Error('Search failed');
+      const json = await res.json();
+
+      state.total = json.total ?? 0;
+      const tp = Math.max(1, Math.ceil(state.total / 20));
+      const works = json.data ?? [];
+
+      if (loadingSkeleton) loadingSkeleton.style.display = 'none';
+      state.loading = false;
+
+      if (works.length === 0) {
+        resultsArea.innerHTML = `<p class="no-results">No works found for "<span class="query-highlight">${escapeHTML(state.query)}</span>"</p>`;
+        if (pagination) pagination.style.display = 'none';
+      } else {
+        resultsArea.innerHTML = `
+          <p class="results-meta" id="results-meta">${state.total} ${state.total === 1 ? 'work' : 'works'} found</p>
+          <div class="works-grid" id="works-grid">
+            ${works.map(w => renderWorkCard(w)).join('')}
+          </div>
+        `;
+
+        if (pagination) {
+          pagination.style.display = '';
+          if (pageInfo) pageInfo.textContent = `Page ${state.page} of ${tp}`;
+          if (prevLink) { prevLink.href = pageUrlJS(state.page - 1); prevLink.style.display = state.page > 1 ? '' : 'none'; }
+          if (nextLink) { nextLink.href = pageUrlJS(state.page + 1); nextLink.style.display = state.page < tp ? '' : 'none'; }
+        }
+      }
+
+      updateURL();
+    } catch (err) {
+      if (loadingSkeleton) loadingSkeleton.style.display = 'none';
+      state.loading = false;
+      resultsArea.innerHTML = '<p class="error-msg">Search failed. Please try again.</p>';
+      if (pagination) pagination.style.display = 'none';
+    }
+  }
+
+  // ─── Render work card (HTML string) ─────────────────────────────
+  function renderWorkCard(w) {
+    const authorNames = (w.authors || []).map(a => a.name).join(', ');
+    const fandoms = (w.tags || []).filter(t => t.type === 'fandom');
+    const summary = w.summary
+      ? (w.summary.length > 200 ? w.summary.slice(0, 200) + '…' : w.summary)
+      : '';
+    const words = (w.wordCount || 0).toLocaleString();
+    const statusLabel = w.complete ? 'Complete' : 'WIP';
+    const date = new Date(w.updatedAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+    const chapters = w.chapterCount != null ? `<span>${w.chapterCount} ${w.chapterCount === 1 ? 'chapter' : 'chapters'}</span>` : '';
+    const kudosDisplay = w.kudosCount > 0 ? `<span>❤ ${w.kudosCount}</span>` : '';
+
+    const fandomPills = fandoms.slice(0, 3).map(t => `<span class="fandom-pill">${escapeHTML(t.name)}</span>`).join('');
+    const moreFandoms = fandoms.length > 3 ? `<span class="fandom-pill fandom-more">+${fandoms.length - 3}</span>` : '';
+
+    return `
+      <a href="/works/${w.id}" class="work-card">
+        <div class="work-card-header">
+          <h3 class="work-card-title">${escapeHTML(w.title)}</h3>
+          <span class="work-card-status" data-complete="${w.complete}">${statusLabel}</span>
+        </div>
+        <p class="work-card-author">by ${escapeHTML(authorNames)}</p>
+        ${summary ? `<p class="work-card-summary">${escapeHTML(summary)}</p>` : ''}
+        ${fandoms.length > 0 ? `<div class="work-card-fandoms">${fandomPills}${moreFandoms}</div>` : ''}
+        <div class="work-card-meta">
+          <span>${words} words</span>
+          ${chapters}
+          ${kudosDisplay}
+          <span>Updated ${date}</span>
+        </div>
+      </a>
+    `;
+  }
+
+  // ─── Pagination links ──────────────────────────────────────────
+  function pageUrlJS(p) {
+    const u = new URL(window.location.href);
+    u.searchParams.set('q', state.query);
+    u.searchParams.set('page', String(p));
+    u.searchParams.set('sort', state.sort);
+    if (state.fandom) u.searchParams.set('fandom', state.fandom);
+    if (state.character) u.searchParams.set('character', state.character);
+    if (state.relationship) u.searchParams.set('relationship', state.relationship);
+    if (state.rating) u.searchParams.set('rating', state.rating);
+    if (state.warning) u.searchParams.set('warning', state.warning);
+    if (state.category) u.searchParams.set('category', state.category);
+    if (state.complete) u.searchParams.set('complete', state.complete);
+    return u.pathname + u.search;
+  }
+
+  function updateURL() {
+    const u = new URL(window.location.href);
+    u.searchParams.set('q', state.query);
+    u.searchParams.set('page', String(state.page));
+    u.searchParams.set('sort', state.sort);
+    if (state.fandom) u.searchParams.set('fandom', state.fandom); else u.searchParams.delete('fandom');
+    if (state.character) u.searchParams.set('character', state.character); else u.searchParams.delete('character');
+    if (state.relationship) u.searchParams.set('relationship', state.relationship); else u.searchParams.delete('relationship');
+    if (state.rating) u.searchParams.set('rating', state.rating); else u.searchParams.delete('rating');
+    if (state.warning) u.searchParams.set('warning', state.warning); else u.searchParams.delete('warning');
+    if (state.category) u.searchParams.set('category', state.category); else u.searchParams.delete('category');
+    if (state.complete) u.searchParams.set('complete', state.complete); else u.searchParams.delete('complete');
+    window.history.replaceState({}, '', u.toString());
+  }
+
+  function escapeHTML(str) {
+    const div = document.createElement('div');
+    div.textContent = str;
+    return div.innerHTML;
+  }
+
+  // ─── Pagination click handlers ──────────────────────────────────
+  if (prevLink) {
+    prevLink.addEventListener('click', (e) => {
+      e.preventDefault();
+      state.page = Math.max(1, state.page - 1);
+      fetchResults();
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    });
+  }
+  if (nextLink) {
+    nextLink.addEventListener('click', (e) => {
+      e.preventDefault();
+      state.page++;
+      fetchResults();
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    });
+  }
+</script>
+
+<style is:global>
+  .search-page {
+    max-width: 72rem;
+    margin: 0 auto;
+    padding: var(--space-8) var(--space-4);
   }
 
   /* ── Search Bar ── */
-  .search-bar { margin-bottom: var(--space-4); }
+  .search-bar {
+    margin-bottom: var(--space-6);
+  }
 
   .search-input-wrapper {
     display: flex;
     align-items: center;
     gap: var(--space-3);
-    background: var(--md-sys-color-surface-container-high);
+    background: var(--md-sys-color-surface-container);
     border: 1px solid var(--md-sys-color-outline-variant);
-    border-radius: var(--md-sys-shape-corner-extra-large);
-    padding: var(--space-4) var(--space-6);
-    transition: border-color var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard);
+    border-radius: var(--md-sys-shape-corner-full);
+    padding: var(--space-3) var(--space-6);
+    transition: border-color var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard),
+                box-shadow var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard);
   }
   .search-input-wrapper:focus-within {
     border-color: var(--md-sys-color-primary);
+    box-shadow: 0 0 0 1px var(--md-sys-color-primary);
   }
 
   .search-icon {
@@ -158,13 +614,33 @@ const initialFilters = { type, complete, word_min, word_max };
   .search-input {
     flex: 1;
     font: var(--md-sys-typescale-headline-medium);
+    font-size: 1.25rem;
     color: var(--md-sys-color-on-surface);
     background: transparent;
     border: none;
     outline: none;
     min-width: 0;
   }
-  .search-input::placeholder { color: var(--md-sys-color-outline); }
+  .search-input::placeholder {
+    color: var(--md-sys-color-outline);
+    font-weight: 400;
+  }
+
+  .clear-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: none;
+    border: none;
+    cursor: pointer;
+    color: var(--md-sys-color-on-surface-variant);
+    padding: var(--space-1);
+    border-radius: var(--md-sys-shape-corner-full);
+    transition: background var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard);
+  }
+  .clear-btn:hover {
+    background: var(--md-sys-color-surface-container-highest);
+  }
 
   /* ── Filter Chips ── */
   .filter-chips-container {
@@ -183,7 +659,7 @@ const initialFilters = { type, complete, word_min, word_max };
   .filter-row__label {
     font: var(--md-sys-typescale-label-large);
     color: var(--md-sys-color-on-surface-variant);
-    min-width: 64px;
+    min-width: 80px;
     flex-shrink: 0;
   }
 
@@ -201,7 +677,7 @@ const initialFilters = { type, complete, word_min, word_max };
   .filter-chip {
     font: var(--md-sys-typescale-label-large);
     color: var(--md-sys-color-on-surface-variant);
-    background: var(--md-sys-color-surface-container-low);
+    background: var(--md-sys-color-surface-container);
     border: 1px solid var(--md-sys-color-outline-variant);
     border-radius: var(--md-sys-shape-corner-small);
     padding: var(--space-1) var(--space-3);
@@ -233,14 +709,25 @@ const initialFilters = { type, complete, word_min, word_max };
     }
   }
 
-  /* ── Loading / Results ── */
-  .search-loading {
-    font: var(--md-sys-typescale-body-large);
-    color: var(--md-sys-color-on-surface-variant);
-    text-align: center;
-    padding: var(--space-16) 0;
+  .filter-input {
+    font: var(--md-sys-typescale-body-medium);
+    color: var(--md-sys-color-on-surface);
+    background: var(--md-sys-color-surface-container);
+    border: 1px solid var(--md-sys-color-outline-variant);
+    border-radius: var(--md-sys-shape-corner-small);
+    padding: var(--space-1) var(--space-3);
+    outline: none;
+    min-width: 200px;
+    transition: border-color var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard);
+  }
+  .filter-input:focus {
+    border-color: var(--md-sys-color-primary);
+  }
+  .filter-input::placeholder {
+    color: var(--md-sys-color-outline);
   }
 
+  /* ── Results ── */
   .placeholder-text {
     font: var(--md-sys-typescale-body-large);
     color: var(--md-sys-color-outline);
@@ -261,153 +748,74 @@ const initialFilters = { type, complete, word_min, word_max };
     font-style: italic;
   }
 
+  .error-msg {
+    color: var(--md-sys-color-error);
+    font: var(--md-sys-typescale-body-large);
+    text-align: center;
+    padding: var(--space-8) 0;
+  }
+
   .results-meta {
     font: var(--md-sys-typescale-body-medium);
     color: var(--md-sys-color-outline);
     margin-bottom: var(--space-4);
   }
 
-  .results-list {
-    display: flex;
-    flex-direction: column;
+  .works-grid {
+    display: grid;
+    grid-template-columns: 1fr;
     gap: var(--space-4);
   }
 
-  /* ── Work Card (M3 Outlined) ── */
-  .work-card {
-    padding: var(--space-4) var(--space-6);
+  @media (min-width: 640px) {
+    .works-grid {
+      grid-template-columns: repeat(2, 1fr);
+    }
+  }
+
+  /* ── Skeleton Loading ── */
+  .loading-skeleton {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: var(--space-4);
+    margin-top: var(--space-4);
+  }
+
+  @media (min-width: 640px) {
+    .loading-skeleton {
+      grid-template-columns: repeat(2, 1fr);
+    }
+  }
+
+  .skeleton-card {
     background: var(--md-sys-color-surface-container);
     border: 1px solid var(--md-sys-color-outline-variant);
     border-radius: var(--md-sys-shape-corner-large);
-    transition: background var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard),
-                border-color var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard),
-                box-shadow var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard);
+    padding: var(--space-4) var(--space-6);
+    min-height: 140px;
+    position: relative;
+    overflow: hidden;
   }
 
-  @media (hover: hover) {
-    .work-card:hover {
-      background: var(--md-sys-color-surface-container-high);
-      border-color: var(--md-sys-color-outline);
-      box-shadow: var(--md-sys-elevation-1);
-    }
+  .skeleton-card::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: linear-gradient(
+      90deg,
+      transparent 0%,
+      var(--md-sys-color-surface-container-high) 50%,
+      transparent 100%
+    );
+    animation: shimmer 1.5s infinite;
   }
 
-  .work-card__header {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: baseline;
-    gap: var(--space-2);
-    margin-bottom: var(--space-1);
-  }
-
-  .work-card__title {
-    font: var(--md-sys-typescale-title-large);
-    color: var(--md-sys-color-primary);
-    text-decoration: none;
-  }
-  @media (hover: hover) {
-    .work-card__title:hover { text-decoration: underline; }
-  }
-
-  .work-card__author {
-    font: var(--md-sys-typescale-body-medium);
-    color: var(--md-sys-color-on-surface-variant);
-  }
-
-  .work-card__summary {
-    font: var(--md-sys-typescale-body-medium);
-    color: var(--md-sys-color-on-surface-variant);
-    margin: var(--space-1) 0 var(--space-2);
-    line-height: 1.5;
-  }
-
-  .work-card__meta {
-    display: flex;
-    gap: var(--space-2);
-    flex-wrap: wrap;
-    margin-bottom: var(--space-2);
-  }
-
-  .work-card__meta-item {
-    font: var(--md-sys-typescale-body-small);
-    color: var(--md-sys-color-outline);
-  }
-
-  .work-card__meta-sep {
-    font: var(--md-sys-typescale-body-small);
-    color: var(--md-sys-color-outline-variant);
-  }
-
-  /* ── Tag Chips on Work Cards — Obsidian palette tinting ── */
-  .work-card__tags {
-    display: flex;
-    flex-wrap: wrap;
-    gap: var(--space-1);
-    margin-top: var(--space-2);
-  }
-
-  .work-tag-group {
-    display: flex;
-    flex-wrap: wrap;
-    gap: var(--space-1);
-  }
-
-  .work-tag {
-    font: var(--md-sys-typescale-body-small);
-    padding: 2px var(--space-2);
-    border-radius: var(--md-sys-shape-corner-full);
-    text-decoration: none;
-    white-space: nowrap;
-    transition: background var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard);
-    display: inline-flex;
-    align-items: center;
-    gap: var(--space-1);
-    border: 1px solid transparent;
-    line-height: 1.4;
-  }
-
-  /* Tag type accent colors — Obsidian tinted palette */
-  .work-tag--fandom {
-    background: rgba(107, 144, 190, 0.15);
-    color: #8BB4E8;
-    border-color: rgba(107, 144, 190, 0.4);
-  }
-  .work-tag--character {
-    background: rgba(107, 168, 130, 0.15);
-    color: #7DD4A0;
-    border-color: rgba(107, 168, 130, 0.4);
-  }
-  .work-tag--relationship {
-    background: rgba(190, 107, 150, 0.15);
-    color: #E88BB4;
-    border-color: rgba(190, 107, 150, 0.4);
-  }
-  .work-tag--freeform {
-    background: rgba(123, 143, 168, 0.15);
-    color: #9BB5CE;
-    border-color: rgba(123, 143, 168, 0.3);
-  }
-  .work-tag--rating {
-    background: rgba(200, 170, 100, 0.15);
-    color: #D4B872;
-    border-color: rgba(200, 170, 100, 0.4);
-  }
-  .work-tag--warning {
-    background: rgba(190, 107, 107, 0.15);
-    color: #E88B8B;
-    border-color: rgba(190, 107, 107, 0.4);
-  }
-  .work-tag--category {
-    background: rgba(123, 143, 168, 0.10);
-    color: #8BA2B8;
-    border-color: rgba(123, 143, 168, 0.25);
-  }
-
-  @media (hover: hover) {
-    .work-tag:hover {
-      text-decoration: none;
-      filter: brightness(1.2);
-    }
+  @keyframes shimmer {
+    0% { transform: translateX(-100%); }
+    100% { transform: translateX(100%); }
   }
 
   /* ── Pagination ── */
@@ -420,46 +828,39 @@ const initialFilters = { type, complete, word_min, word_max };
     padding-bottom: var(--space-4);
   }
 
-  .fab-btn {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 48px;
-    height: 48px;
-    border-radius: var(--md-sys-shape-corner-large);
-    background: var(--md-sys-color-primary-container);
-    color: var(--md-sys-color-on-primary-container);
-    border: none;
-    cursor: pointer;
-    box-shadow: var(--md-sys-elevation-1);
-    transition: background var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard),
-                box-shadow var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard);
+  .page-link {
+    font: var(--md-sys-typescale-label-large);
+    color: var(--md-sys-color-primary);
+    text-decoration: none;
+    padding: var(--space-2) var(--space-4);
+    border: 1px solid var(--md-sys-color-outline-variant);
+    border-radius: var(--md-sys-shape-corner-full);
+    transition: background var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard);
   }
-  @media (hover: hover) {
-    .fab-btn:hover {
-      background: var(--md-sys-color-primary);
-      color: var(--md-sys-color-on-primary);
-      box-shadow: var(--md-sys-elevation-2);
-    }
+  .page-link:hover {
+    background: var(--md-sys-color-primary-container);
   }
 
-  .page-indicator {
-    font: var(--md-sys-typescale-label-large);
+  .page-info {
+    font: var(--md-sys-typescale-body-medium);
     color: var(--md-sys-color-on-surface-variant);
   }
 
   /* ── Responsive ── */
   @media (max-width: 640px) {
     .filter-row__label {
-      min-width: 56px;
+      min-width: 64px;
       font: var(--md-sys-typescale-body-small);
     }
     .filter-chip {
       padding: var(--space-1) var(--space-2);
       font: var(--md-sys-typescale-body-small);
     }
-    .work-card {
-      padding: var(--space-3) var(--space-4);
+    .filter-input {
+      min-width: 140px;
+    }
+    .search-input {
+      font-size: 1rem;
     }
   }
 </style>

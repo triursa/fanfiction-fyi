@@ -3,28 +3,49 @@ compatibility_date = "2026-04-27"
 compatibility_flags = ["nodejs_compat"]
 pages_build_output_dir = "./dist"
 
-# Non-secret plaintext environment variables.
-# Override per-environment via the Cloudflare Pages dashboard
-# (Pages → project → Settings → Environment variables) or with:
-#   npx wrangler pages secret put FOUNDER_EMAIL   # for secrets
-# See .env.example for full documentation of each variable.
-# Environment variables are managed via Cloudflare Pages secrets:
-#   wrangler pages secret put GOOGLE_CLIENT_ID --project-name fanfiction-fyi
-#   wrangler pages secret put GOOGLE_CLIENT_SECRET --project-name fanfiction-fyi
-#   wrangler pages secret put FOUNDER_EMAIL --project-name fanfiction-fyi
-#   wrangler pages secret put GITHUB_TOKEN --project-name fanfiction-fyi
-# Do NOT add secrets to [vars] below — they override Pages secrets.
-
+# ─── Default (dev) environment ─────────────────────────────
 [[d1_databases]]
 binding = "DB"
-database_name = "fanfiction-fyi-db"
-database_id = "d4a29888-6e20-4391-8aa0-c131b4c36d88"
+database_name = "ffy-dev"
+database_id = "b74e9280-a0a6-40c2-aa7d-840f6260c5ca"
 
 [[r2_buckets]]
 binding = "MEDIA"
-bucket_name = "fanfiction-fyi-media"
+bucket_name = "ffy-dev"
 
 # Smart Placement runs the Worker in the closest Cloudflare location
 # to the D1 database, reducing latency for data-bound requests.
 [placement]
+mode = "smart"
+
+# ─── Staging environment ────────────────────────────────────
+[env.staging]
+name = "fanfiction-fyi-staging"
+
+[[env.staging.d1_databases]]
+binding = "DB"
+database_name = "ffy-staging"
+database_id = "3ef61c14-917d-4d77-9bb2-76498bf4173e"
+
+[[env.staging.r2_buckets]]
+binding = "MEDIA"
+bucket_name = "ffy-staging"
+
+[env.staging.placement]
+mode = "smart"
+
+# ─── Production environment ─────────────────────────────────
+[env.prod]
+name = "fanfiction-fyi-prod"
+
+[[env.prod.d1_databases]]
+binding = "DB"
+database_name = "ffy-prod"
+database_id = "9f22ddcb-c003-4c5a-9065-7c30368e7978"
+
+[[env.prod.r2_buckets]]
+binding = "MEDIA"
+bucket_name = "ffy-prod"
+
+[env.prod.placement]
 mode = "smart"

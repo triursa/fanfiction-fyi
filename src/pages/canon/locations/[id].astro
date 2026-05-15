@@ -1,347 +1,350 @@
 ---
+/**
+ * Location Detail Page — Public
+ * Shows location name, description, type badge, parent location link, edit/delete for owner.
+ */
 export const prerender = false;
-import Base from '../../../layouts/Base.astro';
-import { markdownToHtml } from '../../../lib/markdown';
-import { getAuth } from '../../../lib/auth';
-import { getDrizzle } from '../../../lib/db';
-import { locations, entityReferences, locationEdits, works, pseuds as pseudsTable, tags } from '../../../lib/schema';
-import { eq, and, desc, asc, like, sql, count } from 'drizzle-orm';
+export const config = { auth: 'public' };
+import Base from '@/v2/layouts/Base.astro';
 
-const drz = getDrizzle(Astro.locals.runtime.env.DB as D1Database);
-const d1 = Astro.locals.runtime.env.DB as D1Database;
-const auth = await getAuth(d1, Astro.request);
-
-const id = Astro.params.id;
-if (!id) return Astro.redirect('/canon?tab=locations');
+const locationId = Number(Astro.params.id);
+if (!locationId || isNaN(locationId)) {
+  return Astro.redirect('/canon?tab=locations');
+}
 
 let location: any = null;
-let parentLocation: any = null;
-let childLocations: any[] = [];
-let worksList: any[] = [];
-let editHistory: any[] = [];
+let errorMsg: string | null = null;
 
 try {
-  location = await drz.select().from(locations).where(eq(locations.id, Number(id))).get();
-} catch {
-  // Table may not exist
-}
-
-if (!location) return Astro.redirect('/canon?tab=locations');
-
-// Parent location
-if (location.parentLocationId) {
-  try {
-    const parentRow = await drz.select({ id: locations.id, name: locations.name }).from(locations).where(eq(locations.id, location.parentLocationId)).get();
-    parentLocation = parentRow ? { id: parentRow.id, name: parentRow.name } : null;
-  } catch {
-    parentLocation = null;
+  const res = await fetch(new URL(`/api/canon/locations/${locationId}`, Astro.url));
+  if (res.ok) {
+    const json = await res.json();
+    location = json.data;
+  } else if (res.status === 404) {
+    return Astro.redirect('/canon?tab=locations');
+  } else {
+    errorMsg = 'Failed to load location.';
   }
-}
-
-// Child locations
-try {
-  const childRows = await drz
-    .select({ id: locations.id, name: locations.name })
-    .from(locations)
-    .where(eq(locations.parentLocationId, location.id))
-    .orderBy(asc(locations.name))
-    .all();
-  childLocations = childRows;
 } catch {
-  childLocations = [];
+  errorMsg = 'Network error loading location.';
 }
 
-// Works referencing — via entity_references join
-try {
-  worksList = await drz
-    .select({
-      id: works.id,
-      title: works.title,
-      wordCount: works.wordCount,
-      updatedAt: works.updatedAt,
-      authors: sql<string>`(SELECT GROUP_CONCAT(p.name, ', ') FROM pseuds p JOIN creatorships c ON p.id = c.pseud_id WHERE c.work_id = ${works.id})`,
-    })
-    .from(entityReferences)
-    .innerJoin(works, eq(entityReferences.workId, works.id))
-    .where(and(eq(entityReferences.entityType, 'location'), eq(entityReferences.entityId, location.id)))
-    .orderBy(desc(works.updatedAt))
-    .limit(20)
-    .all();
-} catch {
-  worksList = [];
-}
-
-// Edit history
-try {
-  editHistory = await drz
-    .select()
-    .from(locationEdits)
-    .where(eq(locationEdits.locationId, location.id))
-    .orderBy(desc(locationEdits.createdAt))
-    .limit(20)
-    .all();
-} catch {
-  editHistory = [];
-}
-
-// Get fandom name from tag if available
-let fandomName: string | null = null;
-if (location.fandomTagId) {
-  try {
-    const fandomTag = await drz.select({ name: tags.name }).from(tags).where(eq(tags.id, location.fandomTagId)).get();
-    fandomName = fandomTag?.name ?? null;
-  } catch {
-    fandomName = null;
-  }
-}
-
-const descHtml = markdownToHtml(location.descriptionMd || '');
-const canEdit = auth && (auth.user.id === location.createdBy || ['admin', 'mod', 'founder'].includes(auth.user.role));
+const user = Astro.locals.user;
+const isOwner = user && location && user.id === location.ownerUserId;
 ---
 
-<Base title={`${location.name} — Canon`}>
-  <section class="location-detail">
-    <article class="location-article">
-      <h1 class="page-title">{location.name}</h1>
+<Base title={`${location?.name || 'Location'} — fanfiction.fyi`} description={location?.description?.slice(0, 160) || 'View location on fanfiction.fyi'}>
+  <section class="location-detail-page">
+    {errorMsg && <div class="error-banner" role="alert">{errorMsg}</div>}
 
-      <div class="location-badges">
-        {fandomName && <span class="m3-chip location-badge location-badge--fandom">{fandomName}</span>}
-      </div>
+    {location && (
+      <>
+        <a href="/canon?tab=locations" class="back-link">← Canon</a>
 
-      <!-- Parent location breadcrumb -->
-      {parentLocation && (
-        <nav class="location-breadcrumb">
-          <span class="breadcrumb-label">Part of</span>
-          <a href={`/canon/locations/${parentLocation.id}`} class="breadcrumb-link">{parentLocation.name}</a>
-        </nav>
-      )}
+        <div class="location-header">
+          <div class="location-title-row">
+            <h1 class="location-title">{location.name}</h1>
+            {location.type && <span class="type-badge">{location.type}</span>}
+          </div>
 
-      <!-- Child locations -->
-      {childLocations.length > 0 && (
-        <div class="location-children">
-          <h2 class="section-title">Sub-locations</h2>
-          <ul class="children-list">
-            {childLocations.map(child => (
-              <li>
-                <a href={`/canon/locations/${child.id}`} class="child-link">{child.name}</a>
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
-
-      <!-- Description -->
-      {location.descriptionMd && (
-        <div class="location-desc prose" set:html={descHtml} />
-      )}
-
-      {canEdit && (
-        <a href={`/canon/locations/${location.id}/edit`} class="m3-btn-filled location-edit-btn">Edit Location</a>
-      )}
-    </article>
-
-    <!-- Works referencing -->
-    {worksList.length > 0 && (
-      <section class="location-works">
-        <h2 class="section-title">Works Referencing</h2>
-        <div class="works-list">
-          {worksList.map(w => (
-            <a href={`/works/${w.id}`} class="work-ref-card">
-              <span class="work-ref__title">{w.title}</span>
-              <span class="work-ref__meta">
-                {w.authors && <Fragment>by {w.authors} · </Fragment>}
-                {Number(w.wordCount).toLocaleString()} words
+          <div class="location-meta">
+            {location.pseudName && (
+              <a href={`/pseuds/${location.pseudId}`} class="location-owner">by {location.pseudName}</a>
+            )}
+            <span class="location-meta-item">
+              Created {new Date(location.createdAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+            </span>
+            {location.updatedAt && location.updatedAt !== location.createdAt && (
+              <span class="location-meta-item">
+                Updated {new Date(location.updatedAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
               </span>
-            </a>
-          ))}
-        </div>
-      </section>
-    )}
+            )}
+          </div>
 
-    <!-- Edit History -->
-    {editHistory.length > 0 && (
-      <section class="location-history">
-        <h2 class="section-title">Edit History</h2>
-        <ol class="edit-timeline">
-          {editHistory.map(edit => (
-            <li class="edit-timeline__item">
-              <span class="edit-timeline__date">{new Date(edit.createdAt).toLocaleDateString()}</span>
-              <span class="edit-timeline__desc">{edit.field ? `Changed ${edit.field}` : 'Updated location'}</span>
-            </li>
-          ))}
-        </ol>
-      </section>
+          {location.parentId && (
+            <div class="parent-link">
+              <span class="meta-label">Parent Location:</span>
+              <a href={`/canon/locations/${location.parentId}`} class="parent-link-anchor">
+                ↑ {location.parentName || `Location #${location.parentId}`}
+              </a>
+            </div>
+          )}
+
+          {isOwner && (
+            <div class="owner-actions">
+              <a href={`/canon/locations/${locationId}/edit`} class="btn-outlined">Edit Location</a>
+              <button type="button" class="btn-danger" id="delete-btn">Delete Location</button>
+            </div>
+          )}
+        </div>
+
+        <!-- ── Description ────────────────────────────────────────── -->
+        {location.description && (
+          <div class="location-description">
+            <h2 class="section-heading">Description</h2>
+            <div class="description-content">{location.description}</div>
+          </div>
+        )}
+
+        <!-- ── Child Locations ─────────────────────────────────────── -->
+        {location.children && location.children.length > 0 && (
+          <div class="location-children">
+            <h2 class="section-heading">Sub-Locations <span class="count-badge">{location.children.length}</span></h2>
+            <div class="children-grid">
+              {location.children.map((child: any) => (
+                <a href={`/canon/locations/${child.id}`} class="child-card">
+                  <span class="child-name">{child.name}</span>
+                  {child.type && <span class="child-type">{child.type}</span>}
+                </a>
+              ))}
+            </div>
+          </div>
+        )}
+      </>
     )}
   </section>
 </Base>
 
+{isOwner && (
+  <script define:vars={{ locationId }}>
+    const deleteBtn = document.getElementById('delete-btn');
+    if (deleteBtn) {
+      deleteBtn.addEventListener('click', async () => {
+        if (!confirm('Are you sure you want to delete this location? This cannot be undone.')) return;
+        deleteBtn.disabled = true;
+        deleteBtn.textContent = 'Deleting…';
+        try {
+          const res = await fetch(`/api/canon/locations/${locationId}`, { method: 'DELETE' });
+          if (res.ok) {
+            window.location.href = '/canon?tab=locations';
+          } else {
+            const data = await res.json();
+            alert(data.error || 'Failed to delete location.');
+            deleteBtn.disabled = false;
+            deleteBtn.textContent = 'Delete Location';
+          }
+        } catch {
+          alert('Network error. Please try again.');
+          deleteBtn.disabled = false;
+          deleteBtn.textContent = 'Delete Location';
+        }
+      });
+    }
+  </script>
+)}
+
 <style is:global>
-  @import '../../../styles/theme.css';
-
-  .location-detail { max-width: 800px; margin: 0 auto; }
-
-  .page-title {
-    font: var(--md-sys-typescale-headline-large);
-    color: var(--md-sys-color-on-surface);
-    margin: 0 0 var(--space-3);
+  .location-detail-page {
+    max-width: 72rem;
+    margin: 0 auto;
+    padding: var(--space-8) var(--space-4);
   }
 
-  .location-badges {
-    display: flex;
-    gap: var(--space-1);
+  .back-link {
+    font: var(--md-sys-typescale-label-large);
+    color: var(--md-sys-color-primary);
+    text-decoration: none;
+    display: inline-block;
     margin-bottom: var(--space-4);
+    transition: opacity var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard);
   }
-  .location-badge--fandom {
+  .back-link:hover { opacity: 0.8; }
+
+  .error-banner {
+    background: var(--md-sys-color-error);
+    color: var(--md-sys-color-on-error);
+    border-radius: var(--md-sys-shape-corner-small);
+    padding: var(--space-3) var(--space-4);
+    margin-bottom: var(--space-6);
+    font: var(--md-sys-typescale-body-medium);
+  }
+
+  .location-header {
+    margin-bottom: var(--space-8);
+  }
+
+  .location-title-row {
+    display: flex;
+    align-items: baseline;
+    gap: var(--space-3);
+    flex-wrap: wrap;
+  }
+
+  .location-title {
+    font: var(--md-sys-typescale-headline-medium);
+    margin: 0;
+  }
+
+  .type-badge {
+    font: var(--md-sys-typescale-body-small);
     background: var(--md-sys-color-secondary-container);
     color: var(--md-sys-color-on-secondary-container);
+    border-radius: var(--md-sys-shape-corner-full);
+    padding: 2px 10px;
+    text-transform: capitalize;
+    flex-shrink: 0;
   }
 
-  /* Breadcrumb */
-  .location-breadcrumb {
+  .location-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-2) var(--space-4);
+    margin-top: var(--space-2);
     font: var(--md-sys-typescale-body-medium);
     color: var(--md-sys-color-on-surface-variant);
-    margin-bottom: var(--space-4);
   }
-  .breadcrumb-label { margin-right: var(--space-1); }
-  .breadcrumb-link {
+
+  .location-owner {
     color: var(--md-sys-color-primary);
     text-decoration: none;
   }
-  .breadcrumb-link:hover { text-decoration: underline; }
+  .location-owner:hover { text-decoration: underline; }
 
-  /* Children */
-  .location-children {
-    margin-bottom: var(--space-6);
+  .location-meta-item {
+    color: var(--md-sys-color-on-surface-variant);
   }
-  .children-list {
-    list-style: none;
-    padding: 0;
+
+  .parent-link {
+    margin-top: var(--space-3);
     display: flex;
-    flex-wrap: wrap;
+    align-items: baseline;
     gap: var(--space-2);
+    font: var(--md-sys-typescale-body-medium);
   }
-  .child-link {
+
+  .meta-label {
+    color: var(--md-sys-color-on-surface-variant);
+  }
+
+  .parent-link-anchor {
+    color: var(--md-sys-color-primary);
+    text-decoration: none;
+  }
+  .parent-link-anchor:hover { text-decoration: underline; }
+
+  .owner-actions {
+    display: flex;
+    gap: var(--space-4);
+    margin-top: var(--space-4);
+    flex-wrap: wrap;
+  }
+
+  .btn-outlined {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
     font: var(--md-sys-typescale-label-large);
     color: var(--md-sys-color-primary);
-    background: var(--md-sys-color-surface-container);
-    border: 1px solid var(--md-sys-color-outline-variant);
+    background: transparent;
+    border: 1px solid var(--md-sys-color-outline);
     border-radius: var(--md-sys-shape-corner-full);
-    padding: var(--space-1) var(--space-4);
+    padding: var(--space-3) var(--space-8);
     text-decoration: none;
     transition: background var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard);
   }
-  .child-link:hover {
-    background: var(--md-sys-color-surface-container-high);
-    text-decoration: none;
+  .btn-outlined:hover { background: var(--md-sys-color-primary-container); }
+
+  .btn-danger {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font: var(--md-sys-typescale-label-large);
+    color: var(--md-sys-color-on-error);
+    background: var(--md-sys-color-error);
+    border: none;
+    border-radius: var(--md-sys-shape-corner-full);
+    padding: var(--space-3) var(--space-8);
+    cursor: pointer;
+    transition: opacity var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard);
+  }
+  .btn-danger:hover { opacity: 0.88; }
+
+  /* ── Description ────────────────────────────────────────── */
+  .location-description {
+    margin-bottom: var(--space-8);
   }
 
-  /* Description */
-  .location-desc {
+  .section-heading {
+    font: var(--md-sys-typescale-label-large);
+    color: var(--md-sys-color-on-surface-variant);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    font-size: 0.85rem;
+    margin: 0 0 var(--space-4) 0;
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+  }
+
+  .count-badge {
+    background: var(--md-sys-color-primary-container);
+    color: var(--md-sys-color-on-primary-container);
+    border-radius: var(--md-sys-shape-corner-full);
+    padding: 2px 8px;
+    font-size: 0.75rem;
+  }
+
+  .description-content {
     font: var(--md-sys-typescale-body-large);
     color: var(--md-sys-color-on-surface);
     line-height: 1.75;
-  }
-  .location-desc p { margin: 0 0 var(--space-4); }
-  .location-desc h2 {
-    font: var(--md-sys-typescale-title-large);
-    margin: var(--space-6) 0 var(--space-2);
+    white-space: pre-wrap;
+    max-width: 48rem;
   }
 
-  .location-edit-btn { display: inline-block; margin-top: var(--space-6); }
-
-  .m3-btn-filled {
-    font: var(--md-sys-typescale-label-large);
-    color: var(--md-sys-color-on-primary);
-    background: var(--md-sys-color-primary);
-    border: none;
-    border-radius: var(--md-sys-shape-corner-full);
-    padding: var(--space-2) var(--space-6);
-    cursor: pointer;
-    text-decoration: none;
-    transition: background var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard);
-  }
-  .m3-btn-filled:hover {
-    background: var(--md-sys-color-primary-container);
-    color: var(--md-sys-color-on-primary-container);
-    text-decoration: none;
+  /* ── Children ───────────────────────────────────────────── */
+  .location-children {
+    margin-top: var(--space-8);
+    padding-top: var(--space-6);
+    border-top: 1px solid var(--md-sys-color-outline-variant);
   }
 
-  /* Sections */
-  .section-title {
-    font: var(--md-sys-typescale-title-medium);
-    color: var(--md-sys-color-on-surface);
-    margin: var(--space-8) 0 var(--space-3);
-    padding-bottom: var(--space-2);
-    border-bottom: 1px solid var(--md-sys-color-outline-variant);
+  .children-grid {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: var(--space-3);
   }
-  .works-list {
+
+  @media (min-width: 640px) {
+    .children-grid {
+      grid-template-columns: repeat(2, 1fr);
+    }
+  }
+
+  @media (min-width: 960px) {
+    .children-grid {
+      grid-template-columns: repeat(3, 1fr);
+    }
+  }
+
+  .child-card {
     display: flex;
-    flex-direction: column;
-    gap: var(--space-2);
-  }
-  .work-ref-card {
-    display: flex;
-    justify-content: space-between;
     align-items: baseline;
-    padding: var(--space-3) var(--space-4);
+    justify-content: space-between;
+    gap: var(--space-2);
     background: var(--md-sys-color-surface-container);
     border: 1px solid var(--md-sys-color-outline-variant);
-    border-radius: var(--md-sys-shape-corner-medium);
+    border-radius: var(--md-sys-shape-corner-small);
+    padding: var(--space-3) var(--space-4);
     text-decoration: none;
-    color: var(--md-sys-color-on-surface);
-    transition: background var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard);
+    transition: border-color var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard);
   }
-  .work-ref-card:hover {
-    background: var(--md-sys-color-surface-container-high);
-    text-decoration: none;
+  .child-card:hover {
+    border-color: var(--md-sys-color-outline);
   }
-  .work-ref__title {
-    font: var(--md-sys-typescale-title-small);
+
+  .child-name {
+    font: var(--md-sys-typescale-body-large);
     color: var(--md-sys-color-primary);
   }
-  .work-ref__meta {
-    font: var(--md-sys-typescale-body-small);
-    color: var(--md-sys-color-outline);
-  }
 
-  /* Edit History */
-  .edit-timeline {
-    list-style: none;
-    padding: 0;
-    margin: 0;
-  }
-  .edit-timeline__item {
-    display: flex;
-    gap: var(--space-3);
-    padding: var(--space-2) 0;
-    border-left: 2px solid var(--md-sys-color-outline-variant);
-    padding-left: var(--space-4);
-    position: relative;
-  }
-  .edit-timeline__item::before {
-    content: '';
-    position: absolute;
-    left: -5px;
-    top: 50%;
-    transform: translateY(-50%);
-    width: 8px;
-    height: 8px;
-    border-radius: 50%;
-    background: var(--md-sys-color-primary);
-  }
-  .edit-timeline__date {
+  .child-type {
     font: var(--md-sys-typescale-body-small);
-    color: var(--md-sys-color-outline);
-    white-space: nowrap;
-  }
-  .edit-timeline__desc {
-    font: var(--md-sys-typescale-body-medium);
-    color: var(--md-sys-color-on-surface-variant);
-  }
-
-  .m3-chip {
-    font: var(--md-sys-typescale-label-small);
-    padding: 4px var(--space-3);
+    background: var(--md-sys-color-secondary-container);
+    color: var(--md-sys-color-on-secondary-container);
     border-radius: var(--md-sys-shape-corner-full);
+    padding: 2px 8px;
+    text-transform: capitalize;
+    flex-shrink: 0;
   }
 </style>

@@ -1,62 +1,116 @@
 ---
+/**
+ * Create Lore Entry Page — Auth Required
+ * Form: title, content (textarea), category dropdown, optional work selector, pseud selector.
+ */
 export const prerender = false;
-import Base from '../../../layouts/Base.astro';
-import { getAuth } from '../../../lib/auth';
+// Auth required — default middleware enforces login
+import Base from '@/v2/layouts/Base.astro';
 
-const db = Astro.locals.runtime.env.DB as D1Database;
-const auth = await getAuth(db, Astro.request);
+const user = Astro.locals.user;
 
-if (!auth) return Astro.redirect('/login');
+// Fetch user's pseuds
+let pseuds: any[] = [];
+try {
+  const res = await fetch(new URL(`/api/pseuds?limit=100&userId=${user.id}`, Astro.url), {
+    headers: { cookie: Astro.request.headers.get('cookie') || '' },
+  });
+  if (res.ok) {
+    const json = await res.json();
+    pseuds = json.data ?? [];
+  }
+} catch {
+  // Non-fatal
+}
 
-const LORE_CATEGORIES = [
-  'Worldbuilding', 'Magic System', 'Technology', 'History',
-  'Culture', 'Species', 'Religion', 'Politics', 'Other'
+// Fetch works for work selector
+let works: any[] = [];
+try {
+  const res = await fetch(new URL(`/api/works?limit=50&userId=${user.id}`, Astro.url), {
+    headers: { cookie: Astro.request.headers.get('cookie') || '' },
+  });
+  if (res.ok) {
+    const json = await res.json();
+    works = json.data ?? [];
+  }
+} catch {
+  // Non-fatal
+}
+
+const loreCategories = [
+  { value: 'history', label: 'History' },
+  { value: 'magic', label: 'Magic' },
+  { value: 'culture', label: 'Culture' },
+  { value: 'technology', label: 'Technology' },
+  { value: 'politics', label: 'Politics' },
+  { value: 'religion', label: 'Religion' },
+  { value: 'nature', label: 'Nature' },
+  { value: 'other', label: 'Other' },
 ];
 ---
 
-<Base title="New Lore Entry — fanfiction.fyi">
-  <section class="lore-new">
-    <h1 class="page-title">Create Lore Entry</h1>
-    <p class="page-subtitle">Add a new entry to the Canon Layer knowledge base.</p>
+<Base title="New Lore Entry — fanfiction.fyi" description="Create a lore entry on fanfiction.fyi">
+  <section class="form-page">
+    <div class="form-header">
+      <a href="/canon?tab=lore" class="back-link">← Back to Canon</a>
+      <h1 class="form-title">New Lore Entry</h1>
+    </div>
 
-    <form id="lore-form" class="form-stack">
-      <div class="m3-card">
-        <h2 class="m3-card-title">Details</h2>
-        <div class="form-stack" style="gap: var(--space-4)">
-          <div class="m3-form-field">
-            <label for="title">Title <span class="required">*</span></label>
-            <input type="text" id="title" name="title" required placeholder="e.g. Magic System" class="m3-input" />
-          </div>
+    <form id="new-lore-form" class="lore-form">
+      <div class="form-field">
+        <label for="title">Title</label>
+        <input type="text" id="title" name="title" required maxlength="500" placeholder="The Founding of Avalon" />
+      </div>
 
-          <div class="m3-form-field">
-            <label for="category">Category <span class="required">*</span></label>
-            <select id="category" name="category" required class="m3-select">
-              <option value="">Select a category</option>
-              {LORE_CATEGORIES.map(cat => (
-                <option value={cat}>{cat}</option>
-              ))}
-            </select>
-          </div>
+      <div class="form-field">
+        <label for="content">Content</label>
+        <textarea id="content" name="content" rows="12" placeholder="Write your lore entry in Markdown…"></textarea>
+        <p class="field-hint">Markdown formatting is supported: **bold**, *italic*, # headings, - lists, [links](url).</p>
+      </div>
 
-          <div class="m3-form-field">
-            <label for="fandom">Fandom <span class="required">*</span></label>
-            <div class="fandom-autocomplete-wrap">
-              <input type="text" id="fandom" name="fandom" required placeholder="Start typing a fandom…" class="m3-input" autocomplete="off" />
-              <ul id="fandom-suggestions" class="autocomplete-list" role="listbox"></ul>
-              <input type="hidden" id="fandom-value" name="fandom_value" />
-            </div>
-          </div>
+      <div class="form-field">
+        <label for="category">Category</label>
+        <select id="category" name="category" required>
+          <option value="">Select a category…</option>
+          {loreCategories.map(cat => (
+            <option value={cat.value}>{cat.label}</option>
+          ))}
+        </select>
+      </div>
 
-          <div class="m3-form-field">
-            <label for="body">Body (Markdown)</label>
-            <textarea id="body" name="body_md" rows="12" placeholder="Write the lore entry in Markdown. Use [[:Name]] for wiki-links.\n\ne.g. The [[:Magic System]] allows…" class="m3-textarea"></textarea>
-          </div>
-        </div>
+      <div class="form-field">
+        <label for="workId">Linked Work <span class="optional-label">(optional)</span></label>
+        <select id="workId" name="workId">
+          <option value="">No linked work</option>
+          {works.map((w: any) => (
+            <option value={w.id}>{w.title}</option>
+          ))}
+        </select>
+        <p class="field-hint">Optionally link this lore entry to one of your works.</p>
+      </div>
+
+      <div class="form-field">
+        <label for="pseudId">Post As</label>
+        <select id="pseudId" name="pseudId" required>
+          {pseuds.length === 0 ? (
+            <option value="">No pseuds available</option>
+          ) : (
+            pseuds.map((p: any) => (
+              <option value={p.id} selected={p.isDefault}>{p.name}</option>
+            ))
+          )}
+        </select>
+        {pseuds.length === 0 && (
+          <p class="field-hint">You need a pseud to post. <a href="/settings">Create one in settings</a>.</p>
+        )}
       </div>
 
       <div class="form-actions">
-        <a href="/canon" class="m3-btn-outlined">Cancel</a>
-        <button type="submit" class="m3-btn-filled" id="submit-btn">Create Entry</button>
+        <button type="submit" class="btn-filled" id="submit-btn">
+          <span class="btn-text">Create Lore Entry</span>
+          <span class="btn-loading" style="display:none;">Creating…</span>
+        </button>
+        <a href="/canon?tab=lore" class="btn-outlined">Cancel</a>
       </div>
 
       <div id="form-error" class="form-error" role="alert"></div>
@@ -64,238 +118,176 @@ const LORE_CATEGORIES = [
   </section>
 </Base>
 
-<style is:global>
-  @import '../../../styles/theme.css';
-
-  .lore-new { max-width: 700px; margin: 0 auto; }
-
-  .page-title {
-    font: var(--md-sys-typescale-headline-large);
-    color: var(--md-sys-color-on-surface);
-    margin: 0 0 var(--space-1);
-  }
-  .page-subtitle {
-    font: var(--md-sys-typescale-body-medium);
-    color: var(--md-sys-color-on-surface-variant);
-    margin: 0 0 var(--space-6);
-  }
-  .required { color: var(--md-sys-color-error); }
-
-  .m3-card {
-    background: var(--md-sys-color-surface-container);
-    border: 1px solid var(--md-sys-color-outline-variant);
-    border-radius: var(--md-sys-shape-corner-large);
-    padding: var(--space-6);
-  }
-  .m3-card-title {
-    font: var(--md-sys-typescale-title-large);
-    color: var(--md-sys-color-on-surface);
-    margin: 0 0 var(--space-4);
-  }
-
-  .form-stack { display: flex; flex-direction: column; gap: var(--space-4); }
-  .m3-form-field { display: flex; flex-direction: column; gap: var(--space-1); }
-  .m3-form-field label {
-    font: var(--md-sys-typescale-label-large);
-    color: var(--md-sys-color-on-surface-variant);
-  }
-  .m3-input {
-    width: 100%;
-    background: var(--md-sys-color-surface-container);
-    color: var(--md-sys-color-on-surface);
-    border: 1px solid var(--md-sys-color-outline-variant);
-    border-radius: var(--md-sys-shape-corner-medium);
-    padding: var(--space-3) var(--space-4);
-    font: var(--md-sys-typescale-body-large);
-  }
-  .m3-input:focus {
-    outline: none;
-    border-color: var(--md-sys-color-primary);
-    box-shadow: 0 0 0 1px var(--md-sys-color-primary);
-  }
-  .m3-select {
-    background: var(--md-sys-color-surface-container);
-    color: var(--md-sys-color-on-surface);
-    border: 1px solid var(--md-sys-color-outline-variant);
-    border-radius: var(--md-sys-shape-corner-medium);
-    padding: var(--space-2) var(--space-3);
-    font: var(--md-sys-typescale-body-medium);
-  }
-  .m3-textarea {
-    width: 100%;
-    min-height: 200px;
-    background: var(--md-sys-color-surface-container);
-    color: var(--md-sys-color-on-surface);
-    border: 1px solid var(--md-sys-color-outline-variant);
-    border-radius: var(--md-sys-shape-corner-medium);
-    padding: var(--space-3) var(--space-4);
-    font: var(--md-sys-typescale-body-large);
-    font-family: var(--font-mono, monospace);
-    resize: vertical;
-  }
-  .m3-textarea:focus {
-    outline: none;
-    border-color: var(--md-sys-color-primary);
-    box-shadow: 0 0 0 1px var(--md-sys-color-primary);
-  }
-
-  .form-actions {
-    display: flex;
-    justify-content: flex-end;
-    gap: var(--space-3);
-  }
-  .form-error {
-    color: var(--md-sys-color-error);
-    font: var(--md-sys-typescale-body-small);
-  }
-
-  .m3-btn-filled {
-    font: var(--md-sys-typescale-label-large);
-    color: var(--md-sys-color-on-primary);
-    background: var(--md-sys-color-primary);
-    border: none;
-    border-radius: var(--md-sys-shape-corner-full);
-    padding: var(--space-2) var(--space-6);
-    cursor: pointer;
-  }
-  .m3-btn-filled:hover {
-    background: var(--md-sys-color-primary-container);
-    color: var(--md-sys-color-on-primary-container);
-  }
-  .m3-btn-outlined {
-    display: inline-block;
-    font: var(--md-sys-typescale-label-large);
-    color: var(--md-sys-color-primary);
-    background: transparent;
-    border: 1px solid var(--md-sys-color-outline);
-    border-radius: var(--md-sys-shape-corner-full);
-    padding: var(--space-2) var(--space-6);
-    cursor: pointer;
-    text-decoration: none;
-  }
-
-  /* Autocomplete */
-  .fandom-autocomplete-wrap {
-    position: relative;
-  }
-  .autocomplete-list {
-    position: absolute;
-    top: 100%;
-    left: 0;
-    right: 0;
-    z-index: 10;
-    background: var(--md-sys-color-surface-container-high);
-    border: 1px solid var(--md-sys-color-outline-variant);
-    border-radius: var(--md-sys-shape-corner-medium);
-    max-height: 200px;
-    overflow-y: auto;
-    list-style: none;
-    margin: 0;
-    padding: 0;
-    display: none;
-  }
-  .autocomplete-list--visible { display: block; }
-  .autocomplete-list li {
-    padding: var(--space-2) var(--space-4);
-    cursor: pointer;
-    font: var(--md-sys-typescale-body-medium);
-    color: var(--md-sys-color-on-surface);
-  }
-  .autocomplete-list li:hover {
-    background: var(--md-sys-color-surface-container-highest);
-  }
-</style>
-
 <script>
-  const form = document.getElementById('lore-form') as HTMLFormElement;
-  const errorEl = document.getElementById('form-error')!;
+  const form = document.getElementById('new-lore-form') as HTMLFormElement;
+  const errorEl = document.getElementById('form-error') as HTMLElement;
   const submitBtn = document.getElementById('submit-btn') as HTMLButtonElement;
-  const fandomInput = document.getElementById('fandom') as HTMLInputElement;
-  const fandomHidden = document.getElementById('fandom-value') as HTMLInputElement;
-  const fandomSuggestions = document.getElementById('fandom-suggestions') as HTMLUListElement;
 
-  let debounceTimer: ReturnType<typeof setTimeout>;
-
-  // Fandom autocomplete
-  fandomInput.addEventListener('input', () => {
-    clearTimeout(debounceTimer);
-    const query = fandomInput.value.trim();
-    if (!query) {
-      fandomSuggestions.classList.remove('autocomplete-list--visible');
-      return;
-    }
-    debounceTimer = setTimeout(async () => {
-      try {
-        const res = await fetch(`/api/tags?type=fandom&q=${encodeURIComponent(query)}`);
-        if (!res.ok) return;
-        const tags = await res.json();
-        fandomSuggestions.innerHTML = '';
-        for (const tag of tags.slice(0, 10)) {
-          const li = document.createElement('li');
-          li.textContent = tag.name;
-          li.setAttribute('role', 'option');
-          li.addEventListener('click', () => {
-            fandomInput.value = tag.name;
-            fandomHidden.value = tag.name;
-            fandomSuggestions.classList.remove('autocomplete-list--visible');
-          });
-          fandomSuggestions.appendChild(li);
-        }
-        if (tags.length > 0) {
-          fandomSuggestions.classList.add('autocomplete-list--visible');
-        } else {
-          fandomSuggestions.classList.remove('autocomplete-list--visible');
-        }
-      } catch {
-        fandomSuggestions.classList.remove('autocomplete-list--visible');
-      }
-    }, 300);
-  });
-
-  // Close autocomplete on blur
-  fandomInput.addEventListener('blur', () => {
-    setTimeout(() => fandomSuggestions.classList.remove('autocomplete-list--visible'), 200);
-  });
-
-  // Form submission
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
     errorEl.textContent = '';
     submitBtn.disabled = true;
-    submitBtn.textContent = 'Creating…';
+    (submitBtn.querySelector('.btn-text') as HTMLElement).style.display = 'none';
+    (submitBtn.querySelector('.btn-loading') as HTMLElement).style.display = 'inline';
 
-    const title = (document.getElementById('title') as HTMLInputElement).value;
+    const title = (document.getElementById('title') as HTMLInputElement).value.trim();
+    const content = (document.getElementById('content') as HTMLTextAreaElement).value;
     const category = (document.getElementById('category') as HTMLSelectElement).value;
-    const fandom = fandomInput.value;
-    const bodyMd = (document.getElementById('body') as HTMLTextAreaElement).value;
+    const workId = (document.getElementById('workId') as HTMLSelectElement).value;
+    const pseudId = Number((document.getElementById('pseudId') as HTMLSelectElement).value);
 
-    if (!title || !category || !fandom) {
-      errorEl.textContent = 'Title, category, and fandom are required.';
+    if (!pseudId) {
+      errorEl.textContent = 'Please select a pseudonym to post as.';
       submitBtn.disabled = false;
-      submitBtn.textContent = 'Create Entry';
+      (submitBtn.querySelector('.btn-text') as HTMLElement).style.display = 'inline';
+      (submitBtn.querySelector('.btn-loading') as HTMLElement).style.display = 'none';
       return;
     }
+
+    const body: Record<string, any> = { title, content, category, pseudId };
+    if (workId) body.workId = Number(workId);
 
     try {
       const res = await fetch('/api/canon/lore', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ title, category, fandom, body_md: bodyMd || null }),
+        body: JSON.stringify(body),
       });
 
-      if (res.ok) {
-        const data = await res.json();
-        window.location.href = `/canon/lore/${data.id}`;
-      } else {
-        const data = await res.json();
-        errorEl.textContent = data.error || 'Failed to create lore entry';
+      const data = await res.json();
+      if (!res.ok) {
+        errorEl.textContent = data.error || data.fields?.map((f: any) => `${f.field}: ${f.message}`).join(', ') || 'Failed to create lore entry.';
         submitBtn.disabled = false;
-        submitBtn.textContent = 'Create Entry';
+        (submitBtn.querySelector('.btn-text') as HTMLElement).style.display = 'inline';
+        (submitBtn.querySelector('.btn-loading') as HTMLElement).style.display = 'none';
+        return;
       }
+
+      window.location.href = `/canon/lore/${data.data.id}`;
     } catch {
-      errorEl.textContent = 'Network error — please try again';
+      errorEl.textContent = 'Network error. Please try again.';
       submitBtn.disabled = false;
-      submitBtn.textContent = 'Create Entry';
+      (submitBtn.querySelector('.btn-text') as HTMLElement).style.display = 'inline';
+      (submitBtn.querySelector('.btn-loading') as HTMLElement).style.display = 'none';
     }
   });
 </script>
+
+<style is:global>
+  .form-page {
+    max-width: 48rem;
+    margin: 0 auto;
+    padding: var(--space-8) var(--space-4);
+  }
+
+  .form-header {
+    margin-bottom: var(--space-8);
+  }
+
+  .back-link {
+    font: var(--md-sys-typescale-body-medium);
+    color: var(--md-sys-color-primary);
+    text-decoration: none;
+    display: inline-block;
+    margin-bottom: var(--space-2);
+  }
+
+  .form-title {
+    font: var(--md-sys-typescale-headline-medium);
+    margin: 0 0 var(--space-4) 0;
+  }
+
+  .lore-form {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-6);
+  }
+
+  .form-field {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+  }
+  .form-field label {
+    font: var(--md-sys-typescale-label-large);
+    color: var(--md-sys-color-on-surface-variant);
+  }
+  .form-field input,
+  .form-field select,
+  .form-field textarea {
+    font: var(--md-sys-typescale-body-large);
+    color: var(--md-sys-color-on-surface);
+    background: var(--md-sys-color-surface-container);
+    border: 1px solid var(--md-sys-color-outline-variant);
+    border-radius: var(--md-sys-shape-corner-small);
+    padding: var(--space-3) var(--space-4);
+    outline: none;
+    transition: border-color var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard);
+  }
+  .form-field input:focus,
+  .form-field select:focus,
+  .form-field textarea:focus {
+    border-color: var(--md-sys-color-primary);
+  }
+  .form-field textarea {
+    resize: vertical;
+    min-height: 200px;
+  }
+
+  .optional-label {
+    font: var(--md-sys-typescale-body-small);
+    color: var(--md-sys-color-on-surface-variant);
+    font-weight: normal;
+  }
+
+  .field-hint {
+    font: var(--md-sys-typescale-body-small);
+    color: var(--md-sys-color-on-surface-variant);
+    margin: var(--space-1) 0 0 0;
+  }
+  .field-hint a { color: var(--md-sys-color-primary); }
+
+  .form-actions {
+    display: flex;
+    gap: var(--space-4);
+    align-items: center;
+    flex-wrap: wrap;
+  }
+
+  .btn-filled {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font: var(--md-sys-typescale-label-large);
+    color: var(--md-sys-color-on-primary);
+    background: var(--md-sys-color-primary);
+    border: none;
+    border-radius: var(--md-sys-shape-corner-full);
+    padding: var(--space-3) var(--space-8);
+    cursor: pointer;
+    transition: opacity var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard);
+  }
+  .btn-filled:hover { opacity: 0.88; }
+  .btn-filled:disabled { opacity: 0.5; cursor: not-allowed; }
+
+  .btn-outlined {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font: var(--md-sys-typescale-label-large);
+    color: var(--md-sys-color-primary);
+    background: transparent;
+    border: 1px solid var(--md-sys-color-outline);
+    border-radius: var(--md-sys-shape-corner-full);
+    padding: var(--space-3) var(--space-8);
+    text-decoration: none;
+    transition: background var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard);
+  }
+  .btn-outlined:hover { background: var(--md-sys-color-primary-container); }
+
+  .form-error {
+    font: var(--md-sys-typescale-body-small);
+    color: var(--md-sys-color-error);
+    min-height: 1.2em;
+  }
+</style>

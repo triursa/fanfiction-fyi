@@ -1,0 +1,151 @@
+---
+export const prerender = false;
+import Base from '../../layouts/Base.astro';
+import { getDrizzle } from '../../lib/db';
+import { series as seriesTable, pseuds, serialWorks, works, tags, taggings } from '../../lib/schema';
+import { eq, sql, count, desc, inArray } from 'drizzle-orm';
+
+const d1 = Astro.locals.runtime.env.DB as D1Database;
+const db = getDrizzle(d1);
+
+const page = Number(Astro.url.searchParams.get('page')) || 1;
+const limit = 20;
+const offset = (page - 1) * limit;
+
+// Series listing with work count — use raw D1 for GROUP BY + subquery
+const seriesResult = await d1.prepare(
+  `SELECT s.*, p.name as creator_name,
+          (SELECT COUNT(*) FROM serial_works WHERE series_id = s.id) as work_count
+   FROM series s
+   JOIN pseuds p ON s.creator_pseud_id = p.id
+   ORDER BY s.updated_at DESC
+   LIMIT ? OFFSET ?`
+).bind(limit, offset).all<any>();
+
+const series = seriesResult.results;
+
+// Enrich with fandom tags and word counts
+for (const s of series) {
+  if (s.work_count > 0) {
+    s.fandoms = await d1.prepare(
+      `SELECT DISTINCT t.name FROM tags t
+       JOIN taggings tg ON t.id = tg.tag_id
+       JOIN serial_works sw ON sw.work_id = tg.work_id
+       WHERE sw.series_id = ?1 AND t.type = 'fandom'
+       LIMIT 3`
+    ).bind(s.id).all<any>().then(r => r.results);
+
+    const stats = await d1.prepare(
+      `SELECT COALESCE(SUM(w.word_count), 0) as total_words FROM serial_works sw JOIN works w ON w.id = sw.work_id WHERE sw.series_id = ?1`
+    ).bind(s.id).first<{ total_words: number }>();
+    s.total_words = stats?.total_words ?? 0;
+  } else {
+    s.fandoms = [];
+    s.total_words = 0;
+  }
+}
+
+const [totalRow] = await db.select({ cnt: count() }).from(seriesTable);
+const totalSeries = totalRow?.cnt ?? 0;
+const totalPages = Math.ceil(totalSeries / limit);
+---
+
+<Base title="Series — fanfiction.fyi">
+  <section class="series-list-page">
+    <header class="series-list-header">
+      <h1>Series</h1>
+      <p class="series-subtitle">Collections of related works — sequels, arcs, and sagas</p>
+    </header>
+
+    {series.length === 0 ? (
+      <div class="empty-state" role="status">
+        <p>No series yet.</p>
+        <a href="/series/new" class="btn-primary">Create a Series</a>
+      </div>
+    ) : (
+      <div class="series-grid">
+        {series.map(s => (
+          <a href={`/series/${s.id}`} class="series-card">
+            <div class="series-card-header">
+              <h2 class="series-card-title">{s.title}</h2>
+              {s.complete ? <span class="series-badge-complete">Complete</span> : <span class="series-badge-wip">WIP</span>}
+            </div>
+            {s.description && <p class="series-card-desc">{s.description.length > 180 ? s.description.slice(0, 180) + '…' : s.description}</p>}
+            <div class="series-card-meta">
+              <span>by {s.creator_name}</span>
+              <span>·</span>
+              <span>{s.work_count} work{s.work_count !== 1 ? 's' : ''}</span>
+              {s.total_words > 0 && <><span>·</span><span>{s.total_words.toLocaleString()} words</span></>}
+              {s.fandoms.length > 0 && (
+                <div class="series-card-fandoms">
+                  {s.fandoms.map((f: any) => <span class="tag-pill">{f.name}</span>)}
+                </div>
+              )}
+            </div>
+          </a>
+        ))}
+      </div>
+    )}
+
+    {totalPages > 1 && (
+      <nav class="pagination">
+        {page > 1 && <a href={`/series?page=${page - 1}`} class="btn-secondary">← Previous</a>}
+        <span class="page-info">Page {page} of {totalPages}</span>
+        {page < totalPages && <a href={`/series?page=${page + 1}`} class="btn-secondary">Next →</a>}
+      </nav>
+    )}
+  </section>
+</Base>
+
+<style is:global>
+  @import '../../styles/theme.css';
+
+  .series-list-page { max-width: var(--reading-width); margin: 0 auto; padding: var(--space-6) 0; }
+  .series-list-header { margin-bottom: var(--space-8); }
+  .series-list-header h1 { font: var(--md-sys-typescale-display-small); color: var(--md-sys-color-on-surface); margin: 0 0 var(--space-2); }
+  .series-subtitle { font: var(--md-sys-typescale-body-large); color: var(--md-sys-color-on-surface-variant); margin: 0; }
+
+  .empty-state { text-align: center; padding: var(--space-12) 0; }
+  .empty-state p { font: var(--md-sys-typescale-body-large); color: var(--md-sys-color-outline); margin: 0 0 var(--space-4); }
+
+  .series-grid { display: flex; flex-direction: column; gap: var(--space-4); }
+
+  .series-card {
+    display: block; padding: var(--space-5);
+    background: var(--md-sys-color-surface-container);
+    border: 1px solid var(--md-sys-color-outline-variant);
+    border-radius: var(--md-sys-shape-corner-large);
+    text-decoration: none; color: var(--md-sys-color-on-surface);
+    transition: background var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard),
+                border-color var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard);
+  }
+  @media (hover: hover) {
+    .series-card:hover {
+      background: var(--md-sys-color-surface-container-high);
+      border-color: var(--md-sys-color-outline);
+    }
+  }
+
+  .series-card-header { display: flex; align-items: center; gap: var(--space-3); flex-wrap: wrap; }
+  .series-card-title { font: var(--md-sys-typescale-title-large); color: var(--md-sys-color-primary); margin: 0; }
+  .series-badge-complete {
+    font: var(--md-sys-typescale-label-small); background: var(--md-sys-color-primary-container);
+    color: var(--md-sys-color-on-primary-container); padding: 2px var(--space-3);
+    border-radius: var(--md-sys-shape-corner-full);
+  }
+  .series-badge-wip {
+    font: var(--md-sys-typescale-label-small); background: var(--md-sys-color-tertiary-container);
+    color: var(--md-sys-color-on-tertiary-container); padding: 2px var(--space-3);
+    border-radius: var(--md-sys-shape-corner-full);
+  }
+  .series-card-desc { font: var(--md-sys-typescale-body-medium); color: var(--md-sys-color-on-surface-variant); margin: var(--space-2) 0; }
+  .series-card-meta { font: var(--md-sys-typescale-body-small); color: var(--md-sys-color-outline); display: flex; gap: var(--space-2); align-items: center; flex-wrap: wrap; }
+  .series-card-fandoms { display: flex; gap: var(--space-1); flex-wrap: wrap; margin-top: var(--space-1); }
+  .tag-pill { font: var(--md-sys-typescale-body-small); background: var(--md-sys-color-secondary-container); color: var(--md-sys-color-on-secondary-container); padding: 2px var(--space-3); border-radius: var(--md-sys-shape-corner-full); }
+
+  .pagination { display: flex; justify-content: center; align-items: center; gap: var(--space-4); margin-top: var(--space-8); }
+  .page-info { font: var(--md-sys-typescale-body-medium); color: var(--md-sys-color-outline); }
+
+  .btn-primary { font: var(--md-sys-typescale-label-large); color: var(--md-sys-color-on-primary); background: var(--md-sys-color-primary); border: none; border-radius: var(--md-sys-shape-corner-full); padding: var(--space-3) var(--space-6); cursor: pointer; text-decoration: none; display: inline-block; }
+  .btn-secondary { font: var(--md-sys-typescale-label-large); color: var(--md-sys-color-primary); background: transparent; border: 1px solid var(--md-sys-color-outline); border-radius: var(--md-sys-shape-corner-full); padding: var(--space-3) var(--space-6); cursor: pointer; text-decoration: none; }
+</style>

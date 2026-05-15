@@ -1,0 +1,445 @@
+---
+/**
+ * Studio: New Work — Create a new work with first chapter.
+ * Auth: required (enforced by middleware default).
+ */
+export const prerender = false;
+import Base from '../../layouts/Base.astro';
+
+const user = Astro.locals.user;
+
+// Fetch the user's pseuds for the pseud selector
+let pseuds: any[] = [];
+try {
+  const res = await fetch(new URL(`/api/pseuds?limit=100&userId=${user.id}`, Astro.url), {
+    headers: { cookie: Astro.request.headers.get('cookie') || '' },
+  });
+  if (res.ok) {
+    const json = await res.json();
+    pseuds = json.data ?? [];
+  }
+} catch {
+  // Non-fatal — form will still render without pseuds
+}
+---
+
+<Base title="New Work — fanfiction.fyi" description="Create a new work on fanfiction.fyi">
+  <section class="studio-page">
+    <div class="studio-header">
+      <a href="/studio" class="back-link">← Back to My Works</a>
+      <h1 class="studio-title">New Work</h1>
+    </div>
+
+    <form id="new-work-form" class="work-form">
+      <div class="form-field">
+        <label for="title">Title</label>
+        <input type="text" id="title" name="title" required maxlength="500" placeholder="Untitled Work" />
+      </div>
+
+      <div class="form-field">
+        <label for="summary">Summary</label>
+        <textarea id="summary" name="summary" rows="4" maxlength="2000" placeholder="A brief summary of your work..."></textarea>
+      </div>
+
+      <div class="form-field">
+        <label for="pseudId">Post As</label>
+        <select id="pseudId" name="pseudId" required>
+          {pseuds.length === 0 ? (
+            <option value="">No pseuds available</option>
+          ) : (
+            pseuds.map((p: any) => (
+              <option value={p.id} selected={p.isDefault}>{p.name}</option>
+            ))
+          )}
+        </select>
+        {pseuds.length === 0 && (
+          <p class="field-hint">You need a pseud to post. <a href="/settings">Create one in settings</a>.</p>
+        )}
+      </div>
+
+      <div class="form-field">
+        <label for="tags-input">Tags</label>
+        <div class="tags-input-wrapper">
+          <div id="tags-container" class="tags-container"></div>
+          <input type="text" id="tags-input" placeholder="Start typing to add tags (e.g. fandom, characters)..." />
+          <div id="tags-suggestions" class="suggestions-dropdown" style="display:none;"></div>
+        </div>
+        <input type="hidden" id="tags-json" name="tags" value="[]" />
+        <p class="field-hint">Press Enter or comma to add a tag. Click × to remove.</p>
+      </div>
+
+      <details class="form-details">
+        <summary class="form-details-summary">First Chapter (optional)</summary>
+        <div class="form-details-content">
+          <div class="form-field">
+            <label for="chapterTitle">Chapter Title</label>
+            <input type="text" id="chapterTitle" name="chapterTitle" maxlength="500" placeholder="Chapter 1" />
+          </div>
+          <div class="form-field">
+            <label for="chapterContent">Chapter Content</label>
+            <textarea id="chapterContent" name="chapterContent" rows="12" placeholder="Write your chapter content in Markdown..."></textarea>
+          </div>
+        </div>
+      </details>
+
+      <div class="form-actions">
+        <button type="submit" class="btn-filled" id="submit-btn">
+          <span class="btn-text">Create Draft</span>
+          <span class="btn-loading" style="display:none;">Creating...</span>
+        </button>
+        <a href="/studio" class="btn-outlined">Cancel</a>
+      </div>
+
+      <div id="form-error" class="form-error" role="alert"></div>
+    </form>
+  </section>
+</Base>
+
+<script>
+  // ─── Tag autocomplete ─────────────────────────────────────────────
+  const TAG_TYPES = ['fandom', 'character', 'relationship', 'freeform', 'rating', 'warning', 'category'];
+  const tagsInput = document.getElementById('tags-input') as HTMLInputElement;
+  const tagsContainer = document.getElementById('tags-container') as HTMLDivElement;
+  const tagsJson = document.getElementById('tags-json') as HTMLInputElement;
+  const suggestions = document.getElementById('tags-suggestions') as HTMLDivElement;
+  let selectedTags: { id?: number; name: string; type: string }[] = [];
+
+  function renderTags() {
+    tagsContainer.innerHTML = '';
+    selectedTags.forEach((tag, idx) => {
+      const pill = document.createElement('span');
+      pill.className = 'tag-pill';
+      pill.innerHTML = `<span class="tag-pill-label">${tag.name}</span><span class="tag-pill-type">${tag.type}</span><button type="button" class="tag-pill-remove" data-idx="${idx}">×</button>`;
+      tagsContainer.appendChild(pill);
+    });
+    tagsJson.value = JSON.stringify(selectedTags);
+
+    // Bind remove handlers
+    tagsContainer.querySelectorAll('.tag-pill-remove').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        const idx = Number((e.currentTarget as HTMLElement).getAttribute('data-idx'));
+        selectedTags.splice(idx, 1);
+        renderTags();
+      });
+    });
+  }
+
+  let debounceTimer: ReturnType<typeof setTimeout>;
+  tagsInput.addEventListener('input', () => {
+    clearTimeout(debounceTimer);
+    const q = tagsInput.value.trim();
+    if (q.length < 2) { suggestions.style.display = 'none'; return; }
+
+    debounceTimer = setTimeout(async () => {
+      try {
+        // Try autocomplete with each tag type
+        const res = await fetch(`/api/tags?q=${encodeURIComponent(q)}&limit=10`);
+        if (res.ok) {
+          const json = await res.json();
+          const items = json.data ?? [];
+          if (items.length === 0) { suggestions.style.display = 'none'; return; }
+
+          suggestions.innerHTML = items.map((t: any) =>
+            `<div class="suggestion-item" data-id="${t.id}" data-name="${t.name}" data-type="${t.type}">
+              <span class="suggestion-name">${t.name}</span>
+              <span class="suggestion-type">${t.type}</span>
+            </div>`
+          ).join('');
+          suggestions.style.display = 'block';
+
+          suggestions.querySelectorAll('.suggestion-item').forEach(el => {
+            el.addEventListener('click', () => {
+              const item = el as HTMLElement;
+              const id = Number(item.dataset.id);
+              const name = item.dataset.name!;
+              const type = item.dataset.type!;
+              if (!selectedTags.some(t => t.id === id)) {
+                selectedTags.push({ id, name, type });
+                renderTags();
+              }
+              tagsInput.value = '';
+              suggestions.style.display = 'none';
+            });
+          });
+        }
+      } catch { /* non-fatal */ }
+    }, 300);
+  });
+
+  // Enter/comma to add freeform tags
+  tagsInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' || e.key === ',') {
+      e.preventDefault();
+      const name = tagsInput.value.trim().replace(/,+$/, '');
+      if (name && !selectedTags.some(t => t.name === name)) {
+        selectedTags.push({ name, type: 'freeform' });
+        renderTags();
+      }
+      tagsInput.value = '';
+      suggestions.style.display = 'none';
+    }
+  });
+
+  // Close suggestions on blur
+  document.addEventListener('click', (e) => {
+    if (!e.target || !(e.target as HTMLElement).closest('.tags-input-wrapper')) {
+      suggestions.style.display = 'none';
+    }
+  });
+
+  // ─── Form submission ──────────────────────────────────────────────
+  const form = document.getElementById('new-work-form') as HTMLFormElement;
+  const errorEl = document.getElementById('form-error') as HTMLElement;
+  const submitBtn = document.getElementById('submit-btn') as HTMLButtonElement;
+
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    errorEl.textContent = '';
+    submitBtn.disabled = true;
+    (submitBtn.querySelector('.btn-text') as HTMLElement).style.display = 'none';
+    (submitBtn.querySelector('.btn-loading') as HTMLElement).style.display = 'inline';
+
+    const title = (document.getElementById('title') as HTMLInputElement).value;
+    const summary = (document.getElementById('summary') as HTMLTextAreaElement).value || undefined;
+    const pseudId = Number((document.getElementById('pseudId') as HTMLSelectElement).value);
+    const tags = JSON.parse(tagsJson.value);
+
+    if (!pseudId) {
+      errorEl.textContent = 'Please select a pseudonym to post as.';
+      submitBtn.disabled = false;
+      (submitBtn.querySelector('.btn-text') as HTMLElement).style.display = 'inline';
+      (submitBtn.querySelector('.btn-loading') as HTMLElement).style.display = 'none';
+      return;
+    }
+
+    try {
+      const res = await fetch('/api/works', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title, summary, pseudId, tags }),
+      });
+
+      const data = await res.json();
+      if (!res.ok) {
+        errorEl.textContent = data.error || data.fields?.map((f: any) => `${f.field}: ${f.message}`).join(', ') || 'Failed to create work.';
+        submitBtn.disabled = false;
+        (submitBtn.querySelector('.btn-text') as HTMLElement).style.display = 'inline';
+        (submitBtn.querySelector('.btn-loading') as HTMLElement).style.display = 'none';
+        return;
+      }
+
+      const workId = data.data.id;
+
+      // If first chapter content provided, create the chapter
+      const chapterTitle = (document.getElementById('chapterTitle') as HTMLInputElement).value;
+      const chapterContent = (document.getElementById('chapterContent') as HTMLTextAreaElement).value;
+      if (chapterTitle || chapterContent) {
+        await fetch(`/api/works/${workId}/chapters`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            title: chapterTitle || 'Chapter 1',
+            contentMd: chapterContent || undefined,
+          }),
+        });
+      }
+
+      window.location.href = `/studio/${workId}/edit`;
+    } catch {
+      errorEl.textContent = 'Network error. Please try again.';
+      submitBtn.disabled = false;
+      (submitBtn.querySelector('.btn-text') as HTMLElement).style.display = 'inline';
+      (submitBtn.querySelector('.btn-loading') as HTMLElement).style.display = 'none';
+    }
+  });
+</script>
+
+<style is:global>
+  .studio-page {
+    max-width: 48rem;
+    margin: 0 auto;
+    padding: var(--space-8) var(--space-4);
+  }
+
+  .studio-header {
+    margin-bottom: var(--space-8);
+  }
+
+  .back-link {
+    font: var(--md-sys-typescale-body-medium);
+    color: var(--md-sys-color-primary);
+    text-decoration: none;
+    display: inline-block;
+    margin-bottom: var(--space-2);
+  }
+
+  .studio-title {
+    font: var(--md-sys-typescale-headline-medium);
+    margin: 0 0 var(--space-4) 0;
+  }
+
+  .work-form {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-6);
+  }
+
+  .form-field {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+  }
+  .form-field label {
+    font: var(--md-sys-typescale-label-large);
+    color: var(--md-sys-color-on-surface-variant);
+  }
+  .form-field input,
+  .form-field select,
+  .form-field textarea {
+    font: var(--md-sys-typescale-body-large);
+    color: var(--md-sys-color-on-surface);
+    background: var(--md-sys-color-surface-container);
+    border: 1px solid var(--md-sys-color-outline-variant);
+    border-radius: var(--md-sys-shape-corner-small);
+    padding: var(--space-3) var(--space-4);
+    outline: none;
+    transition: border-color var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard);
+  }
+  .form-field input:focus,
+  .form-field select:focus,
+  .form-field textarea:focus {
+    border-color: var(--md-sys-color-primary);
+  }
+  .form-field textarea {
+    resize: vertical;
+    min-height: 100px;
+  }
+
+  .field-hint {
+    font: var(--md-sys-typescale-body-small);
+    color: var(--md-sys-color-on-surface-variant);
+    margin: var(--space-1) 0 0 0;
+  }
+  .field-hint a { color: var(--md-sys-color-primary); }
+
+  /* Tags input */
+  .tags-input-wrapper {
+    position: relative;
+  }
+  .tags-container {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-1);
+    margin-bottom: var(--space-2);
+  }
+  .tag-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-1);
+    background: var(--md-sys-color-primary-container);
+    color: var(--md-sys-color-on-primary-container);
+    border-radius: var(--md-sys-shape-corner-full);
+    padding: 2px 10px;
+    font: var(--md-sys-typescale-body-small);
+  }
+  .tag-pill-type {
+    opacity: 0.7;
+    font-size: 0.7rem;
+  }
+  .tag-pill-remove {
+    background: none;
+    border: none;
+    color: var(--md-sys-color-on-primary-container);
+    cursor: pointer;
+    padding: 0;
+    font-size: 1rem;
+    line-height: 1;
+  }
+  .suggestions-dropdown {
+    position: absolute;
+    top: 100%;
+    left: 0;
+    right: 0;
+    background: var(--md-sys-color-surface-container);
+    border: 1px solid var(--md-sys-color-outline-variant);
+    border-radius: var(--md-sys-shape-corner-small);
+    max-height: 200px;
+    overflow-y: auto;
+    z-index: 50;
+  }
+  .suggestion-item {
+    display: flex;
+    justify-content: space-between;
+    padding: var(--space-2) var(--space-4);
+    cursor: pointer;
+    font: var(--md-sys-typescale-body-medium);
+  }
+  .suggestion-item:hover {
+    background: var(--md-sys-color-surface-container-high);
+  }
+  .suggestion-name { color: var(--md-sys-color-on-surface); }
+  .suggestion-type { color: var(--md-sys-color-on-surface-variant); font-size: 0.8rem; }
+
+  /* Collapsible first chapter */
+  .form-details {
+    border: 1px solid var(--md-sys-color-outline-variant);
+    border-radius: var(--md-sys-shape-corner-small);
+    padding: var(--space-4);
+  }
+  .form-details-summary {
+    font: var(--md-sys-typescale-label-large);
+    color: var(--md-sys-color-primary);
+    cursor: pointer;
+  }
+  .form-details-content {
+    margin-top: var(--space-4);
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-4);
+  }
+
+  /* Actions */
+  .form-actions {
+    display: flex;
+    gap: var(--space-4);
+    align-items: center;
+    flex-wrap: wrap;
+  }
+
+  .btn-filled {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font: var(--md-sys-typescale-label-large);
+    color: var(--md-sys-color-on-primary);
+    background: var(--md-sys-color-primary);
+    border: none;
+    border-radius: var(--md-sys-shape-corner-full);
+    padding: var(--space-3) var(--space-8);
+    cursor: pointer;
+    transition: opacity var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard);
+  }
+  .btn-filled:hover { opacity: 0.88; }
+  .btn-filled:disabled { opacity: 0.5; cursor: not-allowed; }
+
+  .btn-outlined {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font: var(--md-sys-typescale-label-large);
+    color: var(--md-sys-color-primary);
+    background: transparent;
+    border: 1px solid var(--md-sys-color-outline);
+    border-radius: var(--md-sys-shape-corner-full);
+    padding: var(--space-3) var(--space-8);
+    text-decoration: none;
+    transition: background var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard);
+  }
+  .btn-outlined:hover { background: var(--md-sys-color-primary-container); }
+
+  .form-error {
+    font: var(--md-sys-typescale-body-small);
+    color: var(--md-sys-color-error);
+    min-height: 1.2em;
+  }
+</style>

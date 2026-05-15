@@ -1,177 +1,193 @@
 ---
 export const prerender = false;
-import Base from '../../layouts/Base.astro';
-import BrowseKeyboardNav from '../../components/BrowseKeyboardNav';
-import { getDrizzle } from '../../lib/db';
-import { works, chapters, tags, taggings, pseuds, creatorships } from '../../lib/schema';
-import { eq, and, isNotNull, desc, sql } from 'drizzle-orm';
+export const config = { auth: 'public' };
+import Base from '@/v2/layouts/Base.astro';
+import WorkCard from '@/v2/components/WorkCard.astro';
 
-const db = getDrizzle(Astro.locals.runtime.env.DB);
+// Pagination + sorting
+const sort = Astro.url.searchParams.get('sort') || 'updated';
+const page = Math.max(1, Number(Astro.url.searchParams.get('page')) || 1);
+const validSorts = ['updated', 'published', 'words'] as const;
+const sortKey = validSorts.includes(sort as any) ? sort : 'updated';
 
-const page = Number(Astro.url.searchParams.get('page')) || 1;
+// Fetch works SSR
+let works: any[] = [];
+let total = 0;
+let errorMsg: string | null = null;
 const limit = 20;
-const offset = (page - 1) * limit;
+const totalPages = Math.max(1, Math.ceil(total / limit));
 
-const worksRows = await db
-  .select({
-    id: works.id,
-    title: works.title,
-    summary: works.summary,
-    wordCount: works.wordCount,
-    complete: works.complete,
-    updatedAt: works.updatedAt,
-    publishedAt: works.publishedAt,
-    chapterCount: sql<number>`count(${chapters.id})`,
-  })
-  .from(works)
-  .leftJoin(chapters, eq(chapters.workId, works.id))
-  .where(isNotNull(works.publishedAt))
-  .groupBy(works.id)
-  .orderBy(desc(works.updatedAt))
-  .limit(limit)
-  .offset(offset);
+try {
+  const res = await fetch(new URL(`/api/works?sort=${sortKey}&page=${page}&limit=${limit}`, Astro.url));
+  if (res.ok) {
+    const json = await res.json();
+    works = json.data ?? [];
+    total = json.total ?? 0;
+  } else {
+    errorMsg = 'Failed to load works.';
+  }
+} catch {
+  errorMsg = 'Network error loading works.';
+}
 
-// Cast to any[] for template compatibility (nested tags/pseuds added below)
-const worksList: any[] = worksRows.map(w => ({
-  ...w,
-  word_count: w.wordCount,
-  updated_at: w.updatedAt,
-  published_at: w.publishedAt,
-  chapter_count: w.chapterCount,
-  tags: [],
-  pseuds: [],
-}));
+const computedTotalPages = Math.max(1, Math.ceil(total / limit));
 
-for (const w of worksList) {
-  w.tags = await db
-    .select({ name: tags.name, type: tags.type })
-    .from(taggings)
-    .innerJoin(tags, eq(taggings.tagId, tags.id))
-    .where(eq(taggings.workId, w.id));
-
-  w.pseuds = await db
-    .select({ name: pseuds.name, icon_key: pseuds.iconKey })
-    .from(creatorships)
-    .innerJoin(pseuds, eq(creatorships.pseudId, pseuds.id))
-    .where(eq(creatorships.workId, w.id));
+function pageUrl(p: number): string {
+  const u = new URL(Astro.url);
+  u.searchParams.set('page', String(p));
+  u.searchParams.set('sort', sortKey);
+  return u.pathname + u.search;
 }
 ---
 
-<Base title="Works — fanfiction.fyi">
-  <section class="works-listing">
-    <h1 class="page-title">Works</h1>
-
-    {worksList.length === 0 && (
-      <div class="empty-state" role="status">
-        <p class="placeholder-text">No works have been published yet.</p>
-        <a href="/works/create" class="empty-state-cta">Post a Work</a>
+<Base title={`Works — fanfiction.fyi`} description="Browse all published works on fanfiction.fyi">
+  <section class="works-page">
+    <div class="works-header">
+      <h1 class="works-title">Works</h1>
+      <div class="works-sort">
+        <label for="sort-select" class="sort-label">Sort by:</label>
+        <select id="sort-select" class="sort-select">
+          <option value="updated" selected={sortKey === 'updated'}>Recently Updated</option>
+          <option value="published" selected={sortKey === 'published'}>Recently Published</option>
+          <option value="words" selected={sortKey === 'words'}>Word Count</option>
+        </select>
       </div>
-    )}
-
-    <div class="works-grid">
-      {worksList.map(w => (
-        <a href={`/works/${w.id}`} class="work-card">
-          <h2 class="work-card__title">{w.title}</h2>
-          <p class="work-card__author">By {w.pseuds.map((p: any, i: number) => (
-            <Fragment>
-              {i > 0 ? ', ' : ''}
-              {p.icon_key && <img class="pseud-icon-sm" src={`/api/storage/${p.icon_key}`} alt="" />}
-              {p.name}
-            </Fragment>
-          ))}</p>
-          {w.summary && <p class="work-card__summary">{w.summary.length > 200 ? w.summary.slice(0, 200) + '…' : w.summary}</p>}
-          <div class="work-card__meta">
-            <span>{w.word_count.toLocaleString()} words</span>
-            <span>·</span>
-            <span>{w.chapter_count} chapter{w.chapter_count !== 1 ? 's' : ''}</span>
-            <span>·</span>
-            <span>{w.complete ? 'Complete' : 'WIP'}</span>
-          </div>
-          <div class="work-card__tags">
-            {w.tags.filter((t: any) => t.type === 'fandom').map((t: any) => <span class="tag-pill">{t.name}</span>)}
-          </div>
-        </a>
-      ))}
     </div>
 
-    {page > 1 && <a href={`/works?page=${page - 1}`} class="btn-secondary">← Previous</a>}
-    {worksList.length === limit && <a href={`/works?page=${page + 1}`} class="btn-secondary">Next →</a>}
-  </section>
+    {errorMsg ? (
+      <p class="error-msg">{errorMsg}</p>
+    ) : works.length === 0 ? (
+      <p class="empty-msg">No works found.</p>
+    ) : (
+      <>
+        <p class="results-count">{total} {total === 1 ? 'work' : 'works'}</p>
+        <div class="works-grid">
+          {works.map((w: any) => (
+            <WorkCard work={w} />
+          ))}
+        </div>
 
-  <BrowseKeyboardNav client:load />
+        {computedTotalPages > 1 && (
+          <nav class="pagination" aria-label="Pagination">
+            {page > 1 && (
+              <a href={pageUrl(page - 1)} class="page-link" rel="prev">← Prev</a>
+            )}
+            <span class="page-info">Page {page} of {computedTotalPages}</span>
+            {page < computedTotalPages && (
+              <a href={pageUrl(page + 1)} class="page-link" rel="next">Next →</a>
+            )}
+          </nav>
+        )}
+      </>
+    )}
+  </section>
 </Base>
 
+<script>
+  const sortSelect = document.getElementById('sort-select') as HTMLSelectElement | null;
+  if (sortSelect) {
+    sortSelect.addEventListener('change', () => {
+      const url = new URL(window.location.href);
+      url.searchParams.set('sort', sortSelect.value);
+      url.searchParams.set('page', '1');
+      window.location.href = url.toString();
+    });
+  }
+</script>
+
 <style is:global>
-  @import '../../styles/theme.css';
+  .works-page {
+    max-width: 72rem;
+    margin: 0 auto;
+    padding: var(--space-8) var(--space-4);
+  }
 
-    .works-listing { max-width: 1200px; margin: 0 auto; padding: 0 var(--space-4); }
-    .page-title { font: var(--md-sys-typescale-headline-medium); color: var(--md-sys-color-on-surface); margin: 0 0 var(--space-6); }
-    .placeholder-text { font: var(--md-sys-typescale-body-large); color: var(--md-sys-color-outline); font-style: italic; }
-    .empty-state { text-align: center; padding: var(--space-8) 0; }
+  .works-header {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: var(--space-4);
+    flex-wrap: wrap;
+    margin-bottom: var(--space-6);
+  }
 
-    .works-grid {
-      display: grid;
-      grid-template-columns: 1fr;
-      gap: var(--space-4);
-    }
+  .works-title {
+    font: var(--md-sys-typescale-headline-medium);
+    margin: 0;
+  }
 
-    @media (min-width: 768px) {
-      .works-grid {
-        grid-template-columns: repeat(2, 1fr);
-      }
-    }
+  .works-sort {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+  }
 
-    .empty-state-cta {
-      display: inline-block;
-      margin-top: var(--space-4);
-      font: var(--md-sys-typescale-label-large);
-      color: var(--md-sys-color-on-primary);
-      background: var(--md-sys-color-primary);
-      border-radius: var(--md-sys-shape-corner-full);
-      padding: var(--space-3) var(--space-6);
-      text-decoration: none;
-      transition: background var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard);
-    }
-    .empty-state-cta:hover { background: var(--md-sys-color-primary-container); color: var(--md-sys-color-on-primary-container); text-decoration: none; }
+  .sort-label {
+    font: var(--md-sys-typescale-label-large);
+    color: var(--md-sys-color-on-surface-variant);
+  }
 
-  .work-card {
-    display: block; padding: var(--space-4) var(--space-6);
+  .sort-select {
+    font: var(--md-sys-typescale-body-medium);
+    color: var(--md-sys-color-on-surface);
     background: var(--md-sys-color-surface-container);
     border: 1px solid var(--md-sys-color-outline-variant);
-    border-radius: var(--md-sys-shape-corner-large);
-    text-decoration: none; color: var(--md-sys-color-on-surface);
-    transition: background var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard);
-  }
-  .work-card:hover {
-    background: var(--md-sys-color-surface-container-high);
-    text-decoration: none;
+    border-radius: var(--md-sys-shape-corner-small);
+    padding: var(--space-2) var(--space-3);
+    cursor: pointer;
   }
 
-  .work-card__title { font: var(--md-sys-typescale-title-large); color: var(--md-sys-color-primary); margin: 0 0 var(--space-1); }
-  .work-card__author { font: var(--md-sys-typescale-body-medium); color: var(--md-sys-color-on-surface-variant); margin: 0 0 var(--space-2); }
-  .pseud-icon-sm { width: 20px; height: 20px; border-radius: 50%; object-fit: cover; vertical-align: middle; margin-right: 4px; }
-  .work-card__summary { font: var(--md-sys-typescale-body-medium); color: var(--md-sys-color-on-surface-variant); margin: 0 0 var(--space-2); }
-  .work-card__meta { font: var(--md-sys-typescale-body-small); color: var(--md-sys-color-outline); display: flex; gap: var(--space-2); flex-wrap: wrap; margin-bottom: var(--space-2); }
-  .work-card__tags { display: flex; flex-wrap: wrap; gap: var(--space-1); }
-
-  .tag-pill {
-    font: var(--md-sys-typescale-body-small);
-    background: var(--md-sys-color-secondary-container);
-    color: var(--md-sys-color-on-secondary-container);
-    padding: 2px var(--space-3);
-    border-radius: var(--md-sys-shape-corner-full);
+  .results-count {
+    font: var(--md-sys-typescale-body-medium);
+    color: var(--md-sys-color-on-surface-variant);
+    margin: 0 0 var(--space-4) 0;
   }
 
-  .btn-secondary {
-    display: inline-block;
+  .works-grid {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: var(--space-4);
+  }
+
+  @media (min-width: 640px) {
+    .works-grid {
+      grid-template-columns: repeat(2, 1fr);
+    }
+  }
+
+  .pagination {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: var(--space-4);
+    margin-top: var(--space-8);
+  }
+
+  .page-link {
     font: var(--md-sys-typescale-label-large);
     color: var(--md-sys-color-primary);
-    background: transparent;
-    border: 1px solid var(--md-sys-color-outline);
-    border-radius: var(--md-sys-shape-corner-full);
-    padding: var(--space-3) var(--space-6);
-    cursor: pointer;
     text-decoration: none;
-    margin: var(--space-4) var(--space-2) 0 0;
+    padding: var(--space-2) var(--space-4);
+    border: 1px solid var(--md-sys-color-outline-variant);
+    border-radius: var(--md-sys-shape-corner-full);
+    transition: background var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard);
+  }
+  .page-link:hover {
+    background: var(--md-sys-color-primary-container);
+  }
+
+  .page-info {
+    font: var(--md-sys-typescale-body-medium);
+    color: var(--md-sys-color-on-surface-variant);
+  }
+
+  .error-msg {
+    color: var(--md-sys-color-error);
+    font: var(--md-sys-typescale-body-large);
+  }
+
+  .empty-msg {
+    color: var(--md-sys-color-on-surface-variant);
+    font: var(--md-sys-typescale-body-large);
   }
 </style>

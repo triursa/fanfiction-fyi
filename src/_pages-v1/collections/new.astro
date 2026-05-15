@@ -1,0 +1,282 @@
+---
+export const prerender = false;
+import Base from '../../layouts/Base.astro';
+import { getAuth, checkApproved } from '../../lib/auth';
+import { getDrizzle } from '../../lib/db';
+
+const d1 = Astro.locals.runtime.env.DB as D1Database;
+const db = getDrizzle(d1);
+const auth = await getAuth(d1, Astro.request);
+if (!auth) return Astro.redirect('/login');
+const approval = checkApproved(auth);
+if ('forbidden' in approval) {
+  if (approval.forbidden === 'unapproved') return Astro.redirect('/pending-approval');
+  if (approval.forbidden === 'suspended') return Astro.redirect(`/login?error=suspended&until=${encodeURIComponent(approval.suspendedUntil ?? '')}`);
+  return Astro.redirect('/login?error=banned');
+}
+---
+
+<Base title="New Collection — fanfiction.fyi">
+  <div class="collection-form-page">
+    <div class="collection-form-card">
+      <h1 class="collection-form-title">New Collection</h1>
+      <p class="collection-form-subtitle">Create a collection to curate and organize works.</p>
+
+      <form id="collection-form" class="collection-form">
+        <div class="form-field">
+          <label for="coll-name">URL Name</label>
+          <input type="text" id="coll-name" name="name" required placeholder="my-collection" pattern="[a-z0-9_-]{2,64}" title="Lowercase letters, numbers, hyphens, underscores. 2-64 characters." />
+          <span class="field-helper">This will be used in the collection URL. Lowercase letters, numbers, hyphens, underscores only.</span>
+        </div>
+
+        <div class="form-field">
+          <label for="coll-title">Title</label>
+          <input type="text" id="coll-title" name="title" required placeholder="My Awesome Collection" />
+        </div>
+
+        <div class="form-field">
+          <label for="coll-description">Description <span class="optional-tag">(optional)</span></label>
+          <textarea id="coll-description" name="description" rows="4" placeholder="What's this collection about?"></textarea>
+        </div>
+
+        <div class="form-field">
+          <label for="coll-privacy">Privacy</label>
+          <select id="coll-privacy" name="privacy">
+            <option value="public">Public — Visible to everyone</option>
+            <option value="unrevealed">Unrevealed — Hidden until reveal</option>
+            <option value="private">Private — Only visible to you</option>
+          </select>
+        </div>
+
+        {auth.pseuds.length > 1 && (
+          <div class="form-field">
+            <label for="coll-pseud">Post as Pseud</label>
+            <select id="coll-pseud" name="pseud_id">
+              {auth.pseuds.map(p => (
+                <option value={p.id} selected={p.isDefault === 1}>{p.name}</option>
+              ))}
+            </select>
+          </div>
+        )}
+        {auth.pseuds.length === 1 && (
+          <input type="hidden" name="pseud_id" value={auth.pseuds[0].id} />
+        )}
+
+        <div id="coll-error" class="form-error" role="alert"></div>
+
+        <div class="form-actions">
+          <button type="submit" class="btn-primary" id="submit-btn">Create Collection</button>
+          <a href="/collections" class="btn-secondary">Cancel</a>
+        </div>
+      </form>
+    </div>
+  </div>
+</Base>
+
+<style is:global>
+  .collection-form-page {
+    max-width: 600px;
+    margin: 0 auto;
+    padding: var(--space-8) var(--space-4);
+  }
+
+  .collection-form-card {
+    padding: var(--space-8);
+    border-radius: 28px;
+    background: var(--md-sys-color-surface-container);
+    border: 1px solid var(--md-sys-color-outline-variant);
+  }
+
+  .collection-form-title {
+    font: var(--md-sys-typescale-headline-medium);
+    color: var(--md-sys-color-on-surface);
+    margin: 0 0 var(--space-1) 0;
+  }
+
+  .collection-form-subtitle {
+    font: var(--md-sys-typescale-body-medium);
+    color: var(--md-sys-color-on-surface-variant);
+    margin: 0 0 var(--space-6) 0;
+  }
+
+  .collection-form {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-4);
+  }
+
+  .form-field {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+  }
+
+  .form-field label {
+    font: var(--md-sys-typescale-label-large);
+    color: var(--md-sys-color-on-surface-variant);
+  }
+
+  .form-field input,
+  .form-field textarea,
+  .form-field select {
+    font: var(--md-sys-typescale-body-large);
+    color: var(--md-sys-color-on-surface);
+    background: var(--md-sys-color-surface-container);
+    border: 1px solid var(--md-sys-color-outline-variant);
+    border-radius: var(--md-sys-shape-corner-small);
+    padding: var(--space-3) var(--space-4);
+    outline: none;
+    transition: border-color var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard);
+  }
+
+  .form-field input:focus,
+  .form-field textarea:focus,
+  .form-field select:focus {
+    border-color: var(--md-sys-color-primary);
+  }
+
+  .form-field input.field-error,
+  .form-field textarea.field-error,
+  .form-field select.field-error {
+    border-color: var(--md-sys-color-error);
+  }
+
+  .field-helper {
+    font: var(--md-sys-typescale-body-small);
+    color: var(--md-sys-color-on-surface-variant);
+  }
+
+  .optional-tag {
+    font: var(--md-sys-typescale-body-small);
+    opacity: 0.7;
+  }
+
+  .form-error {
+    font: var(--md-sys-typescale-body-small);
+    color: var(--md-sys-color-error);
+    min-height: 1.2em;
+  }
+
+  .form-actions {
+    display: flex;
+    gap: var(--space-3);
+    margin-top: var(--space-2);
+  }
+
+  .btn-primary {
+    font: var(--md-sys-typescale-label-large);
+    color: var(--md-sys-color-on-primary);
+    background: var(--md-sys-color-primary);
+    border: none;
+    border-radius: var(--md-sys-shape-corner-full);
+    padding: var(--space-3) var(--space-6);
+    cursor: pointer;
+    transition: background var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard);
+  }
+
+  .btn-primary:hover {
+    background: var(--md-sys-color-primary-container);
+    color: var(--md-sys-color-on-primary-container);
+  }
+
+  .btn-primary:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
+  .btn-secondary {
+    font: var(--md-sys-typescale-label-large);
+    color: var(--md-sys-color-on-surface-variant);
+    background: var(--md-sys-color-surface-container-high);
+    border: 1px solid var(--md-sys-color-outline-variant);
+    border-radius: var(--md-sys-shape-corner-full);
+    padding: var(--space-3) var(--space-6);
+    cursor: pointer;
+    text-decoration: none;
+    display: inline-flex;
+    align-items: center;
+    transition: background var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard);
+  }
+
+  .btn-secondary:hover {
+    background: var(--md-sys-color-surface-container-highest);
+  }
+</style>
+
+<script>
+  const form = document.getElementById('collection-form') as HTMLFormElement;
+  const errorEl = document.getElementById('coll-error')!;
+  const btn = document.getElementById('submit-btn') as HTMLButtonElement;
+  const btnText = btn.textContent;
+  const nameInput = document.getElementById('coll-name') as HTMLInputElement;
+
+  // Auto-generate URL name from title
+  const titleInput = document.getElementById('coll-title') as HTMLInputElement;
+  if (titleInput && nameInput) {
+    titleInput.addEventListener('input', () => {
+      if (!nameInput.dataset.manuallyEdited) {
+        nameInput.value = titleInput.value
+          .toLowerCase()
+          .replace(/[^a-z0-9_-]/g, '-')
+          .replace(/-+/g, '-')
+          .replace(/^-|-$/g, '')
+          .slice(0, 64);
+      }
+    });
+    nameInput.addEventListener('input', () => {
+      nameInput.dataset.manuallyEdited = 'true';
+    });
+  }
+
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    errorEl.textContent = '';
+
+    const name = nameInput.value.trim();
+    const title = titleInput.value.trim();
+
+    if (!name || !title) {
+      errorEl.textContent = 'URL name and title are required';
+      return;
+    }
+
+    btn.disabled = true;
+    btn.textContent = 'Creating…';
+
+    try {
+      const res = await fetch('/api/collections', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name,
+          title,
+          description: (document.getElementById('coll-description') as HTMLTextAreaElement).value.trim() || undefined,
+          privacy: (document.getElementById('coll-privacy') as HTMLSelectElement).value,
+          pseud_id: Number((form.querySelector('[name="pseud_id"]') as HTMLInputElement | HTMLSelectElement).value),
+        }),
+      });
+
+      if (res.ok || res.status === 201) {
+        const data = await res.json();
+        window.location.href = `/collections/${data.id}`;
+      } else {
+        let data: any;
+        try { data = await res.json(); } catch { data = {}; }
+        errorEl.textContent = data.error || 'Failed to create collection';
+      }
+    } catch {
+      errorEl.textContent = 'Network error — please check your connection and try again';
+    } finally {
+      btn.disabled = false;
+      btn.textContent = btnText;
+    }
+  });
+
+  // Clear errors on input
+  form.querySelectorAll('input, textarea, select').forEach(el => {
+    el.addEventListener('input', () => {
+      el.classList.remove('field-error');
+      errorEl.textContent = '';
+    });
+  });
+</script>

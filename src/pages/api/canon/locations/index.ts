@@ -1,189 +1,114 @@
-export const prerender = false;
-
-import { getDrizzle } from '@/lib/db';
-import { requireAuth } from '@/lib/auth';
-import { corsHeaders, handleCors, cacheHeaders } from '@/lib/cors';
-import { markdownToHtml } from '@/lib/markdown';
 import type { APIRoute } from 'astro';
-import { eq, and, sql } from 'drizzle-orm';
-import { locations } from '@/lib/schema';
+import type { D1Database } from '@cloudflare/workers-types';
+import { getDb } from '@/v2/lib/db';
+import { requireAuth, checkApproved } from '@/v2/lib/auth';
+import { validateBody, validateQuery, createLocationSchema, browseLocationSchema } from '@/v2/lib/validation';
+import { locations, pseuds } from '@/v2/lib/schema/index';
+import { eq, desc, count } from 'drizzle-orm';
 
-export const OPTIONS: APIRoute = async ({ request }) => {
-  return handleCors(request) ?? new Response(null, { status: 405 });
-};
+export const config = { auth: 'optional' as const };
 
-function sanitizeFts(q: string): string {
-  return q
-    .replace(/["()*+^:-]/g, '')
-    .replace(/\b(AND|OR|NOT|NEAR)\b/gi, '')
-    .trim();
-}
+// ─── GET /api/canon/locations — Browse locations ───────────────
 
-function slugify(name: string): string {
-  let slug = name
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/(^-|-$)/g, '');
-  if (!slug) slug = `entry-${Date.now()}`;
-  return slug;
-}
-
-async function ensureUniqueSlug(
-  db: ReturnType<typeof getDrizzle>,
-  baseSlug: string,
-  excludeId?: number,
-): Promise<string> {
-  let slug = baseSlug;
-  let suffix = 2;
-  while (true) {
-    const conditions = [eq(locations.slug, slug)];
-    if (excludeId) {
-      conditions.push(sql`${locations.id} != ${excludeId}`);
-    }
-    const existing = await db.select({ id: locations.id })
-      .from(locations)
-      .where(and(...conditions))
-      .get();
-    if (!existing) return slug;
-    slug = `${baseSlug}-${suffix++}`;
-  }
-}
-
-// GET /api/canon/locations — Browse/search locations
-export const GET: APIRoute = async ({ url, locals, request }) => {
-  const cors = corsHeaders(request);
+export const GET: APIRoute = async ({ request, url, locals }) => {
   const d1 = locals.runtime.env.DB as D1Database;
+  const db = getDb(d1);
 
-  const rawQ = url.searchParams.get('q')?.trim() || '';
-  const fandomTagId = url.searchParams.get('fandom_tag_id') || '';
-  const parentLocationId = url.searchParams.get('parent_location_id') || '';
-  const page = Math.max(Number(url.searchParams.get('page') || 1), 1);
-  const limit = Math.min(Number(url.searchParams.get('limit') || 20), 100);
+  const query = validateQuery(url, browseLocationSchema);
+  const { page, limit, type } = query;
   const offset = (page - 1) * limit;
 
-  try {
-    const sanitizedQ = rawQ ? sanitizeFts(rawQ) : '';
-    let fromClause: string;
-    const conditions: string[] = [];
-    const bindings: unknown[] = [];
-    let idx = 1;
-
-    if (sanitizedQ) {
-      fromClause = `locations_fts f JOIN locations l ON f.rowid = l.id`;
-      conditions.push(`locations_fts MATCH ?${idx++}`);
-      bindings.push(sanitizedQ);
-    } else {
-      fromClause = `locations l`;
-    }
-
-    if (fandomTagId) {
-      conditions.push(`l.fandom_tag_id = ?${idx++}`);
-      bindings.push(Number(fandomTagId));
-    }
-
-    if (parentLocationId) {
-      conditions.push(`l.parent_location_id = ?${idx++}`);
-      bindings.push(Number(parentLocationId));
-    }
-
-    const whereClause = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
-
-    // Count
-    const countRow = await d1.prepare(`SELECT COUNT(*) as total FROM ${fromClause} ${whereClause}`).bind(...bindings).first<{ total: number }>();
-    const total = countRow?.total ?? 0;
-
-    // Data with parent name and fandom name
-    const dataSql = `
-      SELECT l.*, p.name as parent_name, t.name as fandom_name
-      FROM ${fromClause}
-      LEFT JOIN locations p ON l.parent_location_id = p.id
-      LEFT JOIN tags t ON l.fandom_tag_id = t.id
-      ${whereClause}
-      ORDER BY l.updated_at DESC
-      LIMIT ?${idx++} OFFSET ?${idx++}
-    `;
-    const dataBindings = [...bindings, limit, offset];
-
-    const { results: locs } = await d1.prepare(dataSql).bind(...dataBindings).all<any>();
-
-    return new Response(
-      JSON.stringify({ locations: locs, total, page, limit }),
-      { headers: { 'Content-Type': 'application/json', ...cors, ...cacheHeaders('public') } },
-    );
-  } catch (e: any) {
-    return new Response(
-      JSON.stringify({ error: e.message }),
-      { status: 500, headers: { 'Content-Type': 'application/json', ...cors } },
-    );
+  // Build where conditions
+  let whereConditions;
+  if (type) {
+    whereConditions = eq(locations.type, type);
   }
+
+  // Count total
+  const [{ total }] = await db
+    .select({ total: count() })
+    .from(locations)
+    .where(whereConditions);
+
+  // Fetch locations with pseud name
+  const locationRows = await db
+    .select({
+      id: locations.id,
+      name: locations.name,
+      description: locations.description,
+      type: locations.type,
+      parentId: locations.parentId,
+      pseudId: locations.pseudId,
+      createdAt: locations.createdAt,
+      updatedAt: locations.updatedAt,
+      pseudName: pseuds.name,
+    })
+    .from(locations)
+    .innerJoin(pseuds, eq(locations.pseudId, pseuds.id))
+    .where(whereConditions)
+    .orderBy(desc(locations.createdAt))
+    .limit(limit)
+    .offset(offset);
+
+  return new Response(JSON.stringify({ data: locationRows, total, page, limit }), {
+    status: 200,
+    headers: { 'Content-Type': 'application/json' },
+  });
 };
 
-// POST /api/canon/locations — Create location
+// ─── POST /api/canon/locations — Create a location ────────────
+
 export const POST: APIRoute = async ({ request, locals }) => {
   const d1 = locals.runtime.env.DB as D1Database;
-  const db = getDrizzle(d1);
-  const cors = corsHeaders(request);
+  const db = getDb(d1);
+
+  // Require auth + approved
   const auth = await requireAuth(d1, request);
-  if (!auth) {
-    return new Response(
-      JSON.stringify({ error: 'Unauthorized' }),
-      { status: 401, headers: { 'Content-Type': 'application/json', ...cors } },
-    );
-  }
+  checkApproved(auth);
 
-  let body: any;
-  try {
-    body = await request.json();
-  } catch {
-    return new Response(
-      JSON.stringify({ error: 'Invalid JSON' }),
-      { status: 400, headers: { 'Content-Type': 'application/json', ...cors } },
-    );
-  }
+  // Validate body
+  const [data, error] = await validateBody(request, createLocationSchema);
+  if (error) return error;
 
-  const { name, description_md, fandom_tag_id, parent_location_id } = body || {};
-  if (!name) {
-    return new Response(
-      JSON.stringify({ error: 'name is required' }),
-      { status: 400, headers: { 'Content-Type': 'application/json', ...cors } },
-    );
-  }
+  // Verify the pseud belongs to this user
+  const pseud = await db
+    .select()
+    .from(pseuds)
+    .where(eq(pseuds.id, data.pseudId))
+    .get();
 
-  const descriptionHtml = description_md ? markdownToHtml(description_md) : null;
-  const baseSlug = slugify(name);
-  const pseudId = auth.pseuds[0]?.id ?? null;
-
-  try {
-    const slug = await ensureUniqueSlug(db, baseSlug);
-
-    await db.insert(locations).values({
-      name,
-      slug,
-      descriptionMd: description_md ?? null,
-      descriptionHtml,
-      fandomTagId: fandom_tag_id ? Number(fandom_tag_id) : null,
-      parentLocationId: parent_location_id ? Number(parent_location_id) : null,
-      createdBy: pseudId,
-      updatedBy: pseudId,
+  if (!pseud || pseud.userId !== auth.user.id) {
+    return new Response(JSON.stringify({ error: 'Pseud not found or does not belong to you' }), {
+      status: 403,
+      headers: { 'Content-Type': 'application/json' },
     });
-
-    // Retrieve the created location using raw D1 for self-join
-    const { results: [created] } = await d1.prepare(
-      `SELECT l.*, p.name as parent_name, t.name as fandom_name
-       FROM locations l
-       LEFT JOIN locations p ON l.parent_location_id = p.id
-       LEFT JOIN tags t ON l.fandom_tag_id = t.id
-       WHERE l.slug = ?1`
-    ).bind(slug).all<any>();
-
-    return new Response(
-      JSON.stringify(created),
-      { status: 201, headers: { 'Content-Type': 'application/json', ...cors } },
-    );
-  } catch (e: any) {
-    return new Response(
-      JSON.stringify({ error: e.message }),
-      { status: 500, headers: { 'Content-Type': 'application/json', ...cors } },
-    );
   }
+
+  // Validate parentId if provided
+  if (data.parentId) {
+    const parent = await db.select({ id: locations.id }).from(locations).where(eq(locations.id, data.parentId)).get();
+    if (!parent) {
+      return new Response(JSON.stringify({ error: 'Parent location not found' }), {
+        status: 400,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
+  }
+
+  // Create location
+  const [inserted] = await db
+    .insert(locations)
+    .values({
+      name: data.name,
+      description: data.description ?? '',
+      type: data.type,
+      parentId: data.parentId ?? null,
+      pseudId: data.pseudId,
+    })
+    .returning();
+
+  return new Response(JSON.stringify({ data: inserted }), {
+    status: 201,
+    headers: { 'Content-Type': 'application/json' },
+  });
 };

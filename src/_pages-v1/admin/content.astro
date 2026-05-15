@@ -1,0 +1,276 @@
+---
+export const prerender = false;
+import Base from '@/layouts/Base.astro';
+import { getDrizzle } from '@/lib/db';
+import { UserRole, ROLE_LEVEL } from '@/lib/types';
+import { users, sessions } from '@/lib/schema';
+import { eq, and, gt, sql } from 'drizzle-orm';
+
+// Auth gate: mod+ required
+const cookie = Astro.request.headers.get('cookie') ?? '';
+const sessionMatch = cookie.match(/session=([a-f0-9]+)/);
+if (!sessionMatch) return Astro.redirect('/login');
+
+const d1 = Astro.locals.runtime.env.DB as D1Database;
+const db = getDrizzle(d1);
+const session = await db.select({ userId: sessions.userId }).from(sessions).where(and(eq(sessions.token, sessionMatch[1]), gt(sessions.expiresAt, sql`datetime('now')`))).get();
+if (!session) return Astro.redirect('/login');
+
+const currentUser = await db.select({ id: users.id, email: users.email, role: users.role }).from(users).where(eq(users.id, session.userId)).get();
+if (!currentUser) return Astro.redirect('/login');
+
+const userLevel = ROLE_LEVEL[currentUser.role as UserRole] ?? 0;
+if (userLevel < ROLE_LEVEL[UserRole.Mod]) return Astro.redirect('/');
+
+// Recent comments with JOINs — use raw D1 for multi-table joins
+const { results: commentRows } = await d1.prepare(`
+  SELECT c.id, c.content, c.created_at, c.work_id, w.title as work_title, p.name as pseud_name
+  FROM comments c
+  JOIN works w ON w.id = c.work_id
+  JOIN pseuds p ON p.id = c.pseud_id
+  ORDER BY c.created_at DESC
+  LIMIT 50
+`).all<{
+  id: number; content: string; created_at: string; work_id: number; work_title: string; pseud_name: string;
+}>();
+
+// Recent published works with JOINs — use raw D1
+const { results: workRows } = await d1.prepare(`
+  SELECT w.id, w.title, w.published_at, w.word_count, p.name as author_name
+  FROM works w
+  JOIN creatorships cs ON cs.work_id = w.id AND cs.role = 'author'
+  JOIN pseuds p ON p.id = cs.pseud_id
+  WHERE w.published_at IS NOT NULL
+  ORDER BY w.published_at DESC
+  LIMIT 25
+`).all<{
+  id: number; title: string; published_at: string; word_count: number; author_name: string;
+}>();
+
+// Map snake_case results to camelCase for template consistency
+const allComments = (commentRows ?? []).map((c) => ({
+  id: c.id,
+  content: c.content,
+  createdAt: c.created_at,
+  workId: c.work_id,
+  workTitle: c.work_title,
+  pseudName: c.pseud_name,
+}));
+
+const allWorks = (workRows ?? []).map((w) => ({
+  id: w.id,
+  title: w.title,
+  publishedAt: w.published_at,
+  wordCount: w.word_count,
+  authorName: w.author_name,
+}));
+---
+
+<Base title="Content Moderation — Admin">
+  <h1 class="admin-heading">Content Moderation</h1>
+
+  <h2 class="section-heading">Recent Comments</h2>
+  <div class="comments-list">
+    {allComments.map(c => (
+      <div class="comment-card" data-comment-id={c.id}>
+        <div class="comment-meta">
+          <span class="comment-author">{c.pseudName}</span>
+          <span class="comment-work">on <a href={`/works/${c.workId}`}>{c.workTitle}</a></span>
+          <span class="comment-date">{new Date(c.createdAt).toLocaleString()}</span>
+        </div>
+        <div class="comment-body">{c.content.length > 300 ? c.content.slice(0, 300) + '…' : c.content}</div>
+        <button class="btn-delete-comment" data-comment-id={c.id}>Delete</button>
+      </div>
+    ))}
+    {allComments.length === 0 && <p class="empty-state">No comments found.</p>}
+  </div>
+
+  <h2 class="section-heading">Recent Published Works</h2>
+  <div class="works-list">
+    {allWorks.map(w => (
+      <div class="work-card">
+        <div class="work-info">
+          <a href={`/works/${w.id}`} class="work-title">{w.title}</a>
+          <span class="work-meta">by {w.authorName} &middot; {w.wordCount} words &middot; {new Date(w.publishedAt).toLocaleDateString()}</span>
+        </div>
+        <a href={`/works/${w.id}/edit`} class="btn-edit">Edit</a>
+      </div>
+    ))}
+    {allWorks.length === 0 && <p class="empty-state">No published works found.</p>}
+  </div>
+
+  <div id="toast" class="toast hidden"></div>
+</Base>
+
+<script>
+  document.querySelectorAll('.btn-delete-comment').forEach(btn => {
+    btn.addEventListener('click', async (e) => {
+      const button = e.target as HTMLButtonElement;
+      const commentId = button.dataset.commentId;
+      if (!confirm('Delete this comment?')) return;
+      try {
+        const res = await fetch(`/api/admin/comments/${commentId}`, { method: 'DELETE' });
+        if (!res.ok) {
+          const err = await res.json();
+          showToast(err.error || 'Failed to delete comment', true);
+        } else {
+          const card = button.closest('.comment-card') as HTMLElement;
+          card.style.opacity = '0.4';
+          button.disabled = true;
+          button.textContent = 'Deleted';
+          showToast('Comment deleted');
+        }
+      } catch {
+        showToast('Network error', true);
+      }
+    });
+  });
+
+  function showToast(msg: string, isError = false) {
+    const toast = document.getElementById('toast')!;
+    toast.textContent = msg;
+    toast.className = 'toast' + (isError ? ' toast-error' : '') + ' toast-show';
+    setTimeout(() => { toast.className = 'toast hidden'; }, 2500);
+  }
+</script>
+
+<style>
+  .admin-heading {
+    font: var(--md-sys-typescale-headline-large);
+    color: var(--md-sys-color-on-surface);
+    margin-bottom: var(--space-6);
+  }
+
+  .section-heading {
+    font: var(--md-sys-typescale-headline-medium);
+    color: var(--md-sys-color-on-surface);
+    margin: var(--space-8) 0 var(--space-4) 0;
+  }
+
+  .comments-list, .works-list {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-3);
+  }
+
+  .comment-card {
+    background: var(--md-sys-color-surface-container);
+    border: 1px solid var(--md-sys-color-outline-variant);
+    border-radius: var(--md-sys-shape-corner-medium);
+    padding: var(--space-4);
+    transition: opacity var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard);
+  }
+
+  .comment-meta {
+    font: var(--md-sys-typescale-label-large);
+    color: var(--md-sys-color-on-surface-variant);
+    display: flex;
+    gap: var(--space-3);
+    margin-bottom: var(--space-2);
+  }
+
+  .comment-author {
+    color: var(--md-sys-color-primary);
+  }
+
+  .comment-work a {
+    color: var(--md-sys-color-primary);
+  }
+
+  .comment-body {
+    font: var(--md-sys-typescale-body-medium);
+    color: var(--md-sys-color-on-surface);
+    margin-bottom: var(--space-2);
+  }
+
+  .btn-delete-comment {
+    background: var(--md-sys-color-error-container);
+    color: var(--md-sys-color-on-error-container);
+    border: none;
+    border-radius: var(--md-sys-shape-corner-small);
+    padding: var(--space-1) var(--space-3);
+    font: var(--md-sys-typescale-label-large);
+    cursor: pointer;
+  }
+
+  .btn-delete-comment:hover {
+    filter: brightness(1.1);
+  }
+
+  .work-card {
+    background: var(--md-sys-color-surface-container);
+    border: 1px solid var(--md-sys-color-outline-variant);
+    border-radius: var(--md-sys-shape-corner-medium);
+    padding: var(--space-4);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+
+  .work-title {
+    font: var(--md-sys-typescale-title-medium);
+    color: var(--md-sys-color-primary);
+  }
+
+  .work-meta {
+    font: var(--md-sys-typescale-body-small);
+    color: var(--md-sys-color-on-surface-variant);
+  }
+
+  .work-info {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+  }
+
+  .btn-edit {
+    background: var(--md-sys-color-primary-container);
+    color: var(--md-sys-color-on-primary-container);
+    border-radius: var(--md-sys-shape-corner-small);
+    padding: var(--space-2) var(--space-4);
+    font: var(--md-sys-typescale-label-large);
+    text-decoration: none;
+    white-space: nowrap;
+  }
+
+  .btn-edit:hover {
+    background: var(--md-sys-color-primary);
+    color: var(--md-sys-color-on-primary);
+    text-decoration: none;
+  }
+
+  .empty-state {
+    color: var(--md-sys-color-on-surface-variant);
+    font: var(--md-sys-typescale-body-large);
+    text-align: center;
+    padding: var(--space-8);
+  }
+
+  .toast {
+    position: fixed;
+    bottom: var(--space-8);
+    left: 50%;
+    transform: translateX(-50%);
+    padding: var(--space-3) var(--space-6);
+    border-radius: var(--md-sys-shape-corner-medium);
+    background: var(--md-sys-color-surface-container-highest);
+    color: var(--md-sys-color-on-surface);
+    font: var(--md-sys-typescale-body-medium);
+    z-index: 1000;
+    transition: opacity 0.3s;
+  }
+
+  .toast-error {
+    background: var(--md-sys-color-error-container);
+    color: var(--md-sys-color-on-error-container);
+  }
+
+  .toast-show {
+    opacity: 1;
+  }
+
+  .hidden {
+    opacity: 0;
+    pointer-events: none;
+  }
+</style>

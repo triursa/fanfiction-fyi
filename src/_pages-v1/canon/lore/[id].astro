@@ -1,0 +1,272 @@
+---
+export const prerender = false;
+import Base from '../../../layouts/Base.astro';
+import { markdownToHtml } from '../../../lib/markdown';
+import { getAuth } from '../../../lib/auth';
+import { getDrizzle } from '../../../lib/db';
+import { loreEntries, entityReferences, loreEdits, works, tags } from '../../../lib/schema';
+import { eq, and, desc, sql } from 'drizzle-orm';
+
+const drz = getDrizzle(Astro.locals.runtime.env.DB as D1Database);
+const d1 = Astro.locals.runtime.env.DB as D1Database;
+const auth = await getAuth(d1, Astro.request);
+
+const id = Astro.params.id;
+if (!id) return Astro.redirect('/canon');
+
+let entry: any = null;
+let worksList: any[] = [];
+let editHistory: any[] = [];
+
+try {
+  entry = await drz.select().from(loreEntries).where(eq(loreEntries.id, Number(id))).get();
+} catch {
+  // Table may not exist
+}
+
+if (!entry) return Astro.redirect('/canon');
+
+// Fetch works referencing this lore entry — via entity_references join
+try {
+  worksList = await drz
+    .select({
+      id: works.id,
+      title: works.title,
+      wordCount: works.wordCount,
+      updatedAt: works.updatedAt,
+      authors: sql<string>`(SELECT GROUP_CONCAT(p.name, ', ') FROM pseuds p JOIN creatorships c ON p.id = c.pseud_id WHERE c.work_id = ${works.id})`,
+    })
+    .from(entityReferences)
+    .innerJoin(works, eq(entityReferences.workId, works.id))
+    .where(and(eq(entityReferences.entityType, 'lore'), eq(entityReferences.entityId, entry.id)))
+    .orderBy(desc(works.updatedAt))
+    .limit(20)
+    .all();
+} catch {
+  worksList = [];
+}
+
+// Fetch edit history
+try {
+  editHistory = await drz
+    .select()
+    .from(loreEdits)
+    .where(eq(loreEdits.loreEntryId, entry.id))
+    .orderBy(desc(loreEdits.createdAt))
+    .limit(20)
+    .all();
+} catch {
+  editHistory = [];
+}
+
+// Get fandom name from tag if available
+let fandomName: string | null = null;
+if (entry.fandomTagId) {
+  try {
+    const fandomTag = await drz.select({ name: tags.name }).from(tags).where(eq(tags.id, entry.fandomTagId)).get();
+    fandomName = fandomTag?.name ?? null;
+  } catch {
+    fandomName = null;
+  }
+}
+
+const bodyHtml = markdownToHtml(entry.bodyMd || '');
+const canEdit = auth && (auth.user.id === entry.createdBy || ['admin', 'mod', 'founder'].includes(auth.user.role));
+---
+
+<Base title={`${entry.title} — Canon`}>
+  <section class="lore-detail">
+    <article class="lore-article">
+      <h1 class="page-title">{entry.title}</h1>
+
+      <div class="lore-badges">
+        {entry.fandom && <span class="m3-chip lore-badge lore-badge--fandom">{entry.fandom}</span>}
+        {entry.category && <span class="m3-chip lore-badge lore-badge--category">{entry.category}</span>}
+      </div>
+
+      <div class="lore-body prose" set:html={bodyHtml} />
+
+      {canEdit && (
+        <a href={`/canon/lore/${entry.id}/edit`} class="m3-btn-filled lore-edit-btn">Edit Entry</a>
+      )}
+    </article>
+
+    <!-- Works referencing -->
+    {works.length > 0 && (
+      <section class="lore-works">
+        <h2 class="section-title">Works Referencing</h2>
+        <div class="works-list">
+          {works.map(w => (
+            <a href={`/works/${w.id}`} class="work-ref-card">
+              <span class="work-ref__title">{w.title}</span>
+              <span class="work-ref__meta">
+                {w.authors && <Fragment>by {w.authors} · </Fragment>}
+                {Number(w.word_count).toLocaleString()} words
+              </span>
+            </a>
+          ))}
+        </div>
+      </section>
+    )}
+
+    <!-- Edit History -->
+    {editHistory.length > 0 && (
+      <section class="lore-history">
+        <h2 class="section-title">Edit History</h2>
+        <ol class="edit-timeline">
+          {editHistory.map(edit => (
+            <li class="edit-timeline__item">
+              <span class="edit-timeline__date">{new Date(edit.created_at).toLocaleDateString()}</span>
+              <span class="edit-timeline__desc">{edit.description || 'Updated entry'}</span>
+            </li>
+          ))}
+        </ol>
+      </section>
+    )}
+  </section>
+</Base>
+
+<style is:global>
+  @import '../../../styles/theme.css';
+
+  .lore-detail { max-width: 800px; margin: 0 auto; }
+
+  .page-title {
+    font: var(--md-sys-typescale-headline-large);
+    color: var(--md-sys-color-on-surface);
+    margin: 0 0 var(--space-3);
+  }
+
+  .lore-badges {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-1);
+    margin-bottom: var(--space-6);
+  }
+  .lore-badge--fandom {
+    background: var(--md-sys-color-secondary-container);
+    color: var(--md-sys-color-on-secondary-container);
+  }
+  .lore-badge--category {
+    background: var(--md-sys-color-tertiary-container);
+    color: var(--md-sys-color-on-tertiary-container);
+  }
+
+  .lore-body {
+    font: var(--md-sys-typescale-body-large);
+    color: var(--md-sys-color-on-surface);
+    line-height: 1.75;
+  }
+  .lore-body p { margin: 0 0 var(--space-4); }
+  .lore-body h2 {
+    font: var(--md-sys-typescale-title-large);
+    color: var(--md-sys-color-on-surface);
+    margin: var(--space-6) 0 var(--space-2);
+  }
+  .lore-body h3 {
+    font: var(--md-sys-typescale-title-medium);
+    color: var(--md-sys-color-on-surface);
+    margin: var(--space-4) 0 var(--space-2);
+  }
+
+  .lore-edit-btn {
+    display: inline-block;
+    margin-top: var(--space-6);
+  }
+
+  .m3-btn-filled {
+    font: var(--md-sys-typescale-label-large);
+    color: var(--md-sys-color-on-primary);
+    background: var(--md-sys-color-primary);
+    border: none;
+    border-radius: var(--md-sys-shape-corner-full);
+    padding: var(--space-2) var(--space-6);
+    cursor: pointer;
+    text-decoration: none;
+    transition: background var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard);
+  }
+  .m3-btn-filled:hover {
+    background: var(--md-sys-color-primary-container);
+    color: var(--md-sys-color-on-primary-container);
+    text-decoration: none;
+  }
+
+  /* Works Referencing */
+  .section-title {
+    font: var(--md-sys-typescale-title-medium);
+    color: var(--md-sys-color-on-surface);
+    margin: var(--space-8) 0 var(--space-3);
+    padding-bottom: var(--space-2);
+    border-bottom: 1px solid var(--md-sys-color-outline-variant);
+  }
+  .works-list {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+  }
+  .work-ref-card {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    padding: var(--space-3) var(--space-4);
+    background: var(--md-sys-color-surface-container);
+    border: 1px solid var(--md-sys-color-outline-variant);
+    border-radius: var(--md-sys-shape-corner-medium);
+    text-decoration: none;
+    color: var(--md-sys-color-on-surface);
+    transition: background var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard);
+  }
+  .work-ref-card:hover {
+    background: var(--md-sys-color-surface-container-high);
+    text-decoration: none;
+  }
+  .work-ref__title {
+    font: var(--md-sys-typescale-title-small);
+    color: var(--md-sys-color-primary);
+  }
+  .work-ref__meta {
+    font: var(--md-sys-typescale-body-small);
+    color: var(--md-sys-color-outline);
+  }
+
+  /* Edit History */
+  .edit-timeline {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+  }
+  .edit-timeline__item {
+    display: flex;
+    gap: var(--space-3);
+    padding: var(--space-2) 0;
+    border-left: 2px solid var(--md-sys-color-outline-variant);
+    padding-left: var(--space-4);
+    position: relative;
+  }
+  .edit-timeline__item::before {
+    content: '';
+    position: absolute;
+    left: -5px;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--md-sys-color-primary);
+  }
+  .edit-timeline__date {
+    font: var(--md-sys-typescale-body-small);
+    color: var(--md-sys-color-outline);
+    white-space: nowrap;
+  }
+  .edit-timeline__desc {
+    font: var(--md-sys-typescale-body-medium);
+    color: var(--md-sys-color-on-surface-variant);
+  }
+
+  .m3-chip {
+    font: var(--md-sys-typescale-label-small);
+    padding: 4px var(--space-3);
+    border-radius: var(--md-sys-shape-corner-full);
+  }
+</style>

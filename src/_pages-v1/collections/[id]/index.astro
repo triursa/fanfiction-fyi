@@ -1,0 +1,490 @@
+---
+export const prerender = false;
+import Base from '../../../layouts/Base.astro';
+import { getDrizzle } from '../../../lib/db';
+import { getAuth } from '../../../lib/auth';
+import { collections, pseuds as pseudsTable, works as worksTable, collectionItems } from '../../../lib/schema';
+import { eq, and, isNotNull, sql } from 'drizzle-orm';
+
+const collectionId = Number(Astro.params.id);
+if (!collectionId) return Astro.redirect('/collections');
+
+const d1 = Astro.locals.runtime.env.DB as D1Database;
+const db = getDrizzle(d1);
+
+const collectionRows = await db.select({
+  id: collections.id,
+  name: collections.name,
+  title: collections.title,
+  description: collections.description,
+  privacy: collections.privacy,
+  createdAt: collections.createdAt,
+  updatedAt: collections.updatedAt,
+  ownerPseudId: collections.ownerPseudId,
+  ownerName: pseudsTable.name,
+})
+  .from(collections)
+  .innerJoin(pseudsTable, eq(collections.ownerPseudId, pseudsTable.id))
+  .where(eq(collections.id, collectionId))
+  .get();
+
+const collection = collectionRows ? {
+  ...collectionRows,
+  owner_name: collectionRows.ownerName,
+  created_at: collectionRows.createdAt,
+} : null;
+
+if (!collection) return Astro.redirect('/collections');
+
+// Check if current user owns this collection (needed before privacy check)
+const authUser = await getAuth(d1, Astro.request);
+const isOwner = authUser ? authUser.pseuds.some(p => p.id === collection.ownerPseudId) : false;
+
+// Non-owners can only see public/unrevealed collections
+if (!['public', 'unrevealed'].includes(collection.privacy) && !isOwner) return Astro.redirect('/collections');
+
+const workRows = await db.select({
+  id: worksTable.id,
+  title: worksTable.title,
+  summary: worksTable.summary,
+  wordCount: worksTable.wordCount,
+  publishedAt: worksTable.publishedAt,
+})
+  .from(worksTable)
+  .innerJoin(collectionItems, eq(worksTable.id, collectionItems.workId))
+  .where(and(eq(collectionItems.collectionId, collectionId), isNotNull(worksTable.publishedAt)))
+  .all();
+
+const works = workRows.map(w => ({
+  ...w,
+  word_count: w.wordCount,
+  published_at: w.publishedAt,
+}));
+---
+
+<Base title={`${collection.name} — fanfiction.fyi`}>
+  <section class="collection-detail">
+    <header class="collection-header">
+      <h1 class="collection-title">{collection.name}</h1>
+      <span class={`privacy-badge privacy-badge--${collection.privacy}`}>{collection.privacy}</span>
+      <div class="collection-meta">
+        <span>Curated by <strong>{collection.owner_name}</strong></span>
+        <span>·</span>
+        <span>Created {new Date(collection.created_at).toLocaleDateString()}</span>
+      </div>
+      {collection.description && <p class="collection-description">{collection.description}</p>}
+      {isOwner && (
+        <div class="collection-owner-actions">
+          <a href={`/collections/${collection.id}/edit`} class="btn-edit">Edit Collection</a>
+          <button type="button" id="delete-collection-btn" class="btn-delete" data-collection-id={collection.id}>Delete Collection</button>
+        </div>
+      )}
+    </header>
+
+    <div class="collection-works">
+      <h2 class="section-title">Works ({works.length})</h2>
+
+      {isOwner && (
+        <div class="add-work-section">
+          <button type="button" id="add-work-btn" class="btn-add-work">+ Add Work</button>
+          <div id="add-work-dialog" class="add-work-dialog" style="display:none;">
+            <input type="text" id="work-search-input" placeholder="Search works by title…" class="form-input" />
+            <div id="work-search-results" class="work-search-results"></div>
+          </div>
+        </div>
+      )}
+
+      {works.length === 0 && (
+        <p class="placeholder-text">This collection is empty.{isOwner && ' Add works using the button above.'}</p>
+      )}
+
+      <div class="works-grid">
+        {works.map(w => (
+          <div class="work-card-wrapper">
+            <a href={`/works/${w.id}`} class="work-card">
+              <h3 class="work-card__title">{w.title}</h3>
+              {w.summary && <p class="work-card__summary">{w.summary.length > 200 ? w.summary.slice(0, 200) + '…' : w.summary}</p>}
+              <div class="work-card__meta">
+                <span>{w.word_count.toLocaleString()} words</span>
+                {w.published_at && <><span>·</span><span>Published {new Date(w.published_at).toLocaleDateString()}</span></>}
+              </div>
+            </a>
+            {isOwner && (
+              <button type="button" class="btn-remove-work" data-work-id={w.id} data-work-title={w.title}>Remove</button>
+            )}
+          </div>
+        ))}
+      </div>
+    </div>
+  </section>
+</Base>
+
+<style is:global>
+  @import '../../../styles/theme.css';
+
+  .collection-detail { max-width: 900px; margin: 0 auto; }
+
+  .collection-header {
+    margin-bottom: var(--space-8);
+  }
+
+  .collection-owner-actions {
+    display: flex;
+    gap: var(--space-3);
+    margin-top: var(--space-4);
+  }
+
+  .btn-edit, .btn-delete {
+    font: var(--md-sys-typescale-label-large);
+    border: none;
+    border-radius: var(--md-sys-shape-corner-full);
+    padding: var(--space-2) var(--space-5);
+    cursor: pointer;
+    text-decoration: none;
+    display: inline-flex;
+    align-items: center;
+    transition: background var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard);
+  }
+
+  .btn-edit {
+    background: var(--md-sys-color-secondary-container);
+    color: var(--md-sys-color-on-secondary-container);
+  }
+
+  .btn-edit:hover {
+    background: var(--md-sys-color-secondary);
+    color: var(--md-sys-color-on-secondary);
+  }
+
+  .btn-delete {
+    background: var(--md-sys-color-error-container);
+    color: var(--md-sys-color-on-error-container);
+  }
+
+  .btn-delete:hover {
+    background: var(--md-sys-color-error);
+    color: var(--md-sys-color-on-error);
+  }
+
+  .collection-title {
+    font: var(--md-sys-typescale-headline-large);
+    color: var(--md-sys-color-on-surface);
+    margin: 0 0 var(--space-2);
+    display: inline;
+    margin-right: var(--space-2);
+  }
+
+  .collection-meta {
+    font: var(--md-sys-typescale-body-medium);
+    color: var(--md-sys-color-on-surface-variant);
+    display: flex;
+    gap: var(--space-2);
+    flex-wrap: wrap;
+    margin-top: var(--space-2);
+  }
+
+  .collection-description {
+    font: var(--md-sys-typescale-body-large);
+    color: var(--md-sys-color-on-surface-variant);
+    margin: var(--space-4) 0 0;
+    line-height: 1.6;
+  }
+
+  .section-title {
+    font: var(--md-sys-typescale-title-large);
+    color: var(--md-sys-color-on-surface);
+    margin: 0 0 var(--space-4);
+  }
+
+  .placeholder-text {
+    font: var(--md-sys-typescale-body-large);
+    color: var(--md-sys-color-outline);
+    font-style: italic;
+  }
+
+  .works-grid {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-4);
+  }
+
+  .work-card {
+    display: block;
+    padding: var(--space-4) var(--space-6);
+    background: var(--md-sys-color-surface-container);
+    border: 1px solid var(--md-sys-color-outline-variant);
+    border-radius: var(--md-sys-shape-corner-large);
+    text-decoration: none;
+    color: var(--md-sys-color-on-surface);
+    transition: background var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard);
+  }
+  .work-card:hover {
+    background: var(--md-sys-color-surface-container-high);
+    text-decoration: none;
+  }
+
+  .work-card__title {
+    font: var(--md-sys-typescale-title-large);
+    color: var(--md-sys-color-primary);
+    margin: 0 0 var(--space-1);
+  }
+  .work-card__summary {
+    font: var(--md-sys-typescale-body-medium);
+    color: var(--md-sys-color-on-surface-variant);
+    margin: 0 0 var(--space-2);
+  }
+  .work-card__meta {
+    font: var(--md-sys-typescale-body-small);
+    color: var(--md-sys-color-outline);
+    display: flex;
+    gap: var(--space-2);
+    flex-wrap: wrap;
+  }
+
+  /* ── Privacy Badges ── */
+  .privacy-badge {
+    font: var(--md-sys-typescale-body-small);
+    padding: 2px var(--space-3);
+    border-radius: var(--md-sys-shape-corner-full);
+    text-transform: capitalize;
+    white-space: nowrap;
+    vertical-align: middle;
+  }
+  .privacy-badge--public {
+    background: rgba(72, 168, 108, 0.15);
+    color: #48A86C;
+  }
+  .privacy-badge--unrevealed {
+    background: rgba(218, 165, 32, 0.15);
+    color: #DAA520;
+  }
+  .privacy-badge--hidden {
+    background: rgba(255, 100, 100, 0.15);
+    color: #FF6464;
+  }
+  .privacy-badge--private {
+    background: rgba(140, 145, 153, 0.15);
+    color: var(--md-sys-color-outline);
+  }
+
+  .add-work-section {
+    margin-bottom: var(--space-4);
+  }
+
+  .btn-add-work {
+    font: var(--md-sys-typescale-label-large);
+    background: var(--md-sys-color-primary-container);
+    color: var(--md-sys-color-on-primary-container);
+    border: none;
+    border-radius: var(--md-sys-shape-corner-full);
+    padding: var(--space-2) var(--space-5);
+    cursor: pointer;
+  }
+
+  .btn-add-work:hover {
+    background: var(--md-sys-color-primary);
+    color: var(--md-sys-color-on-primary);
+  }
+
+  .add-work-dialog {
+    margin-top: var(--space-3);
+    padding: var(--space-4);
+    background: var(--md-sys-color-surface-container);
+    border-radius: var(--md-sys-shape-corner-medium);
+    border: 1px solid var(--md-sys-color-outline-variant);
+  }
+
+  .work-search-results {
+    margin-top: var(--space-2);
+    max-height: 200px;
+    overflow-y: auto;
+  }
+
+  .work-search-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: var(--space-2) var(--space-3);
+    cursor: pointer;
+    border-radius: 4px;
+  }
+
+  .work-search-item:hover {
+    background: var(--md-sys-color-surface-container-high);
+  }
+
+  .work-search-item-title {
+    font: var(--md-sys-typescale-body-medium);
+    color: var(--md-sys-color-on-surface);
+  }
+
+  .work-search-item-add {
+    font: var(--md-sys-typescale-label-small);
+    background: var(--md-sys-color-primary-container);
+    color: var(--md-sys-color-on-primary-container);
+    border: none;
+    border-radius: 4px;
+    padding: 0.2rem 0.5rem;
+    cursor: pointer;
+  }
+
+  .work-card-wrapper {
+    position: relative;
+  }
+
+  .btn-remove-work {
+    position: absolute;
+    top: var(--space-2);
+    right: var(--space-2);
+    font: var(--md-sys-typescale-label-small);
+    background: var(--md-sys-color-error-container);
+    color: var(--md-sys-color-on-error-container);
+    border: none;
+    border-radius: 4px;
+    padding: 0.2rem 0.5rem;
+    cursor: pointer;
+    opacity: 0;
+    transition: opacity var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard);
+  }
+
+  .work-card-wrapper:hover .btn-remove-work {
+    opacity: 1;
+  }
+
+  .form-input {
+    font: var(--md-sys-typescale-body-large);
+    padding: var(--space-2) var(--space-3);
+    background: var(--md-sys-color-surface-container-lowest);
+    border: 1px solid var(--md-sys-color-outline-variant);
+    border-radius: var(--md-sys-shape-corner-small);
+    color: var(--md-sys-color-on-surface);
+    width: 100%;
+    box-sizing: border-box;
+  }
+
+  .form-input:focus {
+    outline: 2px solid var(--md-sys-color-primary);
+    outline-offset: -1px;
+  }
+</style>
+
+<script>
+  const collectionId = document.querySelector('[data-collection-id]')?.dataset.collectionId;
+
+  // Delete collection
+  const deleteBtn = document.getElementById('delete-collection-btn');
+  if (deleteBtn) {
+    deleteBtn.addEventListener('click', async () => {
+      if (!confirm('Delete this collection? This cannot be undone.')) return;
+      const cId = deleteBtn.dataset.collectionId;
+      try {
+        const res = await fetch(`/api/collections/${cId}`, {
+          method: 'DELETE',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ id: Number(cId) }),
+        });
+        if (res.ok) {
+          window.location.href = '/collections';
+        } else {
+          const data = await res.json().catch(() => ({}));
+          alert(data.error || 'Failed to delete collection');
+        }
+      } catch {
+        alert('Network error');
+      }
+    });
+  }
+
+  // Add work - toggle dialog
+  const addWorkBtn = document.getElementById('add-work-btn');
+  const addWorkDialog = document.getElementById('add-work-dialog');
+  const workSearchInput = document.getElementById('work-search-input') as HTMLInputElement;
+  const workSearchResults = document.getElementById('work-search-results');
+
+  if (addWorkBtn && addWorkDialog) {
+    addWorkBtn.addEventListener('click', () => {
+      const visible = addWorkDialog.style.display !== 'none';
+      addWorkDialog.style.display = visible ? 'none' : 'block';
+      if (!visible) workSearchInput?.focus();
+    });
+
+    // Search works
+    let searchTimeout: number;
+    workSearchInput?.addEventListener('input', () => {
+      clearTimeout(searchTimeout);
+      const query = workSearchInput.value.trim();
+      if (!query) { workSearchResults!.innerHTML = ''; return; }
+      searchTimeout = window.setTimeout(async () => {
+        try {
+          const res = await fetch(`/api/search?q=${encodeURIComponent(query)}&limit=5`);
+          if (res.ok) {
+            const data = await res.json();
+            workSearchResults!.innerHTML = '';
+            for (const w of data.works || []) {
+              const item = document.createElement('div');
+              item.className = 'work-search-item';
+              item.innerHTML = `<span class="work-search-item-title">${w.title}</span><button class="work-search-item-add" data-work-id="${w.id}">Add</button>`;
+              workSearchResults!.appendChild(item);
+            }
+          }
+        } catch { /* ignore */ }
+      }, 300);
+    });
+  }
+
+  // Add work from search results
+  document.addEventListener('click', async (e: Event) => {
+    const target = e.target as HTMLElement;
+    if (!target.classList.contains('work-search-item-add')) return;
+    const workId = Number(target.dataset.workId);
+    const cId = Number(document.querySelector('[data-collection-id]')?.dataset.collectionId);
+    if (!workId || !cId) return;
+    target.textContent = 'Adding…';
+    target.setAttribute('disabled', 'true');
+    try {
+      const res = await fetch('/api/collectionItems', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ collection_id: cId, work_id: workId }),
+      });
+      if (res.ok) {
+        window.location.reload();
+      } else {
+        const data = await res.json().catch(() => ({}));
+        alert(data.error || 'Failed to add work');
+        target.textContent = 'Add';
+        target.removeAttribute('disabled');
+      }
+    } catch {
+      alert('Network error');
+      target.textContent = 'Add';
+      target.removeAttribute('disabled');
+    }
+  });
+
+  // Remove work from collection
+  document.querySelectorAll('.btn-remove-work').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const workId = Number((btn as HTMLElement).dataset.workId);
+      const workTitle = (btn as HTMLElement).dataset.workTitle;
+      const cId = Number(document.querySelector('[data-collection-id]')?.dataset.collectionId);
+      if (!workId || !cId) return;
+      if (!confirm(`Remove "${workTitle}" from this collection?`)) return;
+      try {
+        const res = await fetch('/api/collectionItems', {
+          method: 'DELETE',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ collection_id: cId, work_id: workId }),
+        });
+        if (res.ok) {
+          window.location.reload();
+        } else {
+          const data = await res.json().catch(() => ({}));
+          alert(data.error || 'Failed to remove work');
+        }
+      } catch {
+        alert('Network error');
+      }
+    });
+  });
+</script>

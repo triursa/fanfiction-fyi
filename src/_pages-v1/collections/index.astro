@@ -1,0 +1,163 @@
+---
+export const prerender = false;
+import Base from '../../layouts/Base.astro';
+import { getDrizzle } from '../../lib/db';
+import { getAuth, checkApproved } from '../../lib/auth';
+import { collections as collectionsTable, collectionItems } from '../../lib/schema';
+import { sql, desc, inArray } from 'drizzle-orm';
+
+const db = getDrizzle(Astro.locals.runtime.env.DB as D1Database);
+
+const collectionRows = await db.select({
+  id: collectionsTable.id,
+  name: collectionsTable.name,
+  description: collectionsTable.description,
+  privacy: collectionsTable.privacy,
+  createdAt: collectionsTable.createdAt,
+  itemCount: sql<number>`(SELECT COUNT(*) FROM collection_items WHERE collection_id = ${collectionsTable.id})`.as('item_count'),
+})
+  .from(collectionsTable)
+  .where(sql`${collectionsTable.privacy} IN ('public', 'unrevealed')`)
+  .groupBy(collectionsTable.id)
+  .orderBy(desc(collectionsTable.createdAt))
+  .limit(50)
+  .all();
+
+const collections = collectionRows.map(c => ({
+  ...c,
+  // Keep snake_case aliases for template compatibility
+  created_at: c.createdAt,
+}));
+
+// Check if user is logged in and approved
+const d1b = Astro.locals.runtime.env.DB as D1Database;
+const authUser = await getAuth(d1b, Astro.request);
+const canCreate = authUser ? (() => { const a = checkApproved(authUser); return !('forbidden' in a); })() : false;
+---
+
+<Base title="Collections — fanfiction.fyi">
+  <section class="collections-listing">
+    <div class="page-header-row">
+      <h1 class="page-title">Collections</h1>
+      {canCreate && (
+        <a href="/collections/new" class="btn-create">+ New Collection</a>
+      )}
+    </div>
+
+    {collections.length === 0 && (
+      <p class="placeholder-text">No public collections yet. Be the first to curate one!</p>
+    )}
+
+    <div class="collections-grid">
+      {collections.map(c => (
+        <a href={`/collections/${c.id}`} class="collection-card">
+          <div class="collection-card__header">
+            <h2 class="collection-card__name">{c.name}</h2>
+            <span class={`privacy-badge privacy-badge--${c.privacy}`}>{c.privacy}</span>
+          </div>
+          {c.description && <p class="collection-card__description">{c.description.length > 180 ? c.description.slice(0, 180) + '…' : c.description}</p>}
+          <div class="collection-card__meta">
+            <span>{c.item_count} work{c.item_count !== 1 ? 's' : ''}</span>
+            <span>·</span>
+            <span>Created {new Date(c.created_at).toLocaleDateString()}</span>
+          </div>
+        </a>
+      ))}
+    </div>
+  </section>
+</Base>
+
+<style is:global>
+  @import '../../styles/theme.css';
+
+  .collections-listing { max-width: 900px; margin: 0 auto; }
+  .page-header-row { display: flex; align-items: center; justify-content: space-between; margin-bottom: var(--space-6); }
+  .page-title { font: var(--md-sys-typescale-headline-medium); color: var(--md-sys-color-on-surface); margin: 0; }
+  .btn-create { font: var(--md-sys-typescale-label-large); color: var(--md-sys-color-on-primary); background: var(--md-sys-color-primary); border: none; border-radius: var(--md-sys-shape-corner-full); padding: var(--space-2) var(--space-5); cursor: pointer; text-decoration: none; display: inline-flex; align-items: center; transition: background var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard); }
+  .btn-create:hover { background: var(--md-sys-color-primary-container); color: var(--md-sys-color-on-primary-container); }
+  .placeholder-text { font: var(--md-sys-typescale-body-large); color: var(--md-sys-color-outline); font-style: italic; }
+
+  .collections-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+    gap: var(--space-4);
+  }
+
+  .collection-card {
+    display: block;
+    padding: var(--space-4) var(--space-6);
+    background: var(--md-sys-color-surface-container);
+    border: 1px solid var(--md-sys-color-outline-variant);
+    border-radius: var(--md-sys-shape-corner-large);
+    text-decoration: none;
+    color: var(--md-sys-color-on-surface);
+    transition: background var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard);
+  }
+  .collection-card:hover {
+    background: var(--md-sys-color-surface-container-high);
+    text-decoration: none;
+  }
+
+  .collection-card__header {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    margin-bottom: var(--space-2);
+  }
+  .collection-card__name {
+    font: var(--md-sys-typescale-title-large);
+    color: var(--md-sys-color-primary);
+    margin: 0;
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .collection-card__description {
+    font: var(--md-sys-typescale-body-medium);
+    color: var(--md-sys-color-on-surface-variant);
+    margin: 0 0 var(--space-2);
+  }
+
+  .collection-card__meta {
+    font: var(--md-sys-typescale-body-small);
+    color: var(--md-sys-color-outline);
+    display: flex;
+    gap: var(--space-2);
+    flex-wrap: wrap;
+  }
+
+  /* ── Privacy Badges ── */
+  .privacy-badge {
+    font: var(--md-sys-typescale-body-small);
+    padding: 2px var(--space-3);
+    border-radius: var(--md-sys-shape-corner-full);
+    text-transform: capitalize;
+    white-space: nowrap;
+    flex-shrink: 0;
+  }
+  .privacy-badge--public {
+    background: rgba(72, 168, 108, 0.15);
+    color: #48A86C;
+  }
+  .privacy-badge--unrevealed {
+    background: rgba(218, 165, 32, 0.15);
+    color: #DAA520;
+  }
+  .privacy-badge--hidden {
+    background: rgba(255, 100, 100, 0.15);
+    color: #FF6464;
+  }
+  .privacy-badge--private {
+    background: rgba(140, 145, 153, 0.15);
+    color: var(--md-sys-color-outline);
+  }
+
+  @media (max-width: 768px) {
+    .collections-grid {
+      grid-template-columns: 1fr;
+    }
+  }
+</style>

@@ -1,99 +1,97 @@
 ---
+/**
+ * New Series Page — Auth Required
+ * Form to create a series: title, description, pseud.
+ */
 export const prerender = false;
-import Base from '../../layouts/Base.astro';
-import { getAuth } from '../../lib/auth';
+// Auth required — default middleware enforces login
+import Base from '@/v2/layouts/Base.astro';
 
-// Auth required
-const db = Astro.locals.runtime.env.DB as D1Database;
-const auth = await getAuth(db, Astro.request);
-if (!auth) return Astro.redirect('/login');
+const user = Astro.locals.user;
 
-const pseuds = auth.pseuds;
-const defaultPseud = pseuds[0]?.id ?? null;
+// Fetch user's pseuds for the pseud selector
+let pseuds: any[] = [];
+try {
+  const res = await fetch(new URL(`/api/pseuds?limit=100&userId=${user.id}`, Astro.url), {
+    headers: { cookie: Astro.request.headers.get('cookie') || '' },
+  });
+  if (res.ok) {
+    const json = await res.json();
+    pseuds = json.data ?? [];
+  }
+} catch {
+  // Non-fatal — form will still render without pseuds
+}
 ---
 
-<Base title="New Series — fanfiction.fyi">
-  <section class="new-series-page">
-    <h1>Create a Series</h1>
-    <p class="form-hint">Group related works together — sequels, arcs, or a shared universe.</p>
+<Base title="New Series — fanfiction.fyi" description="Create a new series on fanfiction.fyi">
+  <section class="form-page">
+    <div class="form-header">
+      <a href="/series" class="back-link">← Back to Series</a>
+      <h1 class="form-title">New Series</h1>
+    </div>
 
-    <form id="series-form" class="series-form">
-      <div class="form-group">
+    <form id="new-series-form" class="series-form">
+      <div class="form-field">
         <label for="title">Title</label>
-        <input type="text" id="title" name="title" required placeholder="e.g., The Halcyon Cycle" class="input-field" />
+        <input type="text" id="title" name="title" required maxlength="500" placeholder="My Series Title" />
       </div>
 
-      <div class="form-group">
-        <label for="description">Description <span class="optional">(optional)</span></label>
-        <textarea id="description" name="description" rows="4" placeholder="What ties these works together?" class="input-field"></textarea>
+      <div class="form-field">
+        <label for="description">Description</label>
+        <textarea id="description" name="description" rows="5" maxlength="5000" placeholder="Describe what this series is about…"></textarea>
       </div>
 
-      <div class="form-group">
-        <label for="pseud_id">Post As</label>
-        {pseuds.length > 1 ? (
-          <select id="pseud_id" name="pseud_id" class="input-field">
-            {pseuds.map(p => <option value={p.id} selected={p.id === defaultPseud}>{p.name}</option>)}
-          </select>
-        ) : (
-          <input type="hidden" id="pseud_id" name="pseud_id" value={defaultPseud} />
-          <span class="pseud-display">{pseuds[0]?.name}</span>
+      <div class="form-field">
+        <label for="pseudId">Post As</label>
+        <select id="pseudId" name="pseudId" required>
+          {pseuds.length === 0 ? (
+            <option value="">No pseuds available</option>
+          ) : (
+            pseuds.map((p: any) => (
+              <option value={p.id} selected={p.isDefault}>{p.name}</option>
+            ))
+          )}
+        </select>
+        {pseuds.length === 0 && (
+          <p class="field-hint">You need a pseud to create a series. <a href="/settings">Create one in settings</a>.</p>
         )}
       </div>
 
-      <div id="form-error" class="form-error" style="display:none;"></div>
-
       <div class="form-actions">
-        <button type="submit" class="btn-primary">Create Series</button>
-        <a href="/series" class="btn-secondary">Cancel</a>
+        <button type="submit" class="btn-filled" id="submit-btn">
+          <span class="btn-text">Create Series</span>
+          <span class="btn-loading" style="display:none;">Creating…</span>
+        </button>
+        <a href="/series" class="btn-outlined">Cancel</a>
       </div>
+
+      <div id="form-error" class="form-error" role="alert"></div>
     </form>
   </section>
 </Base>
 
-<style is:global>
-  @import '../../styles/theme.css';
-
-  .new-series-page { max-width: 680px; margin: 0 auto; padding: var(--space-6) 0; }
-  .new-series-page h1 { font: var(--md-sys-typescale-display-small); color: var(--md-sys-color-on-surface); margin: 0 0 var(--space-2); }
-  .form-hint { font: var(--md-sys-typescale-body-large); color: var(--md-sys-color-on-surface-variant); margin: 0 0 var(--space-8); }
-
-  .series-form { display: flex; flex-direction: column; gap: var(--space-5); }
-  .form-group { display: flex; flex-direction: column; gap: var(--space-2); }
-  .form-group label { font: var(--md-sys-typescale-label-large); color: var(--md-sys-color-on-surface); }
-  .optional { color: var(--md-sys-color-outline); font-weight: 400; }
-
-  .input-field {
-    font: var(--md-sys-typescale-body-large); color: var(--md-sys-color-on-surface);
-    background: var(--md-sys-color-surface-container); border: 1px solid var(--md-sys-color-outline-variant);
-    border-radius: var(--md-sys-shape-corner-medium); padding: var(--space-3) var(--space-4);
-  }
-  .input-field:focus { outline: none; border-color: var(--md-sys-color-primary); }
-  textarea.input-field { resize: vertical; }
-
-  .pseud-display { font: var(--md-sys-typescale-body-large); color: var(--md-sys-color-on-surface-variant); }
-
-  .form-error { font: var(--md-sys-typescale-body-medium); color: var(--md-sys-color-error); background: var(--md-sys-color-error-container); border-radius: var(--md-sys-shape-corner-medium); padding: var(--space-3) var(--space-4); }
-
-  .form-actions { display: flex; gap: var(--space-3); margin-top: var(--space-4); }
-
-  .btn-primary { font: var(--md-sys-typescale-label-large); color: var(--md-sys-color-on-primary); background: var(--md-sys-color-primary); border: none; border-radius: var(--md-sys-shape-corner-full); padding: var(--space-3) var(--space-6); cursor: pointer; }
-  .btn-secondary { font: var(--md-sys-typescale-label-large); color: var(--md-sys-color-primary); background: transparent; border: 1px solid var(--md-sys-color-outline); border-radius: var(--md-sys-shape-corner-full); padding: var(--space-3) var(--space-6); cursor: pointer; text-decoration: none; }
-</style>
-
 <script>
-  const form = document.getElementById('series-form') as HTMLFormElement;
-  const errorEl = document.getElementById('form-error');
+  const form = document.getElementById('new-series-form') as HTMLFormElement;
+  const errorEl = document.getElementById('form-error') as HTMLElement;
+  const submitBtn = document.getElementById('submit-btn') as HTMLButtonElement;
 
-  form?.addEventListener('submit', async (e) => {
+  form.addEventListener('submit', async (e) => {
     e.preventDefault();
-    if (errorEl) errorEl.style.display = 'none';
+    errorEl.textContent = '';
+    submitBtn.disabled = true;
+    (submitBtn.querySelector('.btn-text') as HTMLElement).style.display = 'none';
+    (submitBtn.querySelector('.btn-loading') as HTMLElement).style.display = 'inline';
 
     const title = (document.getElementById('title') as HTMLInputElement).value.trim();
-    const description = (document.getElementById('description') as HTMLTextAreaElement).value.trim();
-    const pseudId = (document.getElementById('pseud_id') as HTMLInputElement)?.value;
+    const description = (document.getElementById('description') as HTMLTextAreaElement).value || undefined;
+    const pseudId = Number((document.getElementById('pseudId') as HTMLSelectElement).value);
 
-    if (!title) {
-      if (errorEl) { errorEl.textContent = 'Title is required'; errorEl.style.display = 'block'; }
+    if (!pseudId) {
+      errorEl.textContent = 'Please select a pseudonym.';
+      submitBtn.disabled = false;
+      (submitBtn.querySelector('.btn-text') as HTMLElement).style.display = 'inline';
+      (submitBtn.querySelector('.btn-loading') as HTMLElement).style.display = 'none';
       return;
     }
 
@@ -101,18 +99,137 @@ const defaultPseud = pseuds[0]?.id ?? null;
       const res = await fetch('/api/series', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ title, description: description || null, pseud_id: pseudId ? Number(pseudId) : undefined }),
+        body: JSON.stringify({ title, description, pseudId }),
       });
 
-      if (res.ok || res.status === 201) {
-        const data = await res.json();
-        window.location.href = `/series/${data.series.id}/edit`;
-      } else {
-        const data = await res.json();
-        if (errorEl) { errorEl.textContent = data.error || 'Failed to create series'; errorEl.style.display = 'block'; }
+      const data = await res.json();
+      if (!res.ok) {
+        errorEl.textContent = data.error || data.fields?.map((f: any) => `${f.field}: ${f.message}`).join(', ') || 'Failed to create series.';
+        submitBtn.disabled = false;
+        (submitBtn.querySelector('.btn-text') as HTMLElement).style.display = 'inline';
+        (submitBtn.querySelector('.btn-loading') as HTMLElement).style.display = 'none';
+        return;
       }
+
+      window.location.href = `/series/${data.data.id}`;
     } catch {
-      if (errorEl) { errorEl.textContent = 'Network error'; errorEl.style.display = 'block'; }
+      errorEl.textContent = 'Network error. Please try again.';
+      submitBtn.disabled = false;
+      (submitBtn.querySelector('.btn-text') as HTMLElement).style.display = 'inline';
+      (submitBtn.querySelector('.btn-loading') as HTMLElement).style.display = 'none';
     }
   });
 </script>
+
+<style is:global>
+  .form-page {
+    max-width: 48rem;
+    margin: 0 auto;
+    padding: var(--space-8) var(--space-4);
+  }
+
+  .form-header {
+    margin-bottom: var(--space-8);
+  }
+
+  .back-link {
+    font: var(--md-sys-typescale-body-medium);
+    color: var(--md-sys-color-primary);
+    text-decoration: none;
+    display: inline-block;
+    margin-bottom: var(--space-2);
+  }
+
+  .form-title {
+    font: var(--md-sys-typescale-headline-medium);
+    margin: 0 0 var(--space-4) 0;
+  }
+
+  .series-form {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-6);
+  }
+
+  .form-field {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+  }
+  .form-field label {
+    font: var(--md-sys-typescale-label-large);
+    color: var(--md-sys-color-on-surface-variant);
+  }
+  .form-field input,
+  .form-field select,
+  .form-field textarea {
+    font: var(--md-sys-typescale-body-large);
+    color: var(--md-sys-color-on-surface);
+    background: var(--md-sys-color-surface-container);
+    border: 1px solid var(--md-sys-color-outline-variant);
+    border-radius: var(--md-sys-shape-corner-small);
+    padding: var(--space-3) var(--space-4);
+    outline: none;
+    transition: border-color var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard);
+  }
+  .form-field input:focus,
+  .form-field select:focus,
+  .form-field textarea:focus {
+    border-color: var(--md-sys-color-primary);
+  }
+  .form-field textarea {
+    resize: vertical;
+    min-height: 100px;
+  }
+
+  .field-hint {
+    font: var(--md-sys-typescale-body-small);
+    color: var(--md-sys-color-on-surface-variant);
+    margin: var(--space-1) 0 0 0;
+  }
+  .field-hint a { color: var(--md-sys-color-primary); }
+
+  .form-actions {
+    display: flex;
+    gap: var(--space-4);
+    align-items: center;
+    flex-wrap: wrap;
+  }
+
+  .btn-filled {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font: var(--md-sys-typescale-label-large);
+    color: var(--md-sys-color-on-primary);
+    background: var(--md-sys-color-primary);
+    border: none;
+    border-radius: var(--md-sys-shape-corner-full);
+    padding: var(--space-3) var(--space-8);
+    cursor: pointer;
+    transition: opacity var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard);
+  }
+  .btn-filled:hover { opacity: 0.88; }
+  .btn-filled:disabled { opacity: 0.5; cursor: not-allowed; }
+
+  .btn-outlined {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font: var(--md-sys-typescale-label-large);
+    color: var(--md-sys-color-primary);
+    background: transparent;
+    border: 1px solid var(--md-sys-color-outline);
+    border-radius: var(--md-sys-shape-corner-full);
+    padding: var(--space-3) var(--space-8);
+    text-decoration: none;
+    transition: background var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard);
+  }
+  .btn-outlined:hover { background: var(--md-sys-color-primary-container); }
+
+  .form-error {
+    font: var(--md-sys-typescale-body-small);
+    color: var(--md-sys-color-error);
+    min-height: 1.2em;
+  }
+</style>

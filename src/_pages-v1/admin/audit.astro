@@ -1,0 +1,206 @@
+---
+export const prerender = false;
+import Base from '@/layouts/Base.astro';
+import { getDrizzle } from '@/lib/db';
+import { UserRole, ROLE_LEVEL } from '@/lib/types';
+import { users, sessions } from '@/lib/schema';
+import { eq, and, gt, sql } from 'drizzle-orm';
+
+// Auth gate: admin+ required
+const cookie = Astro.request.headers.get('cookie') ?? '';
+const sessionMatch = cookie.match(/session=([a-f0-9]+)/);
+if (!sessionMatch) return Astro.redirect('/login');
+
+const d1 = Astro.locals.runtime.env.DB as D1Database;
+const db = getDrizzle(d1);
+const session = await db.select({ userId: sessions.userId }).from(sessions).where(and(eq(sessions.token, sessionMatch[1]), gt(sessions.expiresAt, sql`datetime('now')`))).get();
+if (!session) return Astro.redirect('/login');
+
+const currentUser = await db.select({ id: users.id, role: users.role }).from(users).where(eq(users.id, session.userId)).get();
+if (!currentUser) return Astro.redirect('/login');
+
+const userLevel = ROLE_LEVEL[currentUser.role as UserRole] ?? 0;
+if (userLevel < ROLE_LEVEL[UserRole.Mod]) return Astro.redirect('/');
+
+const page = parseInt(Astro.url.searchParams.get('page') || '1');
+const limit = 50;
+const offset = (page - 1) * limit;
+
+const { results: logRows } = await d1.prepare(`
+  SELECT al.id, al.action, al.target_type, al.target_id, al.details, al.created_at,
+    u.email as actor_email, u.role as actor_role
+  FROM audit_log al
+  JOIN users u ON u.id = al.actor_id
+  ORDER BY al.created_at DESC
+  LIMIT ? OFFSET ?
+`).bind(limit, offset).all<{
+  id: number; action: string; target_type: string; target_id: number;
+  details: string | null; created_at: string;
+  actor_email: string; actor_role: string;
+}>();
+
+const { results: countRow } = await d1.prepare('SELECT COUNT(*) as total FROM audit_log').all<{ total: number }>();
+const totalCount = countRow[0]?.total ?? 0;
+const totalPages = Math.ceil(totalCount / limit);
+
+const allLog = (logRows ?? []).map(l => ({
+  id: l.id,
+  action: l.action,
+  targetType: l.target_type,
+  targetId: l.target_id,
+  details: l.details,
+  createdAt: l.created_at,
+  actorEmail: l.actor_email,
+  actorRole: l.actor_role,
+}));
+
+const actionLabels: Record<string, string> = {
+  'user.ban': 'Ban User',
+  'user.unban': 'Unban User',
+  'user.approve': 'Approve User',
+  'user.revoke': 'Revoke Approval',
+  'user.suspend': 'Suspend User',
+  'user.unsuspend': 'Lift Suspension',
+  'user.role_change': 'Change Role',
+  'comment.delete': 'Delete Comment',
+  'comment.edit': 'Edit Comment',
+  'tag.merge': 'Merge Tag',
+  'report.resolve': 'Resolve Report',
+  'report.dismiss': 'Dismiss Report',
+  'collection.delete': 'Delete Collection',
+  'work.delete': 'Delete Work',
+};
+---
+
+<Base title="Audit Log — Admin">
+  <h1 class="admin-heading">Audit Log</h1>
+
+  <p class="admin-subtitle">{totalCount.toLocaleString()} entries{page > 1 ? ` · Page ${page} of ${totalPages}` : ''}</p>
+
+  <div class="table-wrap">
+    <table class="admin-table">
+      <thead>
+        <tr>
+          <th>Time</th>
+          <th>Actor</th>
+          <th>Action</th>
+          <th>Target</th>
+          <th>Details</th>
+        </tr>
+      </thead>
+      <tbody>
+        {allLog.map(l => (
+          <tr>
+            <td class="date-cell">{new Date(l.createdAt.replace(' ', 'T') + 'Z').toLocaleString()}</td>
+            <td class="email-cell">
+              {l.actorEmail}
+              <span class="role-badge">{l.actorRole}</span>
+            </td>
+            <td>
+              <span class="action-badge action-{l.action.split('.')[0]}">{actionLabels[l.action] ?? l.action}</span>
+            </td>
+            <td>
+              <span class="target-type">{l.targetType}</span> #{l.targetId}
+            </td>
+            <td class="details-cell">
+              {l.details ? (
+                <details>
+                  <summary>Show</summary>
+                  <pre class="details-json">{JSON.stringify(JSON.parse(l.details), null, 2)}</pre>
+                </details>
+              ) : '—'}
+            </td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  </div>
+
+  {totalPages > 1 && (
+    <nav class="pagination">
+      {page > 1 && <a href={`/admin/audit?page=${page - 1}`} class="page-btn">← Previous</a>}
+      <span class="page-info">Page {page} of {totalPages}</span>
+      {page < totalPages && <a href={`/admin/audit?page=${page + 1}`} class="page-btn">Next →</a>}
+    </nav>
+  )}
+</Base>
+
+<style is:global>
+  @import '../../styles/theme.css';
+
+  .admin-subtitle {
+    font: var(--md-sys-typescale-body-medium);
+    color: var(--md-sys-color-on-surface-variant);
+    margin: 0 0 var(--space-4);
+  }
+
+  .date-cell { font-size: 0.8rem; white-space: nowrap; }
+  .email-cell { font-size: 0.8rem; }
+  .details-cell { font-size: 0.75rem; max-width: 200px; }
+
+  .role-badge {
+    display: inline-block;
+    font-size: 0.65rem;
+    padding: 0.1rem 0.3rem;
+    border-radius: 3px;
+    margin-left: 0.3rem;
+    background: var(--md-sys-color-surface-container-high);
+    color: var(--md-sys-color-on-surface-variant);
+    text-transform: capitalize;
+  }
+
+  .action-badge {
+    display: inline-block;
+    padding: 0.15rem 0.4rem;
+    border-radius: 4px;
+    font-size: 0.75rem;
+  }
+  .action-user { background: rgba(107, 144, 190, 0.15); color: #6B8FA8; }
+  .action-comment { background: rgba(107, 168, 130, 0.15); color: #6BA882; }
+  .action-tag { background: rgba(190, 107, 150, 0.15); color: #BE6B96; }
+  .action-report { background: rgba(200, 170, 100, 0.15); color: #D4B872; }
+  .action-collection { background: rgba(170, 130, 190, 0.15); color: #AA82BE; }
+  .action-work { background: rgba(190, 107, 107, 0.15); color: #BE6B6B; }
+
+  .target-type {
+    font-size: 0.75rem;
+    padding: 0.1rem 0.3rem;
+    border-radius: 3px;
+    background: var(--md-sys-color-surface-container-high);
+    text-transform: capitalize;
+  }
+
+  .details-json {
+    font-size: 0.7rem;
+    margin: 0.25rem 0 0;
+    max-height: 120px;
+    overflow: auto;
+    background: var(--md-sys-color-surface-container-lowest);
+    padding: 0.5rem;
+    border-radius: 4px;
+  }
+
+  .pagination {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: var(--space-4);
+    margin-top: var(--space-4);
+  }
+  .page-btn {
+    padding: 0.5rem 1rem;
+    border-radius: var(--md-sys-shape-corner-full);
+    background: var(--md-sys-color-secondary-container);
+    color: var(--md-sys-color-on-secondary-container);
+    text-decoration: none;
+    font: var(--md-sys-typescale-label-large);
+  }
+  .page-btn:hover {
+    background: var(--md-sys-color-secondary);
+    color: var(--md-sys-color-on-secondary);
+  }
+  .page-info {
+    font: var(--md-sys-typescale-body-medium);
+    color: var(--md-sys-color-on-surface-variant);
+  }
+</style>

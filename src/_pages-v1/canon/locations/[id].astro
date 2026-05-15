@@ -1,0 +1,347 @@
+---
+export const prerender = false;
+import Base from '../../../layouts/Base.astro';
+import { markdownToHtml } from '../../../lib/markdown';
+import { getAuth } from '../../../lib/auth';
+import { getDrizzle } from '../../../lib/db';
+import { locations, entityReferences, locationEdits, works, pseuds as pseudsTable, tags } from '../../../lib/schema';
+import { eq, and, desc, asc, like, sql, count } from 'drizzle-orm';
+
+const drz = getDrizzle(Astro.locals.runtime.env.DB as D1Database);
+const d1 = Astro.locals.runtime.env.DB as D1Database;
+const auth = await getAuth(d1, Astro.request);
+
+const id = Astro.params.id;
+if (!id) return Astro.redirect('/canon?tab=locations');
+
+let location: any = null;
+let parentLocation: any = null;
+let childLocations: any[] = [];
+let worksList: any[] = [];
+let editHistory: any[] = [];
+
+try {
+  location = await drz.select().from(locations).where(eq(locations.id, Number(id))).get();
+} catch {
+  // Table may not exist
+}
+
+if (!location) return Astro.redirect('/canon?tab=locations');
+
+// Parent location
+if (location.parentLocationId) {
+  try {
+    const parentRow = await drz.select({ id: locations.id, name: locations.name }).from(locations).where(eq(locations.id, location.parentLocationId)).get();
+    parentLocation = parentRow ? { id: parentRow.id, name: parentRow.name } : null;
+  } catch {
+    parentLocation = null;
+  }
+}
+
+// Child locations
+try {
+  const childRows = await drz
+    .select({ id: locations.id, name: locations.name })
+    .from(locations)
+    .where(eq(locations.parentLocationId, location.id))
+    .orderBy(asc(locations.name))
+    .all();
+  childLocations = childRows;
+} catch {
+  childLocations = [];
+}
+
+// Works referencing — via entity_references join
+try {
+  worksList = await drz
+    .select({
+      id: works.id,
+      title: works.title,
+      wordCount: works.wordCount,
+      updatedAt: works.updatedAt,
+      authors: sql<string>`(SELECT GROUP_CONCAT(p.name, ', ') FROM pseuds p JOIN creatorships c ON p.id = c.pseud_id WHERE c.work_id = ${works.id})`,
+    })
+    .from(entityReferences)
+    .innerJoin(works, eq(entityReferences.workId, works.id))
+    .where(and(eq(entityReferences.entityType, 'location'), eq(entityReferences.entityId, location.id)))
+    .orderBy(desc(works.updatedAt))
+    .limit(20)
+    .all();
+} catch {
+  worksList = [];
+}
+
+// Edit history
+try {
+  editHistory = await drz
+    .select()
+    .from(locationEdits)
+    .where(eq(locationEdits.locationId, location.id))
+    .orderBy(desc(locationEdits.createdAt))
+    .limit(20)
+    .all();
+} catch {
+  editHistory = [];
+}
+
+// Get fandom name from tag if available
+let fandomName: string | null = null;
+if (location.fandomTagId) {
+  try {
+    const fandomTag = await drz.select({ name: tags.name }).from(tags).where(eq(tags.id, location.fandomTagId)).get();
+    fandomName = fandomTag?.name ?? null;
+  } catch {
+    fandomName = null;
+  }
+}
+
+const descHtml = markdownToHtml(location.descriptionMd || '');
+const canEdit = auth && (auth.user.id === location.createdBy || ['admin', 'mod', 'founder'].includes(auth.user.role));
+---
+
+<Base title={`${location.name} — Canon`}>
+  <section class="location-detail">
+    <article class="location-article">
+      <h1 class="page-title">{location.name}</h1>
+
+      <div class="location-badges">
+        {fandomName && <span class="m3-chip location-badge location-badge--fandom">{fandomName}</span>}
+      </div>
+
+      <!-- Parent location breadcrumb -->
+      {parentLocation && (
+        <nav class="location-breadcrumb">
+          <span class="breadcrumb-label">Part of</span>
+          <a href={`/canon/locations/${parentLocation.id}`} class="breadcrumb-link">{parentLocation.name}</a>
+        </nav>
+      )}
+
+      <!-- Child locations -->
+      {childLocations.length > 0 && (
+        <div class="location-children">
+          <h2 class="section-title">Sub-locations</h2>
+          <ul class="children-list">
+            {childLocations.map(child => (
+              <li>
+                <a href={`/canon/locations/${child.id}`} class="child-link">{child.name}</a>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      <!-- Description -->
+      {location.descriptionMd && (
+        <div class="location-desc prose" set:html={descHtml} />
+      )}
+
+      {canEdit && (
+        <a href={`/canon/locations/${location.id}/edit`} class="m3-btn-filled location-edit-btn">Edit Location</a>
+      )}
+    </article>
+
+    <!-- Works referencing -->
+    {worksList.length > 0 && (
+      <section class="location-works">
+        <h2 class="section-title">Works Referencing</h2>
+        <div class="works-list">
+          {worksList.map(w => (
+            <a href={`/works/${w.id}`} class="work-ref-card">
+              <span class="work-ref__title">{w.title}</span>
+              <span class="work-ref__meta">
+                {w.authors && <Fragment>by {w.authors} · </Fragment>}
+                {Number(w.wordCount).toLocaleString()} words
+              </span>
+            </a>
+          ))}
+        </div>
+      </section>
+    )}
+
+    <!-- Edit History -->
+    {editHistory.length > 0 && (
+      <section class="location-history">
+        <h2 class="section-title">Edit History</h2>
+        <ol class="edit-timeline">
+          {editHistory.map(edit => (
+            <li class="edit-timeline__item">
+              <span class="edit-timeline__date">{new Date(edit.createdAt).toLocaleDateString()}</span>
+              <span class="edit-timeline__desc">{edit.field ? `Changed ${edit.field}` : 'Updated location'}</span>
+            </li>
+          ))}
+        </ol>
+      </section>
+    )}
+  </section>
+</Base>
+
+<style is:global>
+  @import '../../../styles/theme.css';
+
+  .location-detail { max-width: 800px; margin: 0 auto; }
+
+  .page-title {
+    font: var(--md-sys-typescale-headline-large);
+    color: var(--md-sys-color-on-surface);
+    margin: 0 0 var(--space-3);
+  }
+
+  .location-badges {
+    display: flex;
+    gap: var(--space-1);
+    margin-bottom: var(--space-4);
+  }
+  .location-badge--fandom {
+    background: var(--md-sys-color-secondary-container);
+    color: var(--md-sys-color-on-secondary-container);
+  }
+
+  /* Breadcrumb */
+  .location-breadcrumb {
+    font: var(--md-sys-typescale-body-medium);
+    color: var(--md-sys-color-on-surface-variant);
+    margin-bottom: var(--space-4);
+  }
+  .breadcrumb-label { margin-right: var(--space-1); }
+  .breadcrumb-link {
+    color: var(--md-sys-color-primary);
+    text-decoration: none;
+  }
+  .breadcrumb-link:hover { text-decoration: underline; }
+
+  /* Children */
+  .location-children {
+    margin-bottom: var(--space-6);
+  }
+  .children-list {
+    list-style: none;
+    padding: 0;
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-2);
+  }
+  .child-link {
+    font: var(--md-sys-typescale-label-large);
+    color: var(--md-sys-color-primary);
+    background: var(--md-sys-color-surface-container);
+    border: 1px solid var(--md-sys-color-outline-variant);
+    border-radius: var(--md-sys-shape-corner-full);
+    padding: var(--space-1) var(--space-4);
+    text-decoration: none;
+    transition: background var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard);
+  }
+  .child-link:hover {
+    background: var(--md-sys-color-surface-container-high);
+    text-decoration: none;
+  }
+
+  /* Description */
+  .location-desc {
+    font: var(--md-sys-typescale-body-large);
+    color: var(--md-sys-color-on-surface);
+    line-height: 1.75;
+  }
+  .location-desc p { margin: 0 0 var(--space-4); }
+  .location-desc h2 {
+    font: var(--md-sys-typescale-title-large);
+    margin: var(--space-6) 0 var(--space-2);
+  }
+
+  .location-edit-btn { display: inline-block; margin-top: var(--space-6); }
+
+  .m3-btn-filled {
+    font: var(--md-sys-typescale-label-large);
+    color: var(--md-sys-color-on-primary);
+    background: var(--md-sys-color-primary);
+    border: none;
+    border-radius: var(--md-sys-shape-corner-full);
+    padding: var(--space-2) var(--space-6);
+    cursor: pointer;
+    text-decoration: none;
+    transition: background var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard);
+  }
+  .m3-btn-filled:hover {
+    background: var(--md-sys-color-primary-container);
+    color: var(--md-sys-color-on-primary-container);
+    text-decoration: none;
+  }
+
+  /* Sections */
+  .section-title {
+    font: var(--md-sys-typescale-title-medium);
+    color: var(--md-sys-color-on-surface);
+    margin: var(--space-8) 0 var(--space-3);
+    padding-bottom: var(--space-2);
+    border-bottom: 1px solid var(--md-sys-color-outline-variant);
+  }
+  .works-list {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+  }
+  .work-ref-card {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    padding: var(--space-3) var(--space-4);
+    background: var(--md-sys-color-surface-container);
+    border: 1px solid var(--md-sys-color-outline-variant);
+    border-radius: var(--md-sys-shape-corner-medium);
+    text-decoration: none;
+    color: var(--md-sys-color-on-surface);
+    transition: background var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard);
+  }
+  .work-ref-card:hover {
+    background: var(--md-sys-color-surface-container-high);
+    text-decoration: none;
+  }
+  .work-ref__title {
+    font: var(--md-sys-typescale-title-small);
+    color: var(--md-sys-color-primary);
+  }
+  .work-ref__meta {
+    font: var(--md-sys-typescale-body-small);
+    color: var(--md-sys-color-outline);
+  }
+
+  /* Edit History */
+  .edit-timeline {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+  }
+  .edit-timeline__item {
+    display: flex;
+    gap: var(--space-3);
+    padding: var(--space-2) 0;
+    border-left: 2px solid var(--md-sys-color-outline-variant);
+    padding-left: var(--space-4);
+    position: relative;
+  }
+  .edit-timeline__item::before {
+    content: '';
+    position: absolute;
+    left: -5px;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--md-sys-color-primary);
+  }
+  .edit-timeline__date {
+    font: var(--md-sys-typescale-body-small);
+    color: var(--md-sys-color-outline);
+    white-space: nowrap;
+  }
+  .edit-timeline__desc {
+    font: var(--md-sys-typescale-body-medium);
+    color: var(--md-sys-color-on-surface-variant);
+  }
+
+  .m3-chip {
+    font: var(--md-sys-typescale-label-small);
+    padding: 4px var(--space-3);
+    border-radius: var(--md-sys-shape-corner-full);
+  }
+</style>

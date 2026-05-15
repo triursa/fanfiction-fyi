@@ -1,0 +1,118 @@
+---
+export const prerender = false;
+import Base from '../../layouts/Base.astro';
+import { getAuth } from '../../lib/auth';
+
+// Auth required
+const db = Astro.locals.runtime.env.DB as D1Database;
+const auth = await getAuth(db, Astro.request);
+if (!auth) return Astro.redirect('/login');
+
+const pseuds = auth.pseuds;
+const defaultPseud = pseuds[0]?.id ?? null;
+---
+
+<Base title="New Series — fanfiction.fyi">
+  <section class="new-series-page">
+    <h1>Create a Series</h1>
+    <p class="form-hint">Group related works together — sequels, arcs, or a shared universe.</p>
+
+    <form id="series-form" class="series-form">
+      <div class="form-group">
+        <label for="title">Title</label>
+        <input type="text" id="title" name="title" required placeholder="e.g., The Halcyon Cycle" class="input-field" />
+      </div>
+
+      <div class="form-group">
+        <label for="description">Description <span class="optional">(optional)</span></label>
+        <textarea id="description" name="description" rows="4" placeholder="What ties these works together?" class="input-field"></textarea>
+      </div>
+
+      <div class="form-group">
+        <label for="pseud_id">Post As</label>
+        {pseuds.length > 1 ? (
+          <select id="pseud_id" name="pseud_id" class="input-field">
+            {pseuds.map(p => <option value={p.id} selected={p.id === defaultPseud}>{p.name}</option>)}
+          </select>
+        ) : (
+          <input type="hidden" id="pseud_id" name="pseud_id" value={defaultPseud} />
+          <span class="pseud-display">{pseuds[0]?.name}</span>
+        )}
+      </div>
+
+      <div id="form-error" class="form-error" style="display:none;"></div>
+
+      <div class="form-actions">
+        <button type="submit" class="btn-primary">Create Series</button>
+        <a href="/series" class="btn-secondary">Cancel</a>
+      </div>
+    </form>
+  </section>
+</Base>
+
+<style is:global>
+  @import '../../styles/theme.css';
+
+  .new-series-page { max-width: 680px; margin: 0 auto; padding: var(--space-6) 0; }
+  .new-series-page h1 { font: var(--md-sys-typescale-display-small); color: var(--md-sys-color-on-surface); margin: 0 0 var(--space-2); }
+  .form-hint { font: var(--md-sys-typescale-body-large); color: var(--md-sys-color-on-surface-variant); margin: 0 0 var(--space-8); }
+
+  .series-form { display: flex; flex-direction: column; gap: var(--space-5); }
+  .form-group { display: flex; flex-direction: column; gap: var(--space-2); }
+  .form-group label { font: var(--md-sys-typescale-label-large); color: var(--md-sys-color-on-surface); }
+  .optional { color: var(--md-sys-color-outline); font-weight: 400; }
+
+  .input-field {
+    font: var(--md-sys-typescale-body-large); color: var(--md-sys-color-on-surface);
+    background: var(--md-sys-color-surface-container); border: 1px solid var(--md-sys-color-outline-variant);
+    border-radius: var(--md-sys-shape-corner-medium); padding: var(--space-3) var(--space-4);
+  }
+  .input-field:focus { outline: none; border-color: var(--md-sys-color-primary); }
+  textarea.input-field { resize: vertical; }
+
+  .pseud-display { font: var(--md-sys-typescale-body-large); color: var(--md-sys-color-on-surface-variant); }
+
+  .form-error { font: var(--md-sys-typescale-body-medium); color: var(--md-sys-color-error); background: var(--md-sys-color-error-container); border-radius: var(--md-sys-shape-corner-medium); padding: var(--space-3) var(--space-4); }
+
+  .form-actions { display: flex; gap: var(--space-3); margin-top: var(--space-4); }
+
+  .btn-primary { font: var(--md-sys-typescale-label-large); color: var(--md-sys-color-on-primary); background: var(--md-sys-color-primary); border: none; border-radius: var(--md-sys-shape-corner-full); padding: var(--space-3) var(--space-6); cursor: pointer; }
+  .btn-secondary { font: var(--md-sys-typescale-label-large); color: var(--md-sys-color-primary); background: transparent; border: 1px solid var(--md-sys-color-outline); border-radius: var(--md-sys-shape-corner-full); padding: var(--space-3) var(--space-6); cursor: pointer; text-decoration: none; }
+</style>
+
+<script>
+  const form = document.getElementById('series-form') as HTMLFormElement;
+  const errorEl = document.getElementById('form-error');
+
+  form?.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    if (errorEl) errorEl.style.display = 'none';
+
+    const title = (document.getElementById('title') as HTMLInputElement).value.trim();
+    const description = (document.getElementById('description') as HTMLTextAreaElement).value.trim();
+    const pseudId = (document.getElementById('pseud_id') as HTMLInputElement)?.value;
+
+    if (!title) {
+      if (errorEl) { errorEl.textContent = 'Title is required'; errorEl.style.display = 'block'; }
+      return;
+    }
+
+    try {
+      const res = await fetch('/api/series', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title, description: description || null, pseud_id: pseudId ? Number(pseudId) : undefined }),
+      });
+
+      if (res.ok || res.status === 201) {
+        const data = await res.json();
+        window.location.href = `/series/${data.series.id}/edit`;
+      } else {
+        const data = await res.json();
+        if (errorEl) { errorEl.textContent = data.error || 'Failed to create series'; errorEl.style.display = 'block'; }
+      }
+    } catch {
+      if (errorEl) { errorEl.textContent = 'Network error'; errorEl.style.display = 'block'; }
+    }
+  });
+</script>

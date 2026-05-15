@@ -1,7 +1,16 @@
 ---
 export const prerender = false;
-import Base from '../../layouts/Base.astro';
+export const config = { auth: 'public' };
+import Base from '@/v2/layouts/Base.astro';
+
+// Check for error params from redirect
+const errorParam = Astro.url.searchParams.get('error');
+const errorMessage = errorParam === 'invalid' ? 'Invalid email or password.'
+  : errorParam === 'banned' ? 'This account has been banned.'
+  : errorParam === 'suspended' ? 'This account is suspended.'
+  : '';
 ---
+
 <Base title="Sign In — fanfiction.fyi">
   <div class="auth-container">
     <a href="/" class="auth-logo">fanfiction.fyi</a>
@@ -23,6 +32,7 @@ import Base from '../../layouts/Base.astro';
         <label for="password">Password</label>
         <input type="password" id="password" name="password" required autocomplete="current-password" placeholder="Your password" />
       </div>
+      {errorMessage && <div class="form-error" role="alert">{errorMessage}</div>}
       <div id="login-error" class="form-error" role="alert"></div>
       <button type="submit" class="btn-primary">Sign In</button>
     </form>
@@ -30,6 +40,37 @@ import Base from '../../layouts/Base.astro';
     <p class="auth-alt">Don't have an account? <a href="/signup">Request an invite</a></p>
   </div>
 </Base>
+
+<script>
+  const form = document.getElementById('login-form') as HTMLFormElement;
+  const errorEl = document.getElementById('login-error') as HTMLElement;
+
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    errorEl.textContent = '';
+
+    const email = (document.getElementById('email') as HTMLInputElement).value;
+    const password = (document.getElementById('password') as HTMLInputElement).value;
+
+    try {
+      const res = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, password }),
+      });
+
+      const data = await res.json();
+
+      if (res.ok) {
+        window.location.href = '/';
+      } else {
+        errorEl.textContent = data.error || 'Login failed. Please try again.';
+      }
+    } catch {
+      errorEl.textContent = 'Network error. Please try again.';
+    }
+  });
+</script>
 
 <style is:global>
   .auth-container {
@@ -72,10 +113,7 @@ import Base from '../../layouts/Base.astro';
     text-decoration: none;
     transition: background var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard);
   }
-
-  .btn-google:hover {
-    background: var(--md-sys-color-surface-container-high);
-  }
+  .btn-google:hover { background: var(--md-sys-color-surface-container-high); }
 
   .auth-divider {
     display: flex;
@@ -84,9 +122,7 @@ import Base from '../../layouts/Base.astro';
     color: var(--md-sys-color-on-surface-variant);
     font: var(--md-sys-typescale-body-small);
   }
-
-  .auth-divider::before,
-  .auth-divider::after {
+  .auth-divider::before, .auth-divider::after {
     content: '';
     flex: 1;
     height: 1px;
@@ -104,15 +140,11 @@ import Base from '../../layouts/Base.astro';
     flex-direction: column;
     gap: var(--space-1);
   }
-
   .form-field label {
     font: var(--md-sys-typescale-label-large);
     color: var(--md-sys-color-on-surface-variant);
   }
-
-  .form-field input,
-  .form-field textarea,
-  .form-field select {
+  .form-field input {
     font: var(--md-sys-typescale-body-large);
     color: var(--md-sys-color-on-surface);
     background: var(--md-sys-color-surface-container);
@@ -122,28 +154,8 @@ import Base from '../../layouts/Base.astro';
     outline: none;
     transition: border-color var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard);
   }
-
-  .form-field input:focus,
-  .form-field textarea:focus,
-  .form-field select:focus {
-    border-color: var(--md-sys-color-primary);
-  }
-
-  .form-field input.field-error,
-  .form-field textarea.field-error {
-    border-color: var(--md-sys-color-error);
-  }
-
-  .field-helper {
-    font: var(--md-sys-typescale-body-small);
-    color: var(--md-sys-color-on-surface-variant);
-    min-height: 0;
-    margin-top: 2px;
-  }
-
-  .field-helper--error {
-    color: var(--md-sys-color-error);
-  }
+  .form-field input:focus { border-color: var(--md-sys-color-primary); }
+  .form-field input.field-error { border-color: var(--md-sys-color-error); }
 
   .form-error {
     font: var(--md-sys-typescale-body-small);
@@ -159,152 +171,15 @@ import Base from '../../layouts/Base.astro';
     border-radius: var(--md-sys-shape-corner-full);
     padding: var(--space-3) var(--space-6);
     cursor: pointer;
-    transition: background var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard);
+    transition: opacity var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard);
   }
-
-  .btn-primary:hover {
-    background: var(--md-sys-color-primary-container);
-    color: var(--md-sys-color-on-primary-container);
-  }
-
-  .btn-primary:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
-  }
+  .btn-primary:hover { opacity: 0.9; }
+  .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
 
   .auth-alt {
     font: var(--md-sys-typescale-body-medium);
     color: var(--md-sys-color-on-surface-variant);
     text-align: center;
   }
-
-  .auth-alt a {
-    color: var(--md-sys-color-primary);
-  }
+  .auth-alt a { color: var(--md-sys-color-primary); }
 </style>
-
-<script>
-  const form = document.getElementById('login-form') as HTMLFormElement;
-  const errorEl = document.getElementById('login-error')!;
-  const btn = form.querySelector('button[type="submit"]') as HTMLButtonElement;
-  const btnText = btn.textContent;
-  const emailInput = document.getElementById('email') as HTMLInputElement;
-  const passwordInput = document.getElementById('password') as HTMLInputElement;
-
-  function clearFieldErrors() {
-    emailInput.classList.remove('field-error');
-    passwordInput.classList.remove('field-error');
-  }
-
-  function setFieldError(input: HTMLInputElement, msg: string) {
-    input.classList.add('field-error');
-    input.focus();
-    errorEl.textContent = msg;
-  }
-
-  // Check for OAuth error in URL params
-  const urlParams = new URLSearchParams(window.location.search);
-  const oauthError = urlParams.get('error');
-  if (oauthError) {
-    const messages: Record<string, string> = {
-      oauth_denied: 'Google sign-in was cancelled',
-      oauth_no_code: 'Google OAuth failed — no authorization code',
-      oauth_token_failed: 'Google authentication failed',
-      oauth_callback_failed: 'An error occurred during sign-in. Please try again.',
-      oauth_no_email: 'Google account has no email',
-      banned: 'This account has been suspended',
-      suspended: 'This account is temporarily suspended',
-    };
-    errorEl.textContent = messages[oauthError] || 'Google sign-in failed';
-    // Show detail param for debugging OAuth errors
-    const detail = urlParams.get('detail');
-    if (detail) {
-      errorEl.textContent += ' (' + detail + ')';
-    }
-    // If suspended with until date, append it
-    if (oauthError === 'suspended') {
-      const until = urlParams.get('until');
-      if (until) {
-        try {
-          const date = new Date(until + 'Z');
-          errorEl.textContent += ` until ${date.toLocaleString()}`;
-        } catch {}
-      }
-    }
-  }
-
-  form.addEventListener('submit', async (e) => {
-    e.preventDefault();
-    errorEl.textContent = '';
-    clearFieldErrors();
-
-    // Client-side validation
-    if (!emailInput.value.trim()) {
-      setFieldError(emailInput, 'Email is required');
-      return;
-    }
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailInput.value.trim())) {
-      setFieldError(emailInput, 'Enter a valid email address');
-      return;
-    }
-    if (!passwordInput.value) {
-      setFieldError(passwordInput, 'Password is required');
-      return;
-    }
-
-    btn.disabled = true;
-    btn.textContent = 'Signing in…';
-
-    try {
-      const res = await fetch('/api/auth/login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          email: emailInput.value.trim(),
-          password: passwordInput.value,
-        }),
-      });
-      if (res.ok) {
-        const data = await res.json();
-        if (data.approvalStatus === 'pending') {
-          window.location.href = '/pending-approval';
-        } else {
-          window.location.href = '/';
-        }
-      } else {
-        let data: any;
-        try {
-          data = await res.json();
-        } catch {
-          data = {};
-        }
-        if (data.error === 'no_password') {
-          errorEl.textContent = 'Your account was created with Google. Please use the "Sign in with Google" button above.';
-        } else if (data.error === 'banned') {
-          errorEl.textContent = 'This account has been suspended';
-        } else if (data.error === 'suspended') {
-          errorEl.textContent = 'This account is temporarily suspended';
-          if (data.suspendedUntil) {
-            try {
-              const date = new Date(data.suspendedUntil + 'Z');
-              errorEl.textContent += ` until ${date.toLocaleString()}`;
-            } catch {}
-          }
-        } else if (res.status >= 500) {
-          errorEl.textContent = 'Something went wrong. If you signed up with Google, try signing in with Google instead.';
-        } else {
-          errorEl.textContent = data.error || 'Sign in failed';
-        }
-      }
-    } catch {
-      errorEl.textContent = 'Network error — please check your connection and try again';
-    } finally {
-      btn.disabled = false;
-      btn.textContent = btnText;
-    }
-  });
-
-  // Clear field errors on input
-  emailInput.addEventListener('input', () => { emailInput.classList.remove('field-error'); errorEl.textContent = ''; });
-  passwordInput.addEventListener('input', () => { passwordInput.classList.remove('field-error'); errorEl.textContent = ''; });
-</script>

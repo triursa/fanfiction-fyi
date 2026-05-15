@@ -7,17 +7,34 @@
     "dev": "astro dev",
     "build": "astro build",
     "preview": "astro preview",
+    "deploy:dev": "wrangler pages deploy dist --project-name=fanfiction-fyi",
+    "deploy:staging": "wrangler pages deploy dist --project-name=fanfiction-fyi-staging",
+    "deploy:prod": "wrangler pages deploy dist --project-name=fanfiction-fyi",
     "astro": "astro",
     "db:push": "drizzle-kit push",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
     "db:studio": "drizzle-kit studio",
+    "db:v2:push": "drizzle-kit push --config=drizzle.config.v2.ts",
+    "db:v2:generate": "drizzle-kit generate --config=drizzle.config.v2.ts",
+    "db:v2:studio": "drizzle-kit studio --config=drizzle.config.v2.ts",
     "db:migrate:legacy": "wrangler d1 execute fanfiction-fyi-db --local --file=schema/001_initial.sql",
     "db:migrate:legacy:remote": "wrangler d1 execute fanfiction-fyi-db --remote --file=schema/001_initial.sql",
+    "db:v2:migrate:dev": "wrangler d1 execute ffy-dev --local --file=drizzle/v2/0000_initial.sql",
+    "db:v2:migrate:staging": "wrangler d1 execute ffy-staging --remote --file=drizzle/v2/0000_initial.sql",
+    "db:v2:migrate:prod": "wrangler d1 execute ffy-prod --remote --file=drizzle/v2/0000_initial.sql",
+    "db:v2:seed:dev": "wrangler d1 execute ffy-dev --local --file=drizzle/v2/seed.sql",
+    "db:v2:seed:staging": "wrangler d1 execute ffy-staging --remote --file=drizzle/v2/seed.sql",
+    "db:v2:seed:prod": "wrangler d1 execute ffy-prod --remote --file=drizzle/v2/seed.sql",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
     "format": "prettier --write .",
-    "format:check": "prettier --check ."
+    "format:check": "prettier --check .",
+    "test": "vitest",
+    "test:run": "vitest run",
+    "test:coverage": "vitest run --coverage",
+    "test:integration": "vitest run --config=vitest.integration.config.ts",
+    "test:all": "vitest run && vitest run --config=vitest.integration.config.ts"
   },
   "dependencies": {
     "@astrojs/cloudflare": "^12.0.0",
@@ -42,10 +59,12 @@
     "marked": "^15.0.0",
     "preact": "^10.0.0",
     "sanitize-html": "^2.13.0",
-    "turndown": "^7.0.0"
+    "turndown": "^7.0.0",
+    "zod": "^3.24.0"
   },
   "devDependencies": {
     "@astrojs/check": "^0.9.9",
+    "@testing-library/preact": "^3.2.0",
     "@types/turndown": "^5.0.0",
     "@typescript-eslint/eslint-plugin": "^8.59.1",
     "@typescript-eslint/parser": "^8.59.1",
@@ -54,9 +73,12 @@
     "eslint-config-prettier": "^10.1.8",
     "eslint-plugin-astro": "^1.7.0",
     "eslint-plugin-react-hooks": "^7.1.1",
+    "happy-dom": "^17.0.0",
+    "jsdom": "^26.0.0",
     "prettier": "^3.8.3",
     "prettier-plugin-astro": "^0.14.1",
     "typescript": "^5.9.3",
+    "vitest": "^3.2.0",
     "wrangler": "^4.85.0"
   }
 }

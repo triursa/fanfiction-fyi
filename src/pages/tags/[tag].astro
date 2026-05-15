@@ -1,0 +1,220 @@
+---
+/**
+ * Tag Detail Page — Public
+ * Shows works tagged with a specific tag. Uses search API with tag filter.
+ * Route: /tags/[tag] where [tag] is the tag name (URL-encoded).
+ */
+export const prerender = false;
+export const config = { auth: 'public' };
+import Base from '@/v2/layouts/Base.astro';
+import WorkCard from '@/v2/components/WorkCard.astro';
+
+const tagName = decodeURIComponent(Astro.params.tag || '');
+if (!tagName) {
+  return Astro.redirect('/tags');
+}
+
+// Determine tag type from optional query param (for smarter search routing)
+const tagType = Astro.url.searchParams.get('type') || '';
+const page = Math.max(1, Number(Astro.url.searchParams.get('page')) || 1);
+const sort = Astro.url.searchParams.get('sort') || 'updated';
+
+// Build search URL — map tag type to the correct search param
+const typeToParam: Record<string, string> = {
+  fandom: 'fandom',
+  character: 'character',
+  relationship: 'relationship',
+  rating: 'rating',
+  warning: 'warning',
+  category: 'category',
+  freeform: 'q', // freeform tags search via query
+};
+
+let works: any[] = [];
+let total = 0;
+let errorMsg: string | null = null;
+
+try {
+  const params = new URLSearchParams({
+    q: tagType === 'freeform' || !tagType ? tagName : '',
+    sort,
+    page: String(page),
+    limit: '20',
+  });
+
+  // Use the specific tag filter param if we know the type
+  if (tagType && typeToParam[tagType] && typeToParam[tagType] !== 'q') {
+    params.set(typeToParam[tagType], tagName);
+  } else if (!tagType || tagType === 'freeform') {
+    params.set('q', tagName);
+  }
+
+  const res = await fetch(new URL(`/api/search?${params.toString()}`, Astro.url));
+  if (res.ok) {
+    const json = await res.json();
+    works = json.data || [];
+    total = json.total || 0;
+  } else {
+    errorMsg = 'Failed to load works for this tag.';
+  }
+} catch {
+  errorMsg = 'Network error loading works.';
+}
+
+const totalPages = Math.max(1, Math.ceil(total / 20));
+
+function pageUrl(p: number): string {
+  const u = new URL(Astro.url);
+  u.searchParams.set('page', String(p));
+  u.searchParams.set('sort', sort);
+  return u.pathname + u.search;
+}
+
+const typeName: Record<string, string> = {
+  fandom: 'Fandom',
+  character: 'Character',
+  relationship: 'Relationship',
+  rating: 'Rating',
+  warning: 'Warning',
+  category: 'Category',
+  freeform: 'Freeform',
+};
+---
+
+<Base title={`${tagName} — fanfiction.fyi`} description={`Works tagged "${tagName}" on fanfiction.fyi`}>
+  <section class="tag-detail-page">
+    <a href="/tags" class="back-link">← All Tags</a>
+
+    <div class="tag-header">
+      <h1 class="tag-name">{tagName}</h1>
+      {tagType && typeName[tagType] && <span class="tag-type-badge">{typeName[tagType]}</span>}
+    </div>
+
+    {errorMsg && <div class="error-banner" role="alert">{errorMsg}</div>}
+
+    {total > 0 && (
+      <p class="results-meta">{total} {total === 1 ? 'work' : 'works'} tagged "{tagName}"</p>
+    )}
+
+    {works.length > 0 ? (
+      <>
+        <div class="works-grid">
+          {works.map((w: any) => (
+            <WorkCard work={w} />
+          ))}
+        </div>
+
+        {totalPages > 1 && (
+          <nav class="pagination" aria-label="Works pagination">
+            {page > 1 && (
+              <a href={pageUrl(page - 1)} class="page-link" rel="prev">← Prev</a>
+            )}
+            <span class="page-info">Page {page} of {totalPages}</span>
+            {page < totalPages && (
+              <a href={pageUrl(page + 1)} class="page-link" rel="next">Next →</a>
+            )}
+          </nav>
+        )}
+      </>
+    ) : !errorMsg ? (
+      <p class="empty-msg">No works found with this tag.</p>
+    ) : null}
+  </section>
+</Base>
+
+<style is:global>
+  .tag-detail-page {
+    max-width: 72rem;
+    margin: 0 auto;
+    padding: var(--space-8) var(--space-4);
+  }
+
+  .back-link {
+    font: var(--md-sys-typescale-label-large);
+    color: var(--md-sys-color-primary);
+    text-decoration: none;
+    display: inline-block;
+    margin-bottom: var(--space-4);
+    transition: opacity var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard);
+  }
+  .back-link:hover { opacity: 0.8; }
+
+  .tag-header {
+    display: flex;
+    align-items: baseline;
+    gap: var(--space-3);
+    flex-wrap: wrap;
+    margin-bottom: var(--space-6);
+  }
+
+  .tag-name {
+    font: var(--md-sys-typescale-headline-medium);
+    margin: 0;
+  }
+
+  .tag-type-badge {
+    font: var(--md-sys-typescale-body-small);
+    background: var(--md-sys-color-primary-container);
+    color: var(--md-sys-color-on-primary-container);
+    border-radius: var(--md-sys-shape-corner-full);
+    padding: 2px 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+
+  .error-banner {
+    background: var(--md-sys-color-error);
+    color: var(--md-sys-color-on-error);
+    border-radius: var(--md-sys-shape-corner-small);
+    padding: var(--space-3) var(--space-4);
+    margin-bottom: var(--space-6);
+    font: var(--md-sys-typescale-body-medium);
+  }
+
+  .results-meta {
+    font: var(--md-sys-typescale-body-medium);
+    color: var(--md-sys-color-on-surface-variant);
+    margin: 0 0 var(--space-4) 0;
+  }
+
+  .works-grid {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: var(--space-4);
+  }
+
+  @media (min-width: 640px) {
+    .works-grid {
+      grid-template-columns: repeat(2, 1fr);
+    }
+  }
+
+  .empty-msg {
+    color: var(--md-sys-color-on-surface-variant);
+    font: var(--md-sys-typescale-body-large);
+  }
+
+  /* ── Pagination ──────────────────────────────────────────── */
+  .pagination {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: var(--space-4);
+    margin-top: var(--space-8);
+  }
+
+  .page-link {
+    font: var(--md-sys-typescale-label-large);
+    color: var(--md-sys-color-primary);
+    text-decoration: none;
+    padding: var(--space-2) var(--space-3);
+    border-radius: var(--md-sys-shape-corner-small);
+    transition: background var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard);
+  }
+  .page-link:hover { background: var(--md-sys-color-surface-container); }
+
+  .page-info {
+    font: var(--md-sys-typescale-body-medium);
+    color: var(--md-sys-color-on-surface-variant);
+  }
+</style>

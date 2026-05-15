@@ -1,74 +1,118 @@
-export const prerender = false;
-
-import { getDrizzle } from '@/lib/db';
-import { characterGroups, characters } from '@/lib/schema';
-import { requireAuth } from '@/lib/auth';
-import { corsHeaders, handleCors } from '@/lib/cors';
-import { eq, like, sql, count, asc } from 'drizzle-orm';
 import type { APIRoute } from 'astro';
+import type { D1Database } from '@cloudflare/workers-types';
+import { getDb } from '@/v2/lib/db';
+import { getAuth, requireAuth, checkApproved } from '@/v2/lib/auth';
+import { validateBody, validateQuery, createCharacterGroupSchema, browseCharacterGroupsSchema } from '@/v2/lib/validation';
+import { characterGroups, pseuds, characters } from '@/v2/lib/schema/index';
+import { eq, and, desc, count } from 'drizzle-orm';
 
-export const OPTIONS: APIRoute = async ({ request }) => {
-  return handleCors(request) ?? new Response(null, { status: 405 });
-};
+export const config = { auth: 'optional' as const };
 
-// GET /api/characters/groups — List all character groups
-export const GET: APIRoute = async ({ url, locals, request }) => {
-  const cors = corsHeaders(request);
-  const drz = getDrizzle(locals.runtime.env.DB as D1Database);
-  const q = url.searchParams.get('q') || '';
+// ─── GET /api/characters/groups — Browse character groups ───────────
 
-  const conditions = [];
-  if (q) conditions.push(like(characterGroups.name, `%${q}%`));
+export const GET: APIRoute = async ({ request, url, locals }) => {
+  const d1 = locals.runtime.env.DB as D1Database;
+  const db = getDb(d1);
 
-  const where = conditions.length > 0 ? (conditions.length === 1 ? conditions[0] : sql`${conditions[0]} AND ${conditions.slice(1).map(c => sql`(${c})`).join(sql` AND `)}`) : undefined;
+  const query = validateQuery(url, browseCharacterGroupsSchema);
+  const { page, limit } = query;
+  const offset = (page - 1) * limit;
 
-  const groups = await drz
+  const [{ total }] = await db
+    .select({ total: count() })
+    .from(characterGroups);
+
+  const groupRows = await db
     .select({
       id: characterGroups.id,
       name: characterGroups.name,
       description: characterGroups.description,
+      pseudId: characterGroups.pseudId,
       createdAt: characterGroups.createdAt,
       updatedAt: characterGroups.updatedAt,
-      characterCount: count(characters.id).as('character_count'),
+      pseudName: pseuds.name,
     })
     .from(characterGroups)
-    .leftJoin(characters, eq(characterGroups.id, characters.groupId))
-    .where(conditions.length === 1 ? conditions[0] : undefined)
-    .groupBy(characterGroups.id)
-    .orderBy(asc(characterGroups.name))
-    .all();
+    .innerJoin(pseuds, eq(characterGroups.pseudId, pseuds.id))
+    .orderBy(desc(characterGroups.createdAt))
+    .limit(limit)
+    .offset(offset);
 
-  return new Response(JSON.stringify(groups), { headers: { 'Content-Type': 'application/json', ...cors } });
+  const data = groupRows.map(g => ({
+    id: g.id,
+    name: g.name,
+    description: g.description,
+    pseudId: g.pseudId,
+    pseudName: g.pseudName,
+    createdAt: g.createdAt,
+    updatedAt: g.updatedAt,
+  }));
+
+  return new Response(JSON.stringify({ data, total, page, limit }), {
+    status: 200,
+    headers: { 'Content-Type': 'application/json' },
+  });
 };
 
-// POST /api/characters/groups — Create a group
+// ─── POST /api/characters/groups — Create a character group (auth required) ──
+
 export const POST: APIRoute = async ({ request, locals }) => {
   const d1 = locals.runtime.env.DB as D1Database;
-  const drz = getDrizzle(d1);
+  const db = getDb(d1);
+
   const auth = await requireAuth(d1, request);
-  if (!auth) return new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401, headers: { 'Content-Type': 'application/json' } });
+  checkApproved(auth);
 
-  let body: any;
-  try { body = await request.json(); } catch {
-    return new Response(JSON.stringify({ error: 'Invalid JSON' }), { status: 400, headers: { 'Content-Type': 'application/json' } });
-  }
+  const [data, error] = await validateBody(request, createCharacterGroupSchema);
+  if (error) return error;
 
-  const { name, description } = body || {};
-  if (!name || typeof name !== 'string' || !name.trim()) {
-    return new Response(JSON.stringify({ error: 'Name is required' }), { status: 400, headers: { 'Content-Type': 'application/json' } });
+  const pseud = await db
+    .select()
+    .from(pseuds)
+    .where(and(eq(pseuds.id, data.pseudId), eq(pseuds.userId, auth.user.id)))
+    .get();
+
+  if (!pseud) {
+    return new Response(JSON.stringify({ error: 'Pseud not found or does not belong to you' }), {
+      status: 403,
+      headers: { 'Content-Type': 'application/json' },
+    });
   }
 
   try {
-    const inserted = await drz.insert(characterGroups).values({
-      name: name.trim(),
-      description: description || null,
-    }).returning().get();
+    const [inserted] = await db
+      .insert(characterGroups)
+      .values({
+        name: data.name,
+        description: data.description ?? null,
+        pseudId: data.pseudId,
+      })
+      .returning();
 
-    return new Response(JSON.stringify(inserted), { status: 201, headers: { 'Content-Type': 'application/json' } });
+    const pseudData = await db
+      .select({ name: pseuds.name })
+      .from(pseuds)
+      .where(eq(pseuds.id, inserted.pseudId))
+      .get();
+
+    return new Response(JSON.stringify({
+      data: {
+        id: inserted.id,
+        name: inserted.name,
+        description: inserted.description,
+        pseudId: inserted.pseudId,
+        pseudName: pseudData?.name ?? null,
+        createdAt: inserted.createdAt,
+        updatedAt: inserted.updatedAt,
+      },
+    }), {
+      status: 201,
+      headers: { 'Content-Type': 'application/json' },
+    });
   } catch (e: any) {
-    if (e.message?.includes('UNIQUE constraint failed')) {
-      return new Response(JSON.stringify({ error: 'Group already exists' }), { status: 409, headers: { 'Content-Type': 'application/json' } });
-    }
-    throw e;
+    return new Response(JSON.stringify({ error: 'Failed to create character group' }), {
+      status: 500,
+      headers: { 'Content-Type': 'application/json' },
+    });
   }
 };

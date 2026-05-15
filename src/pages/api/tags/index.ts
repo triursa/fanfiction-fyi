@@ -1,75 +1,110 @@
-export const prerender = false;
-
-import { getDrizzle } from '@/lib/db';
-import { tags } from '@/lib/schema';
-import { requireAuth } from '@/lib/auth';
-import { eq, like, and, asc, sql } from 'drizzle-orm';
 import type { APIRoute } from 'astro';
+import type { D1Database } from '@cloudflare/workers-types';
+import { getDb } from '@/v2/lib/db';
+import { requireAuth, checkApproved } from '@/v2/lib/auth';
+import { validateBody, validateQuery, createTagSchema, tagBrowseSchema } from '@/v2/lib/validation';
+import { tags } from '@/v2/lib/schema/index';
+import { eq, and, like, count, sql } from 'drizzle-orm';
 
-export const GET: APIRoute = async ({ url, locals }) => {
-  const drz = getDrizzle(locals.runtime.env.DB as D1Database);
-  const params = url.searchParams;
-  const type = params.get('type');
-  const name = params.get('name');
-  const limit = Math.min(Number(params.get('limit') || 25), 100);
+export const config = { auth: 'optional' as const };
 
+// ─── GET /api/tags — List/browse tags ──────────────────────────────
+
+export const GET: APIRoute = async ({ request, url, locals }) => {
+  const d1 = locals.runtime.env.DB as D1Database;
+  const db = getDb(d1);
+
+  // Parse and validate query params
+  const query = validateQuery(url, tagBrowseSchema);
+
+  // Build conditions
   const conditions = [];
-  if (type) conditions.push(eq(tags.type, type as any));
-  if (name) conditions.push(like(tags.name, `%${name}%`));
+  if (query.type) {
+    conditions.push(eq(tags.type, query.type));
+  }
+  if (query.q) {
+    conditions.push(like(tags.name, `${query.q}%`));
+  }
 
-  const result = await drz
+  const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
+
+  // Count total
+  const [{ total }] = await db
+    .select({ total: count() })
+    .from(tags)
+    .where(whereClause);
+
+  // Fetch tags
+  const tagRows = await db
     .select()
     .from(tags)
-    .where(conditions.length > 0 ? and(...conditions) : undefined)
-    .orderBy(asc(tags.name))
-    .limit(limit);
+    .where(whereClause)
+    .orderBy(tags.name)
+    .limit(query.limit)
+    .offset((query.page - 1) * query.limit);
 
-  // Convert camelCase to snake_case for API compatibility
-  const tagsResult = result.map(t => ({
-    id: t.id,
-    name: t.name,
-    type: t.type,
-  }));
-
-  return new Response(JSON.stringify(tagsResult), { headers: { 'Content-Type': 'application/json' } });
+  return new Response(JSON.stringify({
+    data: tagRows,
+    total,
+    page: query.page,
+    limit: query.limit,
+  }), {
+    status: 200,
+    headers: { 'Content-Type': 'application/json' },
+  });
 };
+
+// ─── POST /api/tags — Create a tag ─────────────────────────────────
 
 export const POST: APIRoute = async ({ request, locals }) => {
   const d1 = locals.runtime.env.DB as D1Database;
-  const drz = getDrizzle(d1);
+  const db = getDb(d1);
+
+  // Require auth
   const auth = await requireAuth(d1, request);
-  if (!auth) return new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401, headers: { 'Content-Type': 'application/json' } });
+  checkApproved(auth);
 
-  if (auth.user.role !== 'admin' && auth.user.role !== 'mod') {
-    return new Response(JSON.stringify({ error: 'Forbidden: admin or mod role required' }), { status: 403, headers: { 'Content-Type': 'application/json' } });
-  }
+  // Validate body
+  const [data, error] = await validateBody(request, createTagSchema);
+  if (error) return error;
 
-  let body: any;
-  try { body = await request.json(); } catch {
-    return new Response(JSON.stringify({ error: 'Invalid JSON' }), { status: 400, headers: { 'Content-Type': 'application/json' } });
-  }
+  // Check for uniqueness (tags have a unique name constraint)
+  const existing = await db
+    .select()
+    .from(tags)
+    .where(eq(tags.name, data.name))
+    .get();
 
-  const { name, type } = body || {};
-  if (!name || !type) {
-    return new Response(JSON.stringify({ error: 'Name and type are required' }), { status: 400, headers: { 'Content-Type': 'application/json' } });
-  }
-
-  const validTypes = ['fandom', 'character', 'relationship', 'freeform', 'rating', 'warning', 'category'];
-  if (!validTypes.includes(type)) {
-    return new Response(JSON.stringify({ error: `Invalid tag type. Must be one of: ${validTypes.join(', ')}` }), { status: 400, headers: { 'Content-Type': 'application/json' } });
-  }
-
-  try {
-    const [inserted] = await drz.insert(tags).values({ name, type }).returning();
-    return new Response(JSON.stringify({
-      id: inserted.id,
-      name: inserted.name,
-      type: inserted.type,
-    }), { status: 201, headers: { 'Content-Type': 'application/json' } });
-  } catch (e: any) {
-    if (e.message?.includes('UNIQUE constraint failed')) {
-      return new Response(JSON.stringify({ error: 'Tag already exists' }), { status: 409, headers: { 'Content-Type': 'application/json' } });
+  if (existing) {
+    // If the tag already exists with the same type, return it
+    if (existing.type === data.type) {
+      return new Response(JSON.stringify({ data: existing }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      });
     }
-    throw e;
+    // Name taken by a different tag type
+    return new Response(JSON.stringify({
+      error: `Tag name "${data.name}" already exists as a ${existing.type} tag`,
+    }), {
+      status: 409,
+      headers: { 'Content-Type': 'application/json' },
+    });
   }
+
+  // Create the tag
+  const [newTag] = await db
+    .insert(tags)
+    .values({
+      name: data.name,
+      type: data.type,
+      description: data.description ?? null,
+      canonical: data.canonical ? 1 : 0,
+    })
+    .returning();
+
+  return new Response(JSON.stringify({ data: newTag }), {
+    status: 201,
+    headers: { 'Content-Type': 'application/json' },
+  });
 };

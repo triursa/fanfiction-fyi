@@ -1,0 +1,664 @@
+---
+export const prerender = false;
+export const config = { auth: 'optional' };
+import Base from '../../../layouts/Base.astro';
+
+const workId = Number(Astro.params.id);
+if (!workId || Number.isNaN(workId)) {
+  return Astro.redirect('/works');
+}
+
+// Fetch work
+let work: any = null;
+let chapters: any[] = [];
+let errorMsg: string | null = null;
+
+try {
+  const workRes = await fetch(new URL(`/api/works/${workId}`, Astro.url));
+  if (!workRes.ok) {
+    return Astro.redirect('/works');
+  }
+  const workJson = await workRes.json();
+  work = workJson.data;
+} catch {
+  errorMsg = 'Failed to load work.';
+}
+
+// Fetch chapters list
+if (work) {
+  try {
+    const chapRes = await fetch(new URL(`/api/works/${workId}/chapters`, Astro.url));
+    if (chapRes.ok) {
+      const chapJson = await chapRes.json();
+      chapters = chapJson.data ?? [];
+    }
+  } catch {
+    // Non-fatal — show work without chapter list
+  }
+}
+
+if (!work && !errorMsg) {
+  return Astro.redirect('/works');
+}
+
+// Derived data
+const authorPseuds = work.authors?.map((a: any) => a.name).join(', ') ?? 'Unknown';
+const fandoms = work.tags?.filter((t: any) => t.type === 'fandom') ?? [];
+const characters = work.tags?.filter((t: any) => t.type === 'character') ?? [];
+const relationships = work.tags?.filter((t: any) => t.type === 'relationship') ?? [];
+const freeforms = work.tags?.filter((t: any) => t.type === 'freeform') ?? [];
+const ratings = work.tags?.filter((t: any) => t.type === 'rating') ?? [];
+const warnings = work.tags?.filter((t: any) => t.type === 'warning') ?? [];
+const categories = work.tags?.filter((t: any) => t.type === 'category') ?? [];
+
+const isComplete = !!work.complete;
+const wordCount = work.wordCount?.toLocaleString() ?? '0';
+const readingTime = work.wordCount ? Math.max(1, Math.round(work.wordCount / 250)) : '?';
+const pubDate = work.publishedAt ? new Date(work.publishedAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : null;
+const updateDate = work.updatedAt ? new Date(work.updatedAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : null;
+const user = Astro.locals.user;
+
+// Fetch recommendations (non-fatal)
+let recommendations: any[] = [];
+let recMethod: string | null = null;
+if (work) {
+  try {
+    const recRes = await fetch(new URL(`/api/works/${workId}/recommendations`, Astro.url));
+    if (recRes.ok) {
+      const recJson = await recRes.json();
+      recommendations = recJson.recommendations ?? [];
+      recMethod = recJson.method ?? null;
+    }
+  } catch {
+    // Non-fatal — show work without recommendations
+  }
+}
+
+const MATCH_LABELS: Record<string, string> = {
+  kudos: 'Readers Also Liked',
+  tags: 'Similar Tags',
+  recent: 'Popular',
+};
+---
+
+<Base title={`${work.title} — fanfiction.fyi`} description={work.summary || `Read ${work.title} on fanfiction.fyi`}>
+  <section class="work-detail">
+    {errorMsg ? (
+      <p class="error-msg">{errorMsg}</p>
+    ) : (
+      <div class="work-layout">
+        <!-- ─── Main content ──────────────────────────── -->
+        <article class="work-main">
+          <header class="work-header">
+            <h1 class="work-title">{work.title}</h1>
+            <p class="work-author">by {authorPseuds}</p>
+
+            {ratings.length > 0 && (
+              <div class="tag-row">
+                <span class="tag-label">Rating:</span>
+                {ratings.map((t: any) => (
+                  <a href={`/works?rating=${encodeURIComponent(t.name)}`} class="tag tag-rating">{t.name}</a>
+                ))}
+              </div>
+            )}
+            {warnings.length > 0 && (
+              <div class="tag-row">
+                <span class="tag-label">Warnings:</span>
+                {warnings.map((t: any) => (
+                  <a href={`/works?warning=${encodeURIComponent(t.name)}`} class="tag tag-warning">{t.name}</a>
+                ))}
+              </div>
+            )}
+            {categories.length > 0 && (
+              <div class="tag-row">
+                <span class="tag-label">Category:</span>
+                {categories.map((t: any) => (
+                  <a href={`/works?category=${encodeURIComponent(t.name)}`} class="tag">{t.name}</a>
+                ))}
+              </div>
+            )}
+            {fandoms.length > 0 && (
+              <div class="tag-row">
+                <span class="tag-label">Fandom:</span>
+                {fandoms.map((t: any) => (
+                  <a href={`/works?fandom=${encodeURIComponent(t.name)}`} class="tag tag-fandom">{t.name}</a>
+                ))}
+              </div>
+            )}
+          </header>
+
+          {work.summary && (
+            <section class="work-summary">
+              <h2 class="section-heading">Summary</h2>
+              <p>{work.summary}</p>
+            </section>
+          )}
+
+          {work.notes && (
+            <section class="work-notes">
+              <h2 class="section-heading">Author's Notes</h2>
+              <div class="notes-content" set:html={work.notes} />
+            </section>
+          )}
+
+          <!-- First chapter content or link to reader -->
+          {chapters.length > 0 ? (
+            <div class="read-link">
+              <a href={`/works/${workId}/chapters/${chapters[0].id}`} class="btn-filled">
+                Start Reading →
+              </a>
+            </div>
+          ) : (
+            <p class="empty-msg">No chapters published yet.</p>
+          )}
+        </article>
+
+        <!-- ─── Sidebar ──────────────────────────────── -->
+        <aside class="work-sidebar">
+          {/* Stats card */}
+          <div class="stats-card">
+            <dl class="stats-grid">
+              <dt>Words</dt>
+              <dd>{wordCount}</dd>
+              <dt>Chapters</dt>
+              <dd>{work.chapterCount ?? chapters.length}</dd>
+              <dt>Reading Time</dt>
+              <dd>{readingTime} min</dd>
+              <dt>Status</dt>
+              <dd>{isComplete ? 'Complete' : 'Work in Progress'}</dd>
+              {pubDate && (<><dt>Published</dt><dd>{pubDate}</dd></>)}
+              {updateDate && (<><dt>Updated</dt><dd>{updateDate}</dd></>)}
+              <dt>Language</dt>
+              <dd>{work.language ?? 'en'}</dd>
+            </dl>
+
+            {/* Kudos button */}
+            <div class="action-row">
+              <button id="kudos-btn" class="btn-outlined action-btn" data-work-id={workId}>
+                ❤ <span id="kudos-count">{work.kudosCount ?? 0}</span> Kudos
+              </button>
+              {user && (
+                <button id="bookmark-btn" class="btn-outlined action-btn" data-work-id={workId}>
+                  ★ Mark for Later
+                </button>
+              )}
+            </div>
+          </div>
+
+          {/* Characters / Relationships / Freeform tags */}
+          {characters.length > 0 && (
+            <div class="sidebar-section">
+              <h3 class="sidebar-heading">Characters</h3>
+              <div class="tag-cluster">
+                {characters.map((t: any) => (
+                  <a href={`/works?character=${encodeURIComponent(t.name)}`} class="sidebar-tag">{t.name}</a>
+                ))}
+              </div>
+            </div>
+          )}
+          {relationships.length > 0 && (
+            <div class="sidebar-section">
+              <h3 class="sidebar-heading">Relationships</h3>
+              <div class="tag-cluster">
+                {relationships.map((t: any) => (
+                  <a href={`/works?relationship=${encodeURIComponent(t.name)}`} class="sidebar-tag">{t.name}</a>
+                ))}
+              </div>
+            </div>
+          )}
+          {freeforms.length > 0 && (
+            <div class="sidebar-section">
+              <h3 class="sidebar-heading">Additional Tags</h3>
+              <div class="tag-cluster">
+                {freeforms.map((t: any) => (
+                  <a href={`/works?freeform=${encodeURIComponent(t.name)}`} class="sidebar-tag">{t.name}</a>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Chapter list */}
+          {chapters.length > 1 && (
+            <div class="sidebar-section">
+              <h3 class="sidebar-heading">Chapters</h3>
+              <ol class="chapter-list">
+                {chapters.map((c: any, i: number) => (
+                  <li>
+                    <a href={`/works/${workId}/chapters/${c.id}`}>
+                      <span class="chapter-num">{i + 1}.</span> {c.title || `Chapter ${c.position}`}
+                      <span class="chapter-meta">{c.wordCount?.toLocaleString() ?? '0'} words</span>
+                    </a>
+                  </li>
+                ))}
+              </ol>
+            </div>
+          )}
+        </aside>
+      </div>
+    )}
+
+    {/* ─── Recommendations ─────────────────────────────────── */}
+    {work && recommendations.length > 0 && (
+      <section class="recommendations">
+        <h2 class="recommendations-heading">You Might Also Like</h2>
+        <div class="recommendations-grid">
+          {recommendations.map((rec: any) => (
+            <a href={`/works/${rec.id}`} class="rec-card">
+              <div class="rec-card-header">
+                <h3 class="rec-card-title">{rec.title}</h3>
+                <span class={`rec-card-badge rec-badge-${rec.matchMethod}`}>
+                  {MATCH_LABELS[rec.matchMethod] ?? rec.matchMethod}
+                </span>
+              </div>
+              <p class="rec-card-author">
+                by {rec.authors?.map((a: any) => a.pseudName).join(', ') || 'Unknown'}
+              </p>
+              {rec.summary && (
+                <p class="rec-card-summary">{rec.summary}</p>
+              )}
+              <div class="rec-card-meta">
+                <span>{rec.wordCount?.toLocaleString() ?? '0'} words</span>
+                {rec.complete ? <span>· Complete</span> : <span>· WIP</span>}
+                {rec.fandoms?.length > 0 && (
+                  <span> · {rec.fandoms.slice(0, 2).map((f: any) => f.name).join(', ')}</span>
+                )}
+              </div>
+            </a>
+          ))}
+        </div>
+      </section>
+    )}
+  </section>
+</Base>
+
+<script>
+  // Kudos button
+  const kudosBtn = document.getElementById('kudos-btn');
+  if (kudosBtn) {
+    kudosBtn.addEventListener('click', async () => {
+      const workId = kudosBtn.getAttribute('data-work-id');
+      try {
+        const res = await fetch(`/api/works/${workId}/kudos`, { method: 'POST' });
+        if (res.ok) {
+          const countEl = document.getElementById('kudos-count');
+          if (countEl) countEl.textContent = String(Number(countEl.textContent) + 1);
+          kudosBtn.classList.add('kudos-given');
+          kudosBtn.textContent = '❤ Kudos Given';
+          (kudosBtn as HTMLButtonElement).disabled = true;
+        }
+      } catch { /* non-fatal */ }
+    });
+  }
+
+  // Bookmark / Mark for later
+  const bookmarkBtn = document.getElementById('bookmark-btn');
+  if (bookmarkBtn) {
+    bookmarkBtn.addEventListener('click', async () => {
+      const workId = bookmarkBtn.getAttribute('data-work-id');
+      try {
+        const res = await fetch('/api/readings', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ workId: Number(workId), forLater: true }),
+        });
+        if (res.ok) {
+          bookmarkBtn.textContent = '★ Marked for Later';
+          (bookmarkBtn as HTMLButtonElement).disabled = true;
+        }
+      } catch { /* non-fatal */ }
+    });
+  }
+</script>
+
+<style is:global>
+  .work-detail {
+    max-width: 72rem;
+    margin: 0 auto;
+    padding: var(--space-8) var(--space-4);
+  }
+
+  .work-layout {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: var(--space-8);
+  }
+
+  @media (min-width: 768px) {
+    .work-layout {
+      grid-template-columns: 1fr 320px;
+    }
+  }
+
+  /* ─── Main content ──────────────────────────────── */
+  .work-main { min-width: 0; }
+
+  .work-header { margin-bottom: var(--space-6); }
+
+  .work-title {
+    font: var(--md-sys-typescale-headline-medium);
+    margin: 0 0 var(--space-2) 0;
+  }
+
+  .work-author {
+    font: var(--md-sys-typescale-body-large);
+    color: var(--md-sys-color-on-surface-variant);
+    margin: 0 0 var(--space-4) 0;
+  }
+
+  .tag-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-1);
+    margin-bottom: var(--space-1);
+  }
+
+  .tag-label {
+    font: var(--md-sys-typescale-label-large);
+    color: var(--md-sys-color-on-surface-variant);
+    margin-right: var(--space-1);
+  }
+
+  .tag {
+    font: var(--md-sys-typescale-body-small);
+    color: var(--md-sys-color-primary);
+    background: var(--md-sys-color-surface-container);
+    border-radius: var(--md-sys-shape-corner-small);
+    padding: 2px 8px;
+    text-decoration: none;
+    transition: background var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard);
+  }
+  .tag:hover { background: var(--md-sys-color-surface-container-high); }
+
+  .tag-rating { color: #c62828; }
+  .tag-warning { color: #e65100; }
+  .tag-fandom { background: var(--md-sys-color-primary-container); color: var(--md-sys-color-on-primary-container); }
+
+  .work-summary {
+    background: var(--md-sys-color-surface-container);
+    border-radius: var(--md-sys-shape-corner-large);
+    padding: var(--space-4) var(--space-6);
+    margin-bottom: var(--space-6);
+  }
+
+  .work-summary p {
+    font: var(--md-sys-typescale-body-large);
+    font-family: 'Merriweather', serif;
+    line-height: 1.7;
+    color: var(--md-sys-color-on-surface);
+  }
+
+  .work-notes {
+    border-left: 3px solid var(--md-sys-color-outline-variant);
+    padding-left: var(--space-4);
+    margin-bottom: var(--space-6);
+  }
+
+  .notes-content {
+    font: var(--md-sys-typescale-body-medium);
+    color: var(--md-sys-color-on-surface-variant);
+  }
+
+  .section-heading {
+    font: var(--md-sys-typescale-label-large);
+    color: var(--md-sys-color-on-surface-variant);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    margin: 0 0 var(--space-2) 0;
+    font-size: 0.75rem;
+  }
+
+  .read-link { margin: var(--space-6) 0; }
+
+  .btn-filled {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font: var(--md-sys-typescale-label-large);
+    color: var(--md-sys-color-on-primary);
+    background: var(--md-sys-color-primary);
+    border-radius: var(--md-sys-shape-corner-full);
+    padding: var(--space-3) var(--space-8);
+    text-decoration: none;
+    transition: opacity var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard);
+  }
+  .btn-filled:hover { opacity: 0.88; }
+
+  .btn-outlined {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font: var(--md-sys-typescale-label-large);
+    color: var(--md-sys-color-primary);
+    background: transparent;
+    border: 1px solid var(--md-sys-color-outline);
+    border-radius: var(--md-sys-shape-corner-full);
+    padding: var(--space-2) var(--space-4);
+    cursor: pointer;
+    transition: background var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard);
+  }
+  .btn-outlined:hover { background: var(--md-sys-color-primary-container); }
+  .btn-outlined:disabled { opacity: 0.5; cursor: default; }
+
+  .kudos-given {
+    color: #c62828;
+    border-color: #c62828;
+  }
+
+  /* ─── Sidebar ──────────────────────────────────────── */
+  .work-sidebar {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-6);
+  }
+
+  .stats-card {
+    background: var(--md-sys-color-surface-container);
+    border: 1px solid var(--md-sys-color-outline-variant);
+    border-radius: var(--md-sys-shape-corner-large);
+    padding: var(--space-4) var(--space-6);
+  }
+
+  .stats-grid {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: var(--space-1) var(--space-4);
+    margin: 0;
+  }
+
+  .stats-grid dt {
+    font: var(--md-sys-typescale-label-large);
+    color: var(--md-sys-color-on-surface-variant);
+    font-size: 0.8rem;
+  }
+
+  .stats-grid dd {
+    font: var(--md-sys-typescale-body-medium);
+    color: var(--md-sys-color-on-surface);
+    margin: 0;
+  }
+
+  .action-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-2);
+    margin-top: var(--space-4);
+  }
+
+  .action-btn {
+    font: var(--md-sys-typescale-label-large);
+  }
+
+  .sidebar-section { margin: 0; }
+
+  .sidebar-heading {
+    font: var(--md-sys-typescale-label-large);
+    color: var(--md-sys-color-on-surface-variant);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    font-size: 0.75rem;
+    margin: 0 0 var(--space-2) 0;
+  }
+
+  .tag-cluster {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-1);
+  }
+
+  .sidebar-tag {
+    font: var(--md-sys-typescale-body-small);
+    color: var(--md-sys-color-primary);
+    background: var(--md-sys-color-primary-container);
+    border-radius: var(--md-sys-shape-corner-full);
+    padding: 2px 10px;
+    text-decoration: none;
+    transition: opacity var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard);
+  }
+  .sidebar-tag:hover { opacity: 0.8; }
+
+  .chapter-list {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+  }
+
+  .chapter-list li {
+    border-bottom: 1px solid var(--md-sys-color-outline-variant);
+  }
+  .chapter-list li:last-child { border-bottom: none; }
+
+  .chapter-list a {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    padding: var(--space-2) 0;
+    text-decoration: none;
+    color: var(--md-sys-color-primary);
+    font: var(--md-sys-typescale-body-medium);
+  }
+
+  .chapter-num {
+    color: var(--md-sys-color-on-surface-variant);
+    margin-right: var(--space-1);
+  }
+
+  .chapter-meta {
+    font: var(--md-sys-typescale-body-small);
+    color: var(--md-sys-color-on-surface-variant);
+  }
+
+  .error-msg {
+    color: var(--md-sys-color-error);
+    font: var(--md-sys-typescale-body-large);
+  }
+
+  /* ─── Recommendations ──────────────────────────────────── */
+  .recommendations {
+    margin-top: var(--space-8);
+    padding-top: var(--space-8);
+    border-top: 1px solid var(--md-sys-color-outline-variant);
+  }
+
+  .recommendations-heading {
+    font: var(--md-sys-typescale-headline-small);
+    color: var(--md-sys-color-on-surface);
+    margin: 0 0 var(--space-6) 0;
+  }
+
+  .recommendations-grid {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: var(--space-4);
+  }
+
+  @media (min-width: 768px) {
+    .recommendations-grid {
+      grid-template-columns: repeat(3, 1fr);
+    }
+  }
+
+  .rec-card {
+    display: flex;
+    flex-direction: column;
+    background: var(--md-sys-color-surface-container);
+    border: 1px solid var(--md-sys-color-outline-variant);
+    border-radius: var(--md-sys-shape-corner-large);
+    padding: var(--space-4);
+    text-decoration: none;
+    color: var(--md-sys-color-on-surface);
+    transition: background var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard),
+                box-shadow var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard);
+  }
+
+  .rec-card:hover {
+    background: var(--md-sys-color-surface-container-high);
+    box-shadow: var(--md-sys-elevation-level1);
+  }
+
+  .rec-card-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: var(--space-2);
+    margin-bottom: var(--space-1);
+  }
+
+  .rec-card-title {
+    font: var(--md-sys-typescale-title-medium);
+    color: var(--md-sys-color-on-surface);
+    margin: 0;
+    flex: 1;
+    min-width: 0;
+  }
+
+  .rec-card-badge {
+    font: var(--md-sys-typescale-label-small);
+    border-radius: var(--md-sys-shape-corner-full);
+    padding: 2px 8px;
+    white-space: nowrap;
+    flex-shrink: 0;
+  }
+
+  .rec-badge-kudos {
+    background: var(--md-sys-color-tertiary-container);
+    color: var(--md-sys-color-on-tertiary-container);
+  }
+
+  .rec-badge-tags {
+    background: var(--md-sys-color-secondary-container);
+    color: var(--md-sys-color-on-secondary-container);
+  }
+
+  .rec-badge-recent {
+    background: var(--md-sys-color-primary-container);
+    color: var(--md-sys-color-on-primary-container);
+  }
+
+  .rec-card-author {
+    font: var(--md-sys-typescale-body-small);
+    color: var(--md-sys-color-on-surface-variant);
+    margin: 0 0 var(--space-2) 0;
+  }
+
+  .rec-card-summary {
+    font: var(--md-sys-typescale-body-small);
+    color: var(--md-sys-color-on-surface-variant);
+    margin: 0 0 var(--space-2) 0;
+    display: -webkit-box;
+    -webkit-line-clamp: 3;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+
+  .rec-card-meta {
+    font: var(--md-sys-typescale-label-small);
+    color: var(--md-sys-color-on-surface-variant);
+    margin-top: auto;
+  }
+
+  .empty-msg {
+    color: var(--md-sys-color-on-surface-variant);
+    font: var(--md-sys-typescale-body-large);
+  }
+</style>

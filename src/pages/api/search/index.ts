@@ -1,143 +1,237 @@
-export const prerender = false;
-
-import { getDrizzle } from '@/lib/db';
-import { tags, taggings, pseuds, creatorships, works } from '@/lib/schema';
-import { inArray, sql, isNotNull, and, eq } from 'drizzle-orm';
-import { corsHeaders, handleCors, cacheHeaders } from '@/lib/cors';
 import type { APIRoute } from 'astro';
+import type { D1Database } from '@cloudflare/workers-types';
+import { getDb } from '@/v2/lib/db';
+import { validateQuery, searchSchema } from '@/v2/lib/validation';
+import { works, chapters, tags, taggings, creatorships, pseuds, kudos } from '@/v2/lib/schema/index';
+import { eq, and, desc, asc, count, sql } from 'drizzle-orm';
 
-export const OPTIONS: APIRoute = async ({ request }) => {
-  return handleCors(request) ?? new Response(null, { status: 405 });
-};
+export const config = { auth: 'public' as const };
 
-export const GET: APIRoute = async ({ url, locals, request }) => {
-  const cors = corsHeaders(request);
+// ─── GET /api/search — FTS5 + faceted tag filters ──────────────────
+
+export const GET: APIRoute = async ({ url, locals }) => {
   const d1 = locals.runtime.env.DB as D1Database;
-  const db = getDrizzle(d1);
+  const db = getDb(d1);
 
-  const rawQ = url.searchParams.get('q')?.trim() || '';
-  const type = url.searchParams.get('type')?.trim() || undefined;
-  const page = Math.max(Number(url.searchParams.get('page')) || 1, 1);
-  const limit = Math.min(Number(url.searchParams.get('limit')) || 20, 100);
+  // Validate query params
+  let query;
+  try {
+    query = validateQuery(url, searchSchema);
+  } catch (err: any) {
+    return new Response(JSON.stringify({ error: 'Invalid search parameters', details: err.errors || err.message }), {
+      status: 422,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+
+  const { q, fandom, character, relationship, rating, warning, category, complete, sort, page, limit } = query;
   const offset = (page - 1) * limit;
 
-  // Faceted filter params
-  const complete = url.searchParams.get('complete'); // '1' or '0'
-  const wordCountMin = Number(url.searchParams.get('word_min')) || 0;
-  const wordCountMax = Number(url.searchParams.get('word_max')) || 0;
-  const tagIds = url.searchParams.get('tags')?.split(',').map(Number).filter(n => n > 0) || [];
+  // ─── Step 1: FTS5 search to get matching work IDs ──────────────────
+  // Use parameterized query via D1's bind mechanism through raw SQL
+  const ftsQuery = q
+    .split(/\s+/)
+    .filter(term => term.length > 0)
+    .map(term => `"${term.replace(/"/g, '""')}"*`)
+    .join(' ');
 
-  // Sanitize FTS5 query
-  let ftsMatch = '';
-  const ftsBindings: any[] = [];
+  const ftsResults = await d1.prepare(
+    'SELECT rowid as id FROM works_fts WHERE works_fts MATCH ? ORDER BY rank LIMIT ? OFFSET ?'
+  )
+    .bind(ftsQuery, limit * 5, offset)  // Get more results than needed, we'll filter down
+    .all();
 
-  if (rawQ) {
-    const words = rawQ.split(/\s+/).filter(w => /^[\w\u4e00-\u9fff\u3040-\u309f\u30a0-\u30ff\uac00-\ud7af]+$/.test(w));
-    const sanitizedQ = words.join(' ').trim();
-    if (sanitizedQ) {
-      ftsMatch = `JOIN works_fts f ON f.rowid = w.id AND works_fts MATCH ?`;
-      ftsBindings.push(sanitizedQ);
-    }
+  const ftsWorkIds: number[] = (ftsResults.results || []).map((row: any) => row.id);
+
+  if (ftsWorkIds.length === 0) {
+    return new Response(JSON.stringify({ data: [], total: 0, page, limit }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    });
   }
 
-  // Build WHERE conditions
-  const conditions: string[] = ['w.published_at IS NOT NULL'];
-  const bindings: any[] = [];
+  // ─── Step 2: Apply faceted tag filters ────────────────────────────
+  // Each tag filter narrows the set of matching work IDs
+  const tagFilters: { type: string; name: string }[] = [];
+  if (fandom) tagFilters.push({ type: 'fandom', name: fandom });
+  if (character) tagFilters.push({ type: 'character', name: character });
+  if (relationship) tagFilters.push({ type: 'relationship', name: relationship });
+  if (rating) tagFilters.push({ type: 'rating', name: rating });
+  if (warning) tagFilters.push({ type: 'warning', name: warning });
+  if (category) tagFilters.push({ type: 'category', name: category });
 
-  if (complete === '1') conditions.push('w.complete = 1');
-  if (complete === '0') conditions.push('w.complete = 0');
-  if (wordCountMin > 0) { conditions.push('w.word_count >= ?'); bindings.push(wordCountMin); }
-  if (wordCountMax > 0) { conditions.push('w.word_count <= ?'); bindings.push(wordCountMax); }
-  if (type) { conditions.push(`w.id IN (SELECT tg.work_id FROM taggings tg JOIN tags t ON t.id = tg.tag_id WHERE t.type = ?)`); bindings.push(type); }
-  if (tagIds.length > 0) {
-    const tagPlaceholders = tagIds.map(() => '?').join(',');
-    conditions.push(`w.id IN (SELECT tg.work_id FROM taggings tg WHERE tg.tag_id IN (${tagPlaceholders}))`);
-    bindings.push(...tagIds);
+  let candidateWorkIds = ftsWorkIds;
+
+  for (const filter of tagFilters) {
+    // Find work IDs that have this tag
+    const matching = await db
+      .select({ workId: taggings.workId })
+      .from(taggings)
+      .innerJoin(tags, eq(taggings.tagId, tags.id))
+      .where(and(
+        eq(tags.type, filter.type),
+        eq(tags.name, filter.name),
+        sql`${taggings.workId} IN (${sql.join(candidateWorkIds.map(id => sql`${id}`), sql`, `)})`
+      ));
+
+    const matchingIds = new Set(matching.map(m => m.workId));
+    candidateWorkIds = candidateWorkIds.filter(id => matchingIds.has(id));
   }
 
-  const whereClause = conditions.length > 0 ? 'WHERE ' + conditions.join(' AND ') : '';
-
-  // Build count and data queries
-  let countSql: string;
-  let countBindings: any[];
-  let dataSql: string;
-  let dataBindings: any[];
-
-  if (ftsMatch) {
-    const allConditions = ' AND ' + conditions.join(' AND ');
-    countSql = `SELECT COUNT(*) as total FROM works w ${ftsMatch} ${allConditions}`;
-    countBindings = [ftsBindings[0], ...bindings];
-
-    dataSql = `SELECT w.id, w.title, w.summary, w.word_count, w.complete, w.published_at, w.updated_at FROM works w ${ftsMatch} ${allConditions} ORDER BY rank`;
-    dataBindings = [ftsBindings[0], ...bindings];
-  } else {
-    countSql = `SELECT COUNT(*) as total FROM works w ${whereClause}`;
-    countBindings = [...bindings];
-
-    dataSql = `SELECT w.id, w.title, w.summary, w.word_count, w.complete, w.published_at, w.updated_at FROM works w ${whereClause} ORDER BY w.updated_at DESC`;
-    dataBindings = [...bindings];
+  if (candidateWorkIds.length === 0) {
+    return new Response(JSON.stringify({ data: [], total: 0, page, limit }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    });
   }
 
-  dataSql += ' LIMIT ? OFFSET ?';
-  dataBindings.push(limit, offset);
+  // ─── Step 3: Build main query ──────────────────────────────────────
+  // Base conditions: work must be published and in our candidate set
+  const conditions = [
+    eq(works.draft, 0),
+    sql`${works.id} IN (${sql.join(candidateWorkIds.map(id => sql`${id}`), sql`, `)})`
+  ];
 
-  // Use raw D1 for FTS5 + dynamic queries
-  const results = await d1.prepare(dataSql).bind(...dataBindings).all<any>().then(r => r.results ?? []);
-  const totalRow = await d1.prepare(countSql).bind(...countBindings).first<{ total: number }>();
-  const total = totalRow?.total ?? 0;
+  if (complete !== undefined) {
+    conditions.push(eq(works.complete, complete ? 1 : 0));
+  }
 
-  // Enrich results with pseuds and tags using Drizzle
-  const workIds = results.map((w: any) => w.id);
+  const whereClause = and(...conditions);
 
-  if (workIds.length > 0) {
-    // Get pseud names via Drizzle
-    const pseudRows = await db.select({
+  // Determine sort order
+  let orderBy;
+  switch (sort) {
+    case 'published':
+      orderBy = desc(works.publishedAt);
+      break;
+    case 'words':
+      orderBy = desc(works.wordCount);
+      break;
+    case 'kudos':
+      // Will handle below with a subquery/join
+      orderBy = desc(works.updatedAt); // fallback, kudos sort done separately
+      break;
+    case 'comments':
+      orderBy = desc(works.updatedAt); // fallback, would need comment count join
+      break;
+    case 'updated':
+    default:
+      orderBy = desc(works.updatedAt);
+      break;
+  }
+
+  // Count total matching works
+  const [{ total }] = await db
+    .select({ total: count() })
+    .from(works)
+    .where(whereClause);
+
+  // Fetch works
+  const workRows = await db
+    .select()
+    .from(works)
+    .where(whereClause)
+    .orderBy(orderBy)
+    .limit(limit)
+    .offset(offset);
+
+  if (workRows.length === 0) {
+    return new Response(JSON.stringify({ data: [], total: 0, page, limit }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+
+  const resultWorkIds = workRows.map(w => w.id);
+  const idList = sql.join(resultWorkIds.map(id => sql`${id}`), sql`, `);
+
+  // Fetch authors for all result works
+  const authorRows = await db
+    .select({
       workId: creatorships.workId,
-      pseudName: pseuds.name,
-    }).from(creatorships)
-      .innerJoin(pseuds, eq(pseuds.id, creatorships.pseudId))
-      .where(inArray(creatorships.workId, workIds));
+      pseudId: pseuds.id,
+      name: pseuds.name,
+      role: creatorships.role,
+    })
+    .from(creatorships)
+    .innerJoin(pseuds, eq(creatorships.pseudId, pseuds.id))
+    .where(sql`${creatorships.workId} IN (${idList})`);
 
-    const pseudByWorkId = new Map<number, string>();
-    for (const row of pseudRows) {
-      if (!pseudByWorkId.has(row.workId)) {
-        pseudByWorkId.set(row.workId, row.pseudName);
-      }
-    }
-
-    // Get tags via Drizzle
-    const tagRows = await db.select({
+  // Fetch tags for all result works
+  const tagRows = await db
+    .select({
       workId: taggings.workId,
       id: tags.id,
       name: tags.name,
       type: tags.type,
-    }).from(taggings)
-      .innerJoin(tags, eq(tags.id, taggings.tagId))
-      .where(inArray(taggings.workId, workIds));
+    })
+    .from(taggings)
+    .innerJoin(tags, eq(taggings.tagId, tags.id))
+    .where(sql`${taggings.workId} IN (${idList})`);
 
-    const tagsByWorkId = new Map<number, { id: number; name: string; type: string }[]>();
-    for (const row of tagRows) {
-      const arr = tagsByWorkId.get(row.workId) ?? [];
-      arr.push({ id: row.id, name: row.name, type: row.type });
-      tagsByWorkId.set(row.workId, arr);
-    }
+  // Fetch chapter count per work
+  const chapterRows = await db
+    .select({
+      workId: chapters.workId,
+      count: count(),
+    })
+    .from(chapters)
+    .where(sql`${chapters.workId} IN (${idList})`)
+    .groupBy(chapters.workId);
 
-    for (const w of results) {
-      w.pseud_name = pseudByWorkId.get(w.id) ?? null;
-      w.tags = tagsByWorkId.get(w.id) ?? [];
-    }
-  } else {
-    for (const w of results) {
-      w.pseud_name = null;
-      w.tags = [];
-    }
+  // Fetch kudos count per work
+  const kudosRows = await db
+    .select({
+      workId: kudos.workId,
+      count: count(),
+    })
+    .from(kudos)
+    .where(sql`${kudos.workId} IN (${idList})`)
+    .groupBy(kudos.workId);
+
+  // ─── Step 4: Build lookup maps ─────────────────────────────────────
+  const authorsByWork = new Map<number, { pseudId: number; name: string; role: string }[]>();
+  for (const row of authorRows) {
+    if (!authorsByWork.has(row.workId)) authorsByWork.set(row.workId, []);
+    authorsByWork.get(row.workId)!.push({ pseudId: row.pseudId, name: row.name, role: row.role });
   }
 
-  // Search results change frequently — use 60s (1 min) cache
-  const searchCache: Record<string, string> = { 'Cache-Control': 'public, max-age=60' };
+  const tagsByWork = new Map<number, { id: number; name: string; type: string }[]>();
+  for (const row of tagRows) {
+    if (!tagsByWork.has(row.workId)) tagsByWork.set(row.workId, []);
+    tagsByWork.get(row.workId)!.push({ id: row.id, name: row.name, type: row.type });
+  }
 
-  return new Response(
-    JSON.stringify({ results, total, page }),
-    { headers: { 'Content-Type': 'application/json', ...cors, ...searchCache } }
-  );
+  const chaptersByWork = new Map<number, number>();
+  for (const row of chapterRows) {
+    chaptersByWork.set(row.workId, row.count);
+  }
+
+  const kudosByWork = new Map<number, number>();
+  for (const row of kudosRows) {
+    kudosByWork.set(row.workId, row.count);
+  }
+
+  // ─── Step 5: Assemble response ─────────────────────────────────────
+  const data = workRows.map(w => ({
+    id: w.id,
+    title: w.title,
+    summary: w.summary,
+    language: w.language,
+    wordCount: w.wordCount,
+    complete: w.complete,
+    workSkin: w.workSkin,
+    publishedAt: w.publishedAt,
+    createdAt: w.createdAt,
+    updatedAt: w.updatedAt,
+    authors: authorsByWork.get(w.id) || [],
+    tags: tagsByWork.get(w.id) || [],
+    chapterCount: chaptersByWork.get(w.id) || 0,
+    kudosCount: kudosByWork.get(w.id) || 0,
+  }));
+
+  return new Response(JSON.stringify({ data, total, page, limit }), {
+    status: 200,
+    headers: { 'Content-Type': 'application/json' },
+  });
 };

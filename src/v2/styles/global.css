@@ -1,0 +1,152 @@
+/* ==========================================================================
+   Global styles — fanfiction.fyi v2
+   Imports tokens, applies minimal reset, link styles, a11y, and reading base.
+   ========================================================================== */
+
+@import './tokens.css';
+
+/* --------------------------------------------------------------------------
+   Minimal reset
+   -------------------------------------------------------------------------- */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+  margin: 0;
+}
+
+/* --------------------------------------------------------------------------
+   Base body
+   -------------------------------------------------------------------------- */
+body {
+  font: var(--md-sys-typescale-body-large);
+  color: var(--md-sys-color-on-surface);
+  background: var(--md-sys-color-surface);
+  min-height: 100vh;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* --------------------------------------------------------------------------
+   Links
+   -------------------------------------------------------------------------- */
+a {
+  color: var(--md-sys-color-primary);
+  text-decoration: none;
+}
+
+a:hover {
+  text-decoration: underline;
+}
+
+/* --------------------------------------------------------------------------
+   Accessibility — focus-visible
+   -------------------------------------------------------------------------- */
+:focus-visible {
+  outline: 2px solid var(--md-sys-color-primary);
+  outline-offset: 2px;
+  border-radius: var(--md-sys-shape-corner-extra-small);
+}
+
+/* Skip-only focus (no visible ring when skip-link is off-screen) */
+.skip-link:focus-visible {
+  outline-offset: 0;
+  border-radius: 0;
+}
+
+/* --------------------------------------------------------------------------
+   Accessibility — reduced motion
+   -------------------------------------------------------------------------- */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* --------------------------------------------------------------------------
+   Scrollbar styling (WebKit/Blink)
+   -------------------------------------------------------------------------- */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--md-sys-color-surface-container);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--md-sys-color-outline);
+  border-radius: var(--md-sys-shape-corner-full);
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--md-sys-color-on-surface-variant);
+}
+
+/* Firefox */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--md-sys-color-outline) var(--md-sys-color-surface-container);
+}
+
+/* --------------------------------------------------------------------------
+   .reading-container base
+   Reading skins are defined in tokens.css; this adds spacing and max-width.
+   -------------------------------------------------------------------------- */
+.reading-container {
+  max-width: var(--reading-width);
+  margin-inline: auto;
+  padding: var(--space-6);
+  line-height: 1.75;
+  font-size: 1.0625rem; /* 17px — slightly larger for long-form reading */
+}
+
+.reading-container p + p {
+  margin-top: var(--space-4);
+}
+
+.reading-container h1,
+.reading-container h2,
+.reading-container h3,
+.reading-container h4 {
+  font: var(--md-sys-typescale-headline-small);
+  color: var(--md-sys-color-on-surface);
+  margin-top: var(--space-8);
+  margin-bottom: var(--space-2);
+}
+
+.reading-container h1 { font: var(--md-sys-typescale-headline-large); }
+.reading-container h2 { font: var(--md-sys-typescale-headline-medium); }
+
+/* --------------------------------------------------------------------------
+   Font-size data attributes (user reading preference, scoped to content)
+   -------------------------------------------------------------------------- */
+.reading-container[data-font-size="small"]  { font-size: 0.9375rem; }
+.reading-container[data-font-size="default"] { font-size: 1.0625rem; }
+.reading-container[data-font-size="large"]  { font-size: 1.25rem; }
+.reading-container[data-font-size="x-large"] { font-size: 1.5rem; }
+
+/* --------------------------------------------------------------------------
+   Touch-safe hover — only apply hover styles on devices that support it
+   -------------------------------------------------------------------------- */
+@media (hover: hover) {
+  .nav-link:hover {
+    background: var(--md-sys-color-surface-container);
+  }
+}
+
+/* Non-hover devices: make interactive targets larger */
+@media (hover: none) {
+  .nav-link,
+  .nav-link-btn,
+  [role="button"] {
+    min-height: 44px;
+    min-width: 44px;
+  }
+}

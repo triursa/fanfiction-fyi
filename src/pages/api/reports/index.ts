@@ -1,144 +1,122 @@
-export const prerender = false;
-
+/**
+ * Public Report Submission API
+ * POST /api/reports — submit a content report (auth required, approved users only)
+ *
+ * Users can report works or comments for: harassment, spam, copyright, graphic, other.
+ * Each user can only submit one report per target (duplicate prevention).
+ */
 import type { APIRoute } from 'astro';
-import { getDrizzle } from '@/lib/db';
-import { requireAuth } from '@/lib/auth';
-import { contentReports, works, comments } from '@/lib/schema';
-import { checkRateLimit, recordFailedAttempt } from '@/lib/rate-limit';
-import { eq, and, gte, sql } from 'drizzle-orm';
+import type { D1Database } from '@cloudflare/workers-types';
+import { requireAuth, checkApproved } from '@/v2/lib/auth';
+import { getDb } from '@/v2/lib/db';
+import { contentReports, works, comments } from '@/v2/lib/schema/index';
+import { validateBody, createReportSchema } from '@/v2/lib/validation';
+import { eq, and } from 'drizzle-orm';
 
-const VALID_TARGET_TYPES = ['work', 'comment'] as const;
-const VALID_REASONS = ['harassment', 'spam', 'copyright', 'graphic', 'other'] as const;
-
-export const POST: APIRoute = async ({ locals, request }) => {
+export const POST: APIRoute = async ({ request, locals }) => {
   const d1 = locals.runtime.env.DB as D1Database;
-  const db = getDrizzle(d1);
-
-  // Auth required
   const auth = await requireAuth(d1, request);
-  if (!auth) {
-    return new Response(JSON.stringify({ error: 'Auth required' }), {
-      status: 401,
-      headers: { 'Content-Type': 'application/json' },
-    });
-  }
+  checkApproved(auth);
 
-  // Rate limit: 5 reports per hour per user
-  const rlKey = `report:${auth.user.id}`;
-  const rl = await checkRateLimit(d1, rlKey, 'report');
-  if (!rl.allowed) {
-    return new Response(JSON.stringify({ error: 'Rate limit exceeded. Try again later.' }), {
-      status: 429,
-      headers: {
-        'Content-Type': 'application/json',
-        'Retry-After': String(rl.retryAfterSeconds),
-      },
-    });
-  }
+  // Validate request body
+  const [data, validationError] = await validateBody(request, createReportSchema);
+  if (validationError) return validationError;
 
-  // Parse body
-  let body: any;
-  try {
-    body = await request.json();
-  } catch {
-    return new Response(JSON.stringify({ error: 'Invalid JSON body' }), {
-      status: 400,
-      headers: { 'Content-Type': 'application/json' },
-    });
-  }
+  const { targetType, targetId, reason, details } = data;
+  const db = getDb(d1);
 
-  const { target_type, target_id, reason, details } = body;
-
-  // Validate target_type
-  if (!target_type || !VALID_TARGET_TYPES.includes(target_type)) {
-    return new Response(JSON.stringify({ error: 'Invalid target_type. Must be "work" or "comment".' }), {
-      status: 400,
-      headers: { 'Content-Type': 'application/json' },
-    });
-  }
-
-  // Validate target_id
-  if (!target_id || typeof target_id !== 'number' || !Number.isInteger(target_id)) {
-    return new Response(JSON.stringify({ error: 'Invalid target_id. Must be an integer.' }), {
-      status: 400,
-      headers: { 'Content-Type': 'application/json' },
-    });
-  }
-
-  // Validate reason
-  if (!reason || !VALID_REASONS.includes(reason)) {
-    return new Response(JSON.stringify({ error: 'Invalid reason. Must be one of: harassment, spam, copyright, graphic, other.' }), {
-      status: 400,
-      headers: { 'Content-Type': 'application/json' },
-    });
-  }
-
-  // Validate target exists
-  if (target_type === 'work') {
-    const work = await db.select({ id: works.id }).from(works).where(eq(works.id, target_id)).get();
+  // ─── Verify target exists ────────────────────────────────────────
+  if (targetType === 'work') {
+    const work = await db.select({ id: works.id }).from(works).where(eq(works.id, targetId)).get();
     if (!work) {
-      return new Response(JSON.stringify({ error: 'Work not found.' }), {
+      return new Response(JSON.stringify({ error: 'Work not found' }), {
         status: 404,
         headers: { 'Content-Type': 'application/json' },
       });
     }
-  } else if (target_type === 'comment') {
-    const comment = await db.select({ id: comments.id }).from(comments).where(eq(comments.id, target_id)).get();
+  } else if (targetType === 'comment') {
+    const comment = await db.select({ id: comments.id }).from(comments).where(eq(comments.id, targetId)).get();
     if (!comment) {
-      return new Response(JSON.stringify({ error: 'Comment not found.' }), {
+      return new Response(JSON.stringify({ error: 'Comment not found' }), {
         status: 404,
         headers: { 'Content-Type': 'application/json' },
       });
     }
   }
 
-  // Check for duplicate report (same reporter, same target, still open)
-  const existing = await db.select({ id: contentReports.id })
+  // ─── Prevent duplicate reports ───────────────────────────────────
+  const existing = await db
+    .select({ id: contentReports.id })
     .from(contentReports)
-    .where(and(
-      eq(contentReports.reporterId, auth.user.id),
-      eq(contentReports.targetType, target_type),
-      eq(contentReports.targetId, target_id),
-      eq(contentReports.status, 'open'),
-    ))
+    .where(
+      and(
+        eq(contentReports.reporterId, auth.user.id),
+        eq(contentReports.targetType, targetType),
+        eq(contentReports.targetId, targetId),
+      ),
+    )
     .get();
 
   if (existing) {
-    return new Response(JSON.stringify({ error: 'You have already reported this content and it is still under review.' }), {
+    return new Response(JSON.stringify({ error: 'You have already reported this content' }), {
       status: 409,
       headers: { 'Content-Type': 'application/json' },
     });
   }
 
-  // Record rate limit attempt
-  await recordFailedAttempt(d1, rlKey, 'report');
-
-  // Insert report
+  // ─── Create report ───────────────────────────────────────────────
+  const now = new Date().toISOString();
   const result = await db.insert(contentReports).values({
     reporterId: auth.user.id,
-    targetType: target_type,
-    targetId: target_id,
+    targetType,
+    targetId,
     reason,
     details: details || null,
-  }).returning().get();
+    status: 'open',
+    createdAt: now,
+    updatedAt: now,
+  }).returning({ id: contentReports.id });
 
-  // Return as snake_case
-  const report = {
-    id: result.id,
-    reporter_id: result.reporterId,
-    target_type: result.targetType,
-    target_id: result.targetId,
-    reason: result.reason,
-    details: result.details,
-    status: result.status,
-    resolver_id: result.resolverId,
-    resolution: result.resolution,
-    created_at: result.createdAt,
-    resolved_at: result.resolvedAt,
-  };
+  const reportId = result[0].id;
 
-  return new Response(JSON.stringify(report), {
+  // Fetch the full report to return
+  const report = await db
+    .select()
+    .from(contentReports)
+    .where(eq(contentReports.id, reportId))
+    .get();
+
+  return new Response(JSON.stringify({ data: report }), {
     status: 201,
     headers: { 'Content-Type': 'application/json' },
+  });
+};
+
+// All other methods are not allowed
+export const GET: APIRoute = async () => {
+  return new Response(JSON.stringify({ error: 'Method not allowed' }), {
+    status: 405,
+    headers: { 'Content-Type': 'application/json', 'Allow': 'POST' },
+  });
+};
+
+export const PUT: APIRoute = async () => {
+  return new Response(JSON.stringify({ error: 'Method not allowed' }), {
+    status: 405,
+    headers: { 'Content-Type': 'application/json', 'Allow': 'POST' },
+  });
+};
+
+export const PATCH: APIRoute = async () => {
+  return new Response(JSON.stringify({ error: 'Method not allowed' }), {
+    status: 405,
+    headers: { 'Content-Type': 'application/json', 'Allow': 'POST' },
+  });
+};
+
+export const DELETE: APIRoute = async () => {
+  return new Response(JSON.stringify({ error: 'Method not allowed' }), {
+    status: 405,
+    headers: { 'Content-Type': 'application/json', 'Allow': 'POST' },
   });
 };

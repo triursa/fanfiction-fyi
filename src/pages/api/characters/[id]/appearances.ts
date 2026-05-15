@@ -1,106 +1,180 @@
-export const prerender = false;
-
-import { getDrizzle } from '@/lib/db';
-import { characters, characterAppearances, works } from '@/lib/schema';
-import { requireAuth } from '@/lib/auth';
-import { corsHeaders, handleCors } from '@/lib/cors';
-import { eq, desc, count } from 'drizzle-orm';
 import type { APIRoute } from 'astro';
-import type { CharacterRole } from '@/lib/types';
+import type { D1Database } from '@cloudflare/workers-types';
+import { getDb } from '@/v2/lib/db';
+import { getAuth, requireAuth, checkApproved } from '@/v2/lib/auth';
+import { validateBody, createAppearanceSchema, removeAppearanceSchema } from '@/v2/lib/validation';
+import { characterAppearances, characters, works, pseuds } from '@/v2/lib/schema/index';
+import { eq, and, desc } from 'drizzle-orm';
 
-export const OPTIONS: APIRoute = async ({ request }) => {
-  return handleCors(request) ?? new Response(null, { status: 405 });
-};
+export const config = { auth: 'optional' as const };
 
-const VALID_ROLES: CharacterRole[] = ['protagonist', 'deuteragonist', 'antagonist', 'side', 'cameo'];
+// ─── GET /api/characters/[id]/appearances — List appearances for a character ──
 
-// GET /api/characters/[id]/appearances — List appearances for a character
-export const GET: APIRoute = async ({ params, locals, request }) => {
-  const cors = corsHeaders(request);
-  const drz = getDrizzle(locals.runtime.env.DB as D1Database);
-  const id = Number(params.id);
-  if (!id) return new Response(JSON.stringify({ error: 'Invalid character ID' }), { status: 400, headers: { 'Content-Type': 'application/json', ...cors } });
+export const GET: APIRoute = async ({ request, locals, params }) => {
+  const d1 = locals.runtime.env.DB as D1Database;
+  const db = getDb(d1);
+  const characterId = Number(params?.id);
 
-  const page = Math.max(Number(new URL(request.url).searchParams.get('page') || 1), 1);
-  const limit = Math.min(Number(new URL(request.url).searchParams.get('limit') || 25), 100);
-  const offset = (page - 1) * limit;
+  if (!characterId || Number.isNaN(characterId)) {
+    return new Response(JSON.stringify({ error: 'Invalid character ID' }), {
+      status: 400,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
 
-  const appearances = await drz
+  const character = await db.select().from(characters).where(eq(characters.id, characterId)).get();
+  if (!character) {
+    return new Response(JSON.stringify({ error: 'Character not found' }), {
+      status: 404,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+
+  const appearances = await db
     .select({
       id: characterAppearances.id,
       characterId: characterAppearances.characterId,
       workId: characterAppearances.workId,
       role: characterAppearances.role,
       notes: characterAppearances.notes,
-      addedBy: characterAppearances.addedBy,
       createdAt: characterAppearances.createdAt,
       workTitle: works.title,
-      workSummary: works.summary,
-      wordCount: works.wordCount,
-      publishedAt: works.publishedAt,
-      workComplete: works.complete,
     })
     .from(characterAppearances)
     .innerJoin(works, eq(characterAppearances.workId, works.id))
-    .where(eq(characterAppearances.characterId, id))
-    .orderBy(desc(characterAppearances.createdAt))
-    .limit(limit)
-    .offset(offset)
-    .all();
+    .where(eq(characterAppearances.characterId, characterId))
+    .orderBy(desc(characterAppearances.createdAt));
 
-  const countRow = await drz
-    .select({ count: count() })
-    .from(characterAppearances)
-    .where(eq(characterAppearances.characterId, id))
-    .get();
-
-  return new Response(JSON.stringify({ appearances, total: countRow?.count ?? 0, page, limit }), {
-    headers: { 'Content-Type': 'application/json', ...cors },
+  return new Response(JSON.stringify({ data: appearances }), {
+    status: 200,
+    headers: { 'Content-Type': 'application/json' },
   });
 };
 
-// POST /api/characters/[id]/appearances — Add character to a work
-export const POST: APIRoute = async ({ params, request, locals }) => {
+// ─── POST /api/characters/[id]/appearances — Add appearance (auth required) ──
+
+export const POST: APIRoute = async ({ request, locals, params }) => {
   const d1 = locals.runtime.env.DB as D1Database;
-  const drz = getDrizzle(d1);
-  const auth = await requireAuth(d1, request);
-  if (!auth) return new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401, headers: { 'Content-Type': 'application/json' } });
+  const db = getDb(d1);
+  const characterId = Number(params?.id);
 
-  const id = Number(params.id);
-  if (!id) return new Response(JSON.stringify({ error: 'Invalid character ID' }), { status: 400, headers: { 'Content-Type': 'application/json' } });
-
-  const character = await drz.select().from(characters).where(eq(characters.id, id)).get();
-  if (!character) return new Response(JSON.stringify({ error: 'Character not found' }), { status: 404, headers: { 'Content-Type': 'application/json' } });
-
-  let body: any;
-  try { body = await request.json(); } catch {
-    return new Response(JSON.stringify({ error: 'Invalid JSON' }), { status: 400, headers: { 'Content-Type': 'application/json' } });
+  if (!characterId || Number.isNaN(characterId)) {
+    return new Response(JSON.stringify({ error: 'Invalid character ID' }), {
+      status: 400,
+      headers: { 'Content-Type': 'application/json' },
+    });
   }
 
-  const { work_id, role, notes } = body || {};
-  if (!work_id) return new Response(JSON.stringify({ error: 'work_id is required' }), { status: 400, headers: { 'Content-Type': 'application/json' } });
+  const auth = await requireAuth(d1, request);
+  checkApproved(auth);
 
-  // Validate work exists
-  const work = await drz.select({ id: works.id }).from(works).where(eq(works.id, Number(work_id))).get();
-  if (!work) return new Response(JSON.stringify({ error: 'Work not found' }), { status: 404, headers: { 'Content-Type': 'application/json' } });
+  const [data, error] = await validateBody(request, createAppearanceSchema);
+  if (error) return error;
 
-  const charRole: CharacterRole = (role && VALID_ROLES.includes(role)) ? role : 'side';
-  const pseudId = auth.pseuds[0]?.id ?? null;
+  data.characterId = characterId;
+
+  const character = await db.select().from(characters).where(eq(characters.id, characterId)).get();
+  if (!character) {
+    return new Response(JSON.stringify({ error: 'Character not found' }), {
+      status: 404,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+
+  const work = await db.select().from(works).where(eq(works.id, data.workId)).get();
+  if (!work) {
+    return new Response(JSON.stringify({ error: 'Work not found' }), {
+      status: 404,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+
+  const existing = await db
+    .select()
+    .from(characterAppearances)
+    .where(and(
+      eq(characterAppearances.characterId, data.characterId),
+      eq(characterAppearances.workId, data.workId),
+    ))
+    .get();
+
+  if (existing) {
+    return new Response(JSON.stringify({ error: 'Character already appears in this work' }), {
+      status: 409,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
 
   try {
-    const inserted = await drz.insert(characterAppearances).values({
-      characterId: id,
-      workId: Number(work_id),
-      role: charRole,
-      notes: notes || null,
-      addedBy: pseudId,
-    }).returning().get();
+    const [inserted] = await db
+      .insert(characterAppearances)
+      .values({
+        characterId: data.characterId,
+        workId: data.workId,
+        role: data.role,
+        notes: data.notes ?? null,
+      })
+      .returning();
 
-    return new Response(JSON.stringify(inserted), { status: 201, headers: { 'Content-Type': 'application/json' } });
+    return new Response(JSON.stringify({
+      data: {
+        ...inserted,
+        workTitle: work.title,
+      },
+    }), {
+      status: 201,
+      headers: { 'Content-Type': 'application/json' },
+    });
   } catch (e: any) {
-    if (e.message?.includes('UNIQUE constraint failed')) {
-      return new Response(JSON.stringify({ error: 'Character already linked to this work' }), { status: 409, headers: { 'Content-Type': 'application/json' } });
-    }
-    throw e;
+    return new Response(JSON.stringify({ error: 'Failed to add appearance' }), {
+      status: 500,
+      headers: { 'Content-Type': 'application/json' },
+    });
   }
+};
+
+// ─── DELETE /api/characters/[id]/appearances — Remove appearance (auth required) ──
+
+export const DELETE: APIRoute = async ({ request, locals, params }) => {
+  const d1 = locals.runtime.env.DB as D1Database;
+  const db = getDb(d1);
+  const characterId = Number(params?.id);
+
+  if (!characterId || Number.isNaN(characterId)) {
+    return new Response(JSON.stringify({ error: 'Invalid character ID' }), {
+      status: 400,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+
+  const auth = await requireAuth(d1, request);
+  checkApproved(auth);
+
+  const [data, error] = await validateBody(request, removeAppearanceSchema);
+  if (error) return error;
+
+  const appearance = await db
+    .select()
+    .from(characterAppearances)
+    .where(and(
+      eq(characterAppearances.characterId, characterId),
+      eq(characterAppearances.workId, data.workId),
+    ))
+    .get();
+
+  if (!appearance) {
+    return new Response(JSON.stringify({ error: 'Appearance not found' }), {
+      status: 404,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+
+  await db
+    .delete(characterAppearances)
+    .where(eq(characterAppearances.id, appearance.id));
+
+  return new Response(JSON.stringify({ data: { characterId, workId: data.workId, deleted: true } }), {
+    status: 200,
+    headers: { 'Content-Type': 'application/json' },
+  });
 };

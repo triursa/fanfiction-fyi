@@ -1,134 +1,262 @@
-export const prerender = false;
-
-import { getDrizzle } from '@/lib/db';
-import { series, serialWorks, works, creatorships } from '@/lib/schema';
-import { getAuth } from '@/lib/auth';
-import { corsHeaders, handleCors } from '@/lib/cors';
-import { eq, and, gte, inArray, sql, desc, asc } from 'drizzle-orm';
 import type { APIRoute } from 'astro';
+import type { D1Database } from '@cloudflare/workers-types';
+import { getDb } from '@/v2/lib/db';
+import { requireAuth, checkApproved } from '@/v2/lib/auth';
+import { validateBody, addSeriesWorkSchema, removeSeriesWorkSchema, reorderSeriesWorksSchema } from '@/v2/lib/validation';
+import { series, serialWorks, pseuds, works } from '@/v2/lib/schema/index';
+import { eq, and, max } from 'drizzle-orm';
 
-// POST /api/series/[id]/works — Add a work to a series
-// Body: { work_id, position? }
-// DELETE /api/series/[id]/works — Remove a work from a series
-// Body: { work_id }
+export const config = { auth: 'required' as const };
 
-export const OPTIONS: APIRoute = async ({ request }) => {
-  return handleCors(request) ?? new Response(null, { status: 405 });
-};
+// ─── Helper: verify series ownership ─────────────────────────────────
 
-export const POST: APIRoute = async ({ params, request, locals }) => {
+async function verifySeriesOwnership(db: any, seriesId: number, userId: number): Promise<{ owned: boolean; seriesRow?: any }> {
+  const seriesRow = await db.select().from(series).where(eq(series.id, seriesId)).get();
+  if (!seriesRow) return { owned: false };
+
+  const userPseuds = await db.select({ id: pseuds.id }).from(pseuds).where(eq(pseuds.userId, userId));
+  const pseudIds = userPseuds.map((p: any) => p.id);
+
+  return { owned: pseudIds.includes(seriesRow.creatorPseudId), seriesRow };
+}
+
+// ─── POST /api/series/[id]/works — Add work to series ──────────────
+
+export const POST: APIRoute = async ({ request, locals, params }) => {
   const d1 = locals.runtime.env.DB as D1Database;
-  const drz = getDrizzle(d1);
-  const auth = await getAuth(d1, request);
-  if (!auth) return new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401, headers: { 'Content-Type': 'application/json' } });
+  const db = getDb(d1);
+  const seriesId = Number(params?.id);
 
-  const seriesId = Number(params.id);
-  if (!seriesId) return new Response(JSON.stringify({ error: 'Not found' }), { status: 404, headers: { 'Content-Type': 'application/json' } });
+  if (!seriesId || Number.isNaN(seriesId)) {
+    return new Response(JSON.stringify({ error: 'Invalid series ID' }), {
+      status: 400,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+
+  // Require auth + approved
+  const auth = await requireAuth(d1, request);
+  checkApproved(auth);
+
+  // Validate body
+  const [data, error] = await validateBody(request, addSeriesWorkSchema);
+  if (error) return error;
 
   // Verify series exists and user owns it
-  const seriesRow = await drz.select().from(series).where(eq(series.id, seriesId)).get();
-  if (!seriesRow) return new Response(JSON.stringify({ error: 'Series not found' }), { status: 404, headers: { 'Content-Type': 'application/json' } });
+  const { owned, seriesRow } = await verifySeriesOwnership(db, seriesId, auth.user.id);
+  if (!seriesRow) {
+    return new Response(JSON.stringify({ error: 'Series not found' }), {
+      status: 404,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+  if (!owned) {
+    return new Response(JSON.stringify({ error: 'Forbidden: not the series owner' }), {
+      status: 403,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
 
-  const isOwner = auth.pseuds.some((p: any) => p.id === seriesRow.creatorPseudId);
-  if (!isOwner) return new Response(JSON.stringify({ error: 'Forbidden — only the series creator can add works' }), { status: 403, headers: { 'Content-Type': 'application/json' } });
-
-  let body: any;
-  try { body = await request.json(); } catch { return new Response(JSON.stringify({ error: 'Invalid JSON' }), { status: 400, headers: { 'Content-Type': 'application/json' } }); }
-
-  const workId = body?.work_id;
-  if (!workId) return new Response(JSON.stringify({ error: 'work_id is required' }), { status: 400, headers: { 'Content-Type': 'application/json' } });
-
-  // Verify work exists
-  const work = await drz.select().from(works).where(eq(works.id, workId)).get();
-  if (!work) return new Response(JSON.stringify({ error: 'Work not found' }), { status: 404, headers: { 'Content-Type': 'application/json' } });
-
-  // Check that the user owns the work (must be author)
-  const pseudIds = auth.pseuds.map((p: any) => p.id);
-  const creatorship = pseudIds.length > 0
-    ? await drz.select().from(creatorships)
-        .where(and(eq(creatorships.workId, workId), inArray(creatorships.pseudId, pseudIds)))
-        .get()
-    : null;
-  if (!creatorship) return new Response(JSON.stringify({ error: 'You can only add your own works to a series' }), { status: 403, headers: { 'Content-Type': 'application/json' } });
-
-  // Check if work is already in this series
-  const existing = await drz.select().from(serialWorks)
-    .where(and(eq(serialWorks.seriesId, seriesId), eq(serialWorks.workId, workId)))
+  // Verify the work exists and is published
+  const work = await db
+    .select({ id: works.id, draft: works.draft, publishedAt: works.publishedAt })
+    .from(works)
+    .where(eq(works.id, data.workId))
     .get();
-  if (existing) return new Response(JSON.stringify({ error: 'Work is already in this series' }), { status: 409, headers: { 'Content-Type': 'application/json' } });
 
-  // Determine position
-  const position = body?.position;
-  if (position) {
-    // Insert at specific position — shift others down
-    await drz.update(serialWorks)
-      .set({ position: sql`position + 1` })
-      .where(and(eq(serialWorks.seriesId, seriesId), gte(serialWorks.position, position)));
-    await drz.insert(serialWorks).values({ seriesId, workId, position });
-  } else {
-    // Append at end
-    const maxRow = await drz.select({ maxPos: sql<number>`MAX(position)` })
+  if (!work || work.draft || !work.publishedAt) {
+    return new Response(JSON.stringify({ error: 'Work not found or not published' }), {
+      status: 404,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+
+  // Check for duplicate
+  const existing = await db
+    .select({ id: serialWorks.id })
+    .from(serialWorks)
+    .where(and(
+      eq(serialWorks.seriesId, seriesId),
+      eq(serialWorks.workId, data.workId),
+    ))
+    .get();
+
+  if (existing) {
+    return new Response(JSON.stringify({ error: 'Work already in series' }), {
+      status: 409,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+
+  // Determine position: use provided position or max(position)+1
+  let position = data.position;
+  if (position === undefined) {
+    const maxResult = await db
+      .select({ maxPos: max(serialWorks.position) })
       .from(serialWorks)
       .where(eq(serialWorks.seriesId, seriesId))
       .get();
-    const nextPos = (maxRow?.maxPos ?? 0) + 1;
-    await drz.insert(serialWorks).values({ seriesId, workId, position: nextPos });
+    position = (maxResult?.maxPos ?? 0) + 1;
   }
 
-  // Update series updated_at
-  await drz.update(series)
-    .set({ updatedAt: new Date().toISOString().replace('T', ' ').replace(/\.\d+Z$/, '') })
-    .where(eq(series.id, seriesId));
-
-  return new Response(JSON.stringify({ success: true }), { status: 201, headers: { 'Content-Type': 'application/json' } });
-};
-
-export const DELETE: APIRoute = async ({ params, request, locals }) => {
-  const d1 = locals.runtime.env.DB as D1Database;
-  const drz = getDrizzle(d1);
-  const auth = await getAuth(d1, request);
-  if (!auth) return new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401, headers: { 'Content-Type': 'application/json' } });
-
-  const seriesId = Number(params.id);
-  if (!seriesId) return new Response(JSON.stringify({ error: 'Not found' }), { status: 404, headers: { 'Content-Type': 'application/json' } });
-
-  // Verify ownership
-  const seriesRow = await drz.select().from(series).where(eq(series.id, seriesId)).get();
-  if (!seriesRow) return new Response(JSON.stringify({ error: 'Series not found' }), { status: 404, headers: { 'Content-Type': 'application/json' } });
-
-  const isOwner = auth.pseuds.some((p: any) => p.id === seriesRow.creatorPseudId);
-  if (!isOwner) return new Response(JSON.stringify({ error: 'Forbidden' }), { status: 403, headers: { 'Content-Type': 'application/json' } });
-
-  let body: any;
-  try { body = await request.json(); } catch { return new Response(JSON.stringify({ error: 'Invalid JSON' }), { status: 400, headers: { 'Content-Type': 'application/json' } }); }
-
-  const workId = body?.work_id;
-  if (!workId) return new Response(JSON.stringify({ error: 'work_id is required' }), { status: 400, headers: { 'Content-Type': 'application/json' } });
-
-  const deleted = await drz.delete(serialWorks)
-    .where(and(eq(serialWorks.seriesId, seriesId), eq(serialWorks.workId, workId)))
+  // Add the work to the series
+  const [inserted] = await db
+    .insert(serialWorks)
+    .values({
+      seriesId,
+      workId: data.workId,
+      position,
+    })
     .returning();
-  if (deleted.length === 0) {
-    return new Response(JSON.stringify({ error: 'Work not found in series' }), { status: 404, headers: { 'Content-Type': 'application/json' } });
-  }
 
-  // Re-index positions to be contiguous
-  const remaining = await drz.select({ id: serialWorks.id })
-    .from(serialWorks)
-    .where(eq(serialWorks.seriesId, seriesId))
-    .orderBy(asc(serialWorks.position));
-  // Import asc here — already available but let me use number index
-  for (let i = 0; i < remaining.length; i++) {
-    await drz.update(serialWorks)
-      .set({ position: i + 1 })
-      .where(eq(serialWorks.id, remaining[i].id));
-  }
-
-  // Update series updated_at
-  await drz.update(series)
-    .set({ updatedAt: new Date().toISOString().replace('T', ' ').replace(/\.\d+Z$/, '') })
-    .where(eq(series.id, seriesId));
-
-  return new Response(JSON.stringify({ success: true }), { headers: { 'Content-Type': 'application/json' } });
+  return new Response(JSON.stringify({
+    data: {
+      id: inserted.id,
+      seriesId: inserted.seriesId,
+      workId: inserted.workId,
+      position: inserted.position,
+    },
+  }), {
+    status: 201,
+    headers: { 'Content-Type': 'application/json' },
+  });
 };
 
+// ─── DELETE /api/series/[id]/works — Remove work from series ───────
+
+export const DELETE: APIRoute = async ({ request, locals, params }) => {
+  const d1 = locals.runtime.env.DB as D1Database;
+  const db = getDb(d1);
+  const seriesId = Number(params?.id);
+
+  if (!seriesId || Number.isNaN(seriesId)) {
+    return new Response(JSON.stringify({ error: 'Invalid series ID' }), {
+      status: 400,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+
+  // Require auth + approved
+  const auth = await requireAuth(d1, request);
+  checkApproved(auth);
+
+  // Validate body
+  const [data, error] = await validateBody(request, removeSeriesWorkSchema);
+  if (error) return error;
+
+  // Verify series exists and user owns it
+  const { owned, seriesRow } = await verifySeriesOwnership(db, seriesId, auth.user.id);
+  if (!seriesRow) {
+    return new Response(JSON.stringify({ error: 'Series not found' }), {
+      status: 404,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+  if (!owned) {
+    return new Response(JSON.stringify({ error: 'Forbidden: not the series owner' }), {
+      status: 403,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+
+  // Delete the serialWorks entry
+  const result = await db
+    .delete(serialWorks)
+    .where(and(
+      eq(serialWorks.seriesId, seriesId),
+      eq(serialWorks.workId, data.workId),
+    ));
+
+  return new Response(JSON.stringify({ data: { seriesId, workId: data.workId, removed: true } }), {
+    status: 200,
+    headers: { 'Content-Type': 'application/json' },
+  });
+};
+
+// ─── PATCH /api/series/[id]/works — Reorder works in series ────────
+
+export const PATCH: APIRoute = async ({ request, locals, params }) => {
+  const d1 = locals.runtime.env.DB as D1Database;
+  const db = getDb(d1);
+  const seriesId = Number(params?.id);
+
+  if (!seriesId || Number.isNaN(seriesId)) {
+    return new Response(JSON.stringify({ error: 'Invalid series ID' }), {
+      status: 400,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+
+  // Require auth + approved
+  const auth = await requireAuth(d1, request);
+  checkApproved(auth);
+
+  // Validate body
+  const [data, error] = await validateBody(request, reorderSeriesWorksSchema);
+  if (error) return error;
+
+  // Verify series exists and user owns it
+  const { owned, seriesRow } = await verifySeriesOwnership(db, seriesId, auth.user.id);
+  if (!seriesRow) {
+    return new Response(JSON.stringify({ error: 'Series not found' }), {
+      status: 404,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+  if (!owned) {
+    return new Response(JSON.stringify({ error: 'Forbidden: not the series owner' }), {
+      status: 403,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+
+  // Validate that all workIds exist in this series
+  const workIds = data.positions.map(p => p.workId);
+  const existingEntries = await db
+    .select({ workId: serialWorks.workId })
+    .from(serialWorks)
+    .where(eq(serialWorks.seriesId, seriesId));
+
+  const existingWorkIds = new Set(existingEntries.map((e: any) => e.workId));
+  for (const workId of workIds) {
+    if (!existingWorkIds.has(workId)) {
+      return new Response(JSON.stringify({ error: `Work ${workId} is not in this series` }), {
+        status: 400,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
+  }
+
+  // Sort the provided positions by position value, then re-index to contiguous starting from 1
+  const sorted = [...data.positions].sort((a, b) => a.position - b.position);
+
+  // Update positions to contiguous values starting from 1
+  for (let i = 0; i < sorted.length; i++) {
+    await db
+      .update(serialWorks)
+      .set({ position: i + 1 })
+      .where(and(
+        eq(serialWorks.seriesId, seriesId),
+        eq(serialWorks.workId, sorted[i].workId),
+      ));
+  }
+
+  // Re-index any works NOT in the positions list — assign them positions after the explicitly-ordered ones
+  const remainingEntries = existingEntries.filter((e: any) => !workIds.includes(e.workId));
+  let nextPos = sorted.length + 1;
+  for (const entry of remainingEntries) {
+    await db
+      .update(serialWorks)
+      .set({ position: nextPos })
+      .where(and(
+        eq(serialWorks.seriesId, seriesId),
+        eq(serialWorks.workId, entry.workId),
+      ));
+    nextPos++;
+  }
+
+  return new Response(JSON.stringify({ data: { seriesId, reordered: true } }), {
+    status: 200,
+    headers: { 'Content-Type': 'application/json' },
+  });
+};

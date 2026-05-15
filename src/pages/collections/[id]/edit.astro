@@ -1,99 +1,230 @@
 ---
+/**
+ * Edit Collection Page — Auth Required
+ * Edit an existing collection: title, description, privacy are editable; name (slug) is read-only.
+ * Route: /collections/[id]/edit
+ */
 export const prerender = false;
-import Base from '../../../layouts/Base.astro';
-import { getDrizzle } from '../../../lib/db';
-import { getAuth, checkApproved } from '../../../lib/auth';
-import { collections } from '../../../lib/schema';
-import { eq } from 'drizzle-orm';
-
-const d1 = Astro.locals.runtime.env.DB as D1Database;
-const db = getDrizzle(d1);
-const auth = await getAuth(d1, Astro.request);
-if (!auth) return Astro.redirect('/login');
-const approval = checkApproved(auth);
-if ('forbidden' in approval) {
-  if (approval.forbidden === 'unapproved') return Astro.redirect('/pending-approval');
-  if (approval.forbidden === 'suspended') return Astro.redirect(`/login?error=suspended&until=${encodeURIComponent(approval.suspendedUntil ?? '')}`);
-  return Astro.redirect('/login?error=banned');
-}
+// Auth required — default middleware enforces login
+import Base from '@/v2/layouts/Base.astro';
 
 const collectionId = Number(Astro.params.id);
-if (!collectionId) return Astro.redirect('/collections');
+if (!collectionId || isNaN(collectionId)) {
+  return Astro.redirect('/collections');
+}
 
-const collection = await db.select().from(collections).where(eq(collections.id, collectionId)).get();
-if (!collection) return Astro.redirect('/collections');
+const user = Astro.locals.user;
 
-// Verify ownership
-const pseudIds = auth.pseuds.map(p => p.id);
-if (!pseudIds.includes(collection.ownerPseudId)) return Astro.redirect('/collections');
+// Fetch collection data
+let collection: any = null;
+let errorMsg: string | null = null;
+
+try {
+  const res = await fetch(new URL(`/api/collections/${collectionId}`, Astro.url));
+  if (res.ok) {
+    const json = await res.json();
+    collection = json.data;
+  } else if (res.status === 404) {
+    return Astro.redirect('/collections');
+  } else {
+    errorMsg = 'Failed to load collection.';
+  }
+} catch {
+  errorMsg = 'Network error loading collection.';
+}
+
+// If collection loaded but user isn't the owner, redirect
+if (collection && user && user.id !== collection.ownerUserId) {
+  return Astro.redirect(`/collections/${collectionId}`);
+}
+
+// Fetch user's pseuds for pseud selector
+let pseuds: any[] = [];
+try {
+  const pRes = await fetch(new URL(`/api/pseuds?limit=100&userId=${user.id}`, Astro.url), {
+    headers: { cookie: Astro.request.headers.get('cookie') || '' },
+  });
+  if (pRes.ok) {
+    const pJson = await pRes.json();
+    pseuds = pJson.data ?? [];
+  }
+} catch {
+  // Non-fatal
+}
+
+const privacyOptions = [
+  { value: 'open', label: 'Open — Anyone can add works' },
+  { value: 'moderated', label: 'Moderated — Submissions need approval' },
+  { value: 'closed', label: 'Closed — Only you can add works' },
+  { value: 'public', label: 'Public — Visible to everyone' },
+  { value: 'private', label: 'Private — Only you can see it' },
+  { value: 'unrevealed', label: 'Unrevealed — Works hidden until reveal' },
+];
 ---
 
-<Base title={`Edit: ${collection.title} — fanfiction.fyi`}>
-  <div class="collection-form-page">
-    <div class="collection-form-card">
-      <h1 class="collection-form-title">Edit Collection</h1>
+<Base title={`Edit: ${collection?.title || 'Collection'} — fanfiction.fyi`} description="Edit this collection on fanfiction.fyi">
+  <section class="form-page">
+    <div class="form-header">
+      <a href={`/collections/${collectionId}`} class="back-link">← Back to Collection</a>
+      <h1 class="form-title">Edit Collection</h1>
+    </div>
 
-      <form id="collection-form" class="collection-form">
+    {errorMsg && <div class="error-banner" role="alert">{errorMsg}</div>}
+
+    {collection && (
+      <form id="edit-collection-form" class="collection-form">
         <div class="form-field">
-          <label>URL Name</label>
-          <input type="text" value={collection.name} disabled />
-          <span class="field-helper">URL name cannot be changed after creation.</span>
+          <label for="name">URL Slug</label>
+          <input type="text" id="name" value={collection.name} disabled readonly />
+          <p class="field-hint">The URL slug cannot be changed after creation.</p>
         </div>
 
         <div class="form-field">
-          <label for="coll-title">Title</label>
-          <input type="text" id="coll-title" name="title" required value={collection.title} />
+          <label for="title">Title</label>
+          <input type="text" id="title" name="title" required maxlength="200" value={collection.title} />
         </div>
 
         <div class="form-field">
-          <label for="coll-description">Description <span class="optional-tag">(optional)</span></label>
-          <textarea id="coll-description" name="description" rows="4">{collection.description || ''}</textarea>
+          <label for="description">Description</label>
+          <textarea id="description" name="description" rows="5" maxlength="5000">{collection.description || ''}</textarea>
         </div>
 
         <div class="form-field">
-          <label for="coll-privacy">Privacy</label>
-          <select id="coll-privacy" name="privacy">
-            <option value="public" selected={collection.privacy === 'public'}>Public — Visible to everyone</option>
-            <option value="unrevealed" selected={collection.privacy === 'unrevealed'}>Unrevealed — Hidden until reveal</option>
-            <option value="private" selected={collection.privacy === 'private'}>Private — Only visible to you</option>
+          <label for="privacy">Privacy</label>
+          <select id="privacy" name="privacy" required>
+            {privacyOptions.map(opt => (
+              <option value={opt.value} selected={opt.value === collection.privacy}>{opt.label}</option>
+            ))}
           </select>
         </div>
 
-        <div id="coll-error" class="form-error" role="alert"></div>
+        <div class="form-field">
+          <label>Owner</label>
+          <input type="text" value={collection.ownerName || `Pseud #${collection.ownerPseudId}`} disabled readonly />
+          <p class="field-hint">Ownership cannot be transferred after creation.</p>
+        </div>
 
         <div class="form-actions">
-          <button type="submit" class="btn-primary" id="submit-btn">Save Changes</button>
-          <a href={`/collections/${collectionId}`} class="btn-secondary">Cancel</a>
+          <button type="submit" class="btn-filled" id="submit-btn">
+            <span class="btn-text">Save Changes</span>
+            <span class="btn-loading" style="display:none;">Saving…</span>
+          </button>
+          <a href={`/collections/${collectionId}`} class="btn-outlined">Cancel</a>
+          <button type="button" class="btn-danger" id="delete-btn">Delete Collection</button>
         </div>
+
+        <div id="form-error" class="form-error" role="alert"></div>
       </form>
-    </div>
-  </div>
+    )}
+  </section>
 </Base>
 
+{collection && (
+  <script define:vars={{ collectionId }}>
+    const form = document.getElementById('edit-collection-form') as HTMLFormElement;
+    const errorEl = document.getElementById('form-error') as HTMLElement;
+    const submitBtn = document.getElementById('submit-btn') as HTMLButtonElement;
+
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      errorEl.textContent = '';
+      submitBtn.disabled = true;
+      (submitBtn.querySelector('.btn-text') as HTMLElement).style.display = 'none';
+      (submitBtn.querySelector('.btn-loading') as HTMLElement).style.display = 'inline';
+
+      const title = (document.getElementById('title') as HTMLInputElement).value.trim();
+      const description = (document.getElementById('description') as HTMLTextAreaElement).value || undefined;
+      const privacy = (document.getElementById('privacy') as HTMLSelectElement).value;
+
+      try {
+        const res = await fetch(`/api/collections/${collectionId}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ title, description, privacy }),
+        });
+
+        const data = await res.json();
+        if (!res.ok) {
+          errorEl.textContent = data.error || data.fields?.map((f: any) => `${f.field}: ${f.message}`).join(', ') || 'Failed to update collection.';
+          submitBtn.disabled = false;
+          (submitBtn.querySelector('.btn-text') as HTMLElement).style.display = 'inline';
+          (submitBtn.querySelector('.btn-loading') as HTMLElement).style.display = 'none';
+          return;
+        }
+
+        window.location.href = `/collections/${collectionId}`;
+      } catch {
+        errorEl.textContent = 'Network error. Please try again.';
+        submitBtn.disabled = false;
+        (submitBtn.querySelector('.btn-text') as HTMLElement).style.display = 'inline';
+        (submitBtn.querySelector('.btn-loading') as HTMLElement).style.display = 'none';
+      }
+    });
+
+    // Delete handler
+    const deleteBtn = document.getElementById('delete-btn');
+    if (deleteBtn) {
+      deleteBtn.addEventListener('click', async () => {
+        if (!confirm('Are you sure you want to delete this collection? This cannot be undone.')) return;
+        deleteBtn.disabled = true;
+        deleteBtn.textContent = 'Deleting…';
+        try {
+          const res = await fetch(`/api/collections/${collectionId}`, { method: 'DELETE' });
+          if (res.ok) {
+            window.location.href = '/collections';
+          } else {
+            const data = await res.json();
+            alert(data.error || 'Failed to delete collection.');
+            deleteBtn.disabled = false;
+            deleteBtn.textContent = 'Delete Collection';
+          }
+        } catch {
+          alert('Network error. Please try again.');
+          deleteBtn.disabled = false;
+          deleteBtn.textContent = 'Delete Collection';
+        }
+      });
+    }
+  </script>
+)}
+
 <style is:global>
-  .collection-form-page {
-    max-width: 600px;
+  .form-page {
+    max-width: 48rem;
     margin: 0 auto;
     padding: var(--space-8) var(--space-4);
   }
 
-  .collection-form-card {
-    padding: var(--space-8);
-    border-radius: 28px;
-    background: var(--md-sys-color-surface-container);
-    border: 1px solid var(--md-sys-color-outline-variant);
+  .form-header {
+    margin-bottom: var(--space-8);
   }
 
-  .collection-form-title {
+  .back-link {
+    font: var(--md-sys-typescale-body-medium);
+    color: var(--md-sys-color-primary);
+    text-decoration: none;
+    display: inline-block;
+    margin-bottom: var(--space-2);
+  }
+
+  .form-title {
     font: var(--md-sys-typescale-headline-medium);
-    color: var(--md-sys-color-on-surface);
-    margin: 0 0 var(--space-6) 0;
+    margin: 0 0 var(--space-4) 0;
+  }
+
+  .error-banner {
+    background: var(--md-sys-color-error);
+    color: var(--md-sys-color-on-error);
+    border-radius: var(--md-sys-shape-corner-small);
+    padding: var(--space-3) var(--space-4);
+    margin-bottom: var(--space-6);
+    font: var(--md-sys-typescale-body-medium);
   }
 
   .collection-form {
     display: flex;
     flex-direction: column;
-    gap: var(--space-4);
+    gap: var(--space-6);
   }
 
   .form-field {
@@ -101,15 +232,13 @@ if (!pseudIds.includes(collection.ownerPseudId)) return Astro.redirect('/collect
     flex-direction: column;
     gap: var(--space-1);
   }
-
   .form-field label {
     font: var(--md-sys-typescale-label-large);
     color: var(--md-sys-color-on-surface-variant);
   }
-
   .form-field input,
-  .form-field textarea,
-  .form-field select {
+  .form-field select,
+  .form-field textarea {
     font: var(--md-sys-typescale-body-large);
     color: var(--md-sys-color-on-surface);
     background: var(--md-sys-color-surface-container);
@@ -119,116 +248,86 @@ if (!pseudIds.includes(collection.ownerPseudId)) return Astro.redirect('/collect
     outline: none;
     transition: border-color var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard);
   }
-
-  .form-field input:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
-  }
-
   .form-field input:focus,
-  .form-field textarea:focus,
-  .form-field select:focus {
+  .form-field select:focus,
+  .form-field textarea:focus {
     border-color: var(--md-sys-color-primary);
   }
+  .form-field input[disabled],
+  .form-field input[readonly] {
+    opacity: 0.6;
+    cursor: not-allowed;
+    background: var(--md-sys-color-surface-container-highest);
+  }
+  .form-field textarea {
+    resize: vertical;
+    min-height: 100px;
+  }
 
-  .field-helper {
+  .field-hint {
     font: var(--md-sys-typescale-body-small);
     color: var(--md-sys-color-on-surface-variant);
+    margin: var(--space-1) 0 0 0;
+  }
+  .field-hint a { color: var(--md-sys-color-primary); }
+
+  .form-actions {
+    display: flex;
+    gap: var(--space-4);
+    align-items: center;
+    flex-wrap: wrap;
   }
 
-  .optional-tag {
-    font: var(--md-sys-typescale-body-small);
-    opacity: 0.7;
+  .btn-filled {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font: var(--md-sys-typescale-label-large);
+    color: var(--md-sys-color-on-primary);
+    background: var(--md-sys-color-primary);
+    border: none;
+    border-radius: var(--md-sys-shape-corner-full);
+    padding: var(--space-3) var(--space-8);
+    cursor: pointer;
+    transition: opacity var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard);
   }
+  .btn-filled:hover { opacity: 0.88; }
+  .btn-filled:disabled { opacity: 0.5; cursor: not-allowed; }
+
+  .btn-outlined {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font: var(--md-sys-typescale-label-large);
+    color: var(--md-sys-color-primary);
+    background: transparent;
+    border: 1px solid var(--md-sys-color-outline);
+    border-radius: var(--md-sys-shape-corner-full);
+    padding: var(--space-3) var(--space-8);
+    text-decoration: none;
+    transition: background var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard);
+  }
+  .btn-outlined:hover { background: var(--md-sys-color-primary-container); }
+
+  .btn-danger {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font: var(--md-sys-typescale-label-large);
+    color: var(--md-sys-color-on-error);
+    background: var(--md-sys-color-error);
+    border: none;
+    border-radius: var(--md-sys-shape-corner-full);
+    padding: var(--space-3) var(--space-8);
+    cursor: pointer;
+    margin-left: auto;
+    transition: opacity var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard);
+  }
+  .btn-danger:hover { opacity: 0.88; }
 
   .form-error {
     font: var(--md-sys-typescale-body-small);
     color: var(--md-sys-color-error);
     min-height: 1.2em;
   }
-
-  .form-actions {
-    display: flex;
-    gap: var(--space-3);
-    margin-top: var(--space-2);
-  }
-
-  .btn-primary {
-    font: var(--md-sys-typescale-label-large);
-    color: var(--md-sys-color-on-primary);
-    background: var(--md-sys-color-primary);
-    border: none;
-    border-radius: var(--md-sys-shape-corner-full);
-    padding: var(--space-3) var(--space-6);
-    cursor: pointer;
-    transition: background var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard);
-  }
-
-  .btn-primary:hover {
-    background: var(--md-sys-color-primary-container);
-    color: var(--md-sys-color-on-primary-container);
-  }
-
-  .btn-primary:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
-  }
-
-  .btn-secondary {
-    font: var(--md-sys-typescale-label-large);
-    color: var(--md-sys-color-on-surface-variant);
-    background: var(--md-sys-color-surface-container-high);
-    border: 1px solid var(--md-sys-color-outline-variant);
-    border-radius: var(--md-sys-shape-corner-full);
-    padding: var(--space-3) var(--space-6);
-    cursor: pointer;
-    text-decoration: none;
-    display: inline-flex;
-    align-items: center;
-    transition: background var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard);
-  }
-
-  .btn-secondary:hover {
-    background: var(--md-sys-color-surface-container-highest);
-  }
 </style>
-
-<script define:vars={{ collectionId }}>
-  const form = document.getElementById('collection-form');
-  const errorEl = document.getElementById('coll-error');
-  const btn = document.getElementById('submit-btn');
-  const btnText = btn.textContent;
-
-  form.addEventListener('submit', async (e) => {
-    e.preventDefault();
-    errorEl.textContent = '';
-
-    btn.disabled = true;
-    btn.textContent = 'Saving…';
-
-    try {
-      const res = await fetch(`/api/collections/${collectionId}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          id: collectionId,
-          title: document.getElementById('coll-title').value.trim(),
-          description: document.getElementById('coll-description').value.trim() || null,
-          privacy: document.getElementById('coll-privacy').value,
-        }),
-      });
-
-      if (res.ok) {
-        window.location.href = `/collections/${collectionId}`;
-      } else {
-        const data = await res.json().catch(() => ({}));
-        errorEl.textContent = data.error || 'Failed to save changes';
-      }
-    } catch {
-      errorEl.textContent = 'Network error — please check your connection and try again';
-    } finally {
-      btn.disabled = false;
-      btn.textContent = btnText;
-    }
-  });
-</script>

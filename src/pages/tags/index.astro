@@ -1,318 +1,260 @@
 ---
+/**
+ * Tag Browse Page — Public
+ * Fetches tags from /api/tags, groups by type, links to search.
+ */
 export const prerender = false;
-import Base from '../../layouts/Base.astro';
-import { getDrizzle } from '../../lib/db';
-import { tags, taggings } from '../../lib/schema';
-import { sql, eq, desc } from 'drizzle-orm';
+export const config = { auth: 'public' };
+import Base from '@/v2/layouts/Base.astro';
 
-// SSR: fetch initial data for first paint
-const db = getDrizzle(Astro.locals.runtime.env.DB as D1Database);
-const initialTags = await db
-  .select({
-    id: tags.id,
-    name: tags.name,
-    type: tags.type,
-    work_count: sql<number>`COUNT(${taggings.workId})`,
-  })
-  .from(tags)
-  .leftJoin(taggings, eq(tags.id, taggings.tagId))
-  .groupBy(tags.id)
-  .orderBy(desc(sql`work_count`))
-  .limit(100);
+type TagType = 'fandom' | 'character' | 'relationship' | 'rating' | 'warning' | 'category' | 'freeform';
+
+const tagTypes: { type: TagType; label: string }[] = [
+  { type: 'fandom', label: 'Fandoms' },
+  { type: 'character', label: 'Characters' },
+  { type: 'relationship', label: 'Relationships' },
+  { type: 'rating', label: 'Ratings' },
+  { type: 'warning', label: 'Warnings' },
+  { type: 'category', label: 'Categories' },
+  { type: 'freeform', label: 'Freeform Tags' },
+];
+
+// Read type filter from URL
+const activeType = Astro.url.searchParams.get('type') || '';
+const searchQuery = Astro.url.searchParams.get('q') || '';
+
+// Fetch tags from API
+let tagsByType: Record<string, any[]> = {};
+let totalTags = 0;
+let errorMsg: string | null = null;
+
+try {
+  const params = new URLSearchParams({ limit: '100' });
+  if (activeType) params.set('type', activeType);
+  if (searchQuery) params.set('q', searchQuery);
+
+  const res = await fetch(new URL(`/api/tags?${params.toString()}`, Astro.url));
+  if (res.ok) {
+    const json = await res.json();
+    const allTags = json.data || [];
+    totalTags = json.total || 0;
+
+    // Group by type
+    for (const tag of allTags) {
+      if (!tagsByType[tag.type]) tagsByType[tag.type] = [];
+      tagsByType[tag.type].push(tag);
+    }
+  } else {
+    errorMsg = 'Failed to load tags.';
+  }
+} catch {
+  errorMsg = 'Network error loading tags.';
+}
+
+function tagSearchUrl(tag: any): string {
+  // Map tag type to the search param name
+  const typeToParam: Record<string, string> = {
+    fandom: 'fandom',
+    character: 'character',
+    relationship: 'relationship',
+    rating: 'rating',
+    warning: 'warning',
+    category: 'category',
+    freeform: 'q',
+  };
+  const param = typeToParam[tag.type] || 'q';
+  return `/search?${param}=${encodeURIComponent(tag.name)}`;
+}
 ---
 
-<Base title="Browse Tags — fanfiction.fyi">
-  <div class="tags-page">
-    <header class="tags-header">
-      <h1 class="tags-title">Browse Tags</h1>
+<Base title="Browse Tags — fanfiction.fyi" description="Browse tags by type on fanfiction.fyi">
+  <section class="tags-page">
+    <h1 class="page-title">Browse Tags</h1>
 
-      <!-- Type filter chips -->
-      <div class="filter-chips" id="filter-chips" role="tablist" aria-label="Filter by tag type" aria-controls="tag-grid">
-        <button class="chip active" data-type="" role="tab" aria-selected="true">All</button>
-        <button class="chip" data-type="fandom" role="tab" aria-selected="false">Fandom</button>
-        <button class="chip" data-type="character" role="tab" aria-selected="false">Character</button>
-        <button class="chip" data-type="relationship" role="tab" aria-selected="false">Relationship</button>
-        <button class="chip" data-type="freeform" role="tab" aria-selected="false">Freeform</button>
-        <button class="chip" data-type="rating" role="tab" aria-selected="false">Rating</button>
-        <button class="chip" data-type="warning" role="tab" aria-selected="false">Warning</button>
-        <button class="chip" data-type="category" role="tab" aria-selected="false">Category</button>
-      </div>
+    {errorMsg && <div class="error-banner" role="alert">{errorMsg}</div>}
 
-      <!-- Search input -->
-      <div class="search-bar">
-        <label for="tag-search" class="sr-only">Search tags</label>
-        <input
-          type="text"
-          id="tag-search"
-          class="search-input"
-          placeholder="Search tags by name…"
-          autocomplete="off"
-        />
-      </div>
-    </header>
-
-    <!-- Tag grid (server-rendered initial, then client-updated) -->
-    <div class="tag-grid" id="tag-grid" role="tabpanel" aria-label="Tag results">
-      {initialTags.map(tag => (
-        <a href={`/works?tag_id=${tag.id}`} class="tag-card" data-type={tag.type}>
-          <span class="tag-name">{tag.name}</span>
-          <span class={`tag-badge badge-${tag.type}`}>{tag.type}</span>
-          <span class="tag-count">{tag.work_count} {tag.work_count === 1 ? 'work' : 'works'}</span>
-        </a>
-      ))}
+    <!-- ── Search + Type Filter ──────────────────────────────── -->
+    <div class="filter-bar">
+      <form method="GET" class="filter-form">
+        <div class="search-row">
+          <input
+            type="text"
+            name="q"
+            class="search-input"
+            placeholder="Search tags…"
+            value={searchQuery}
+            aria-label="Search tags"
+          />
+          <button type="submit" class="btn-filled btn-sm">Search</button>
+        </div>
+        <div class="type-chips" id="type-chips">
+          <button type="submit" name="type" value="" class:list={['type-chip', !activeType && 'type-chip--active']}>All</button>
+          {tagTypes.map(tt => (
+            <button type="submit" name="type" value={tt.type} class:list={['type-chip', activeType === tt.type && 'type-chip--active']}>{tt.label}</button>
+          ))}
+        </div>
+      </form>
     </div>
 
-    <div class="tag-empty" id="tag-empty" style="display:none;" role="status">
-      <p>No tags found matching your filters.</p>
-    </div>
-  </div>
+    {totalTags > 0 && (
+      <p class="results-meta">{totalTags} tag{totalTags !== 1 ? 's' : ''} found</p>
+    )}
+
+    <!-- ── Tag Groups ────────────────────────────────────────── -->
+    {(!activeType ? tagTypes : tagTypes.filter(tt => tt.type === activeType)).map(tt => {
+      const group = tagsByType[tt.type];
+      if (!group || group.length === 0) return null;
+      return (
+        <div class="tag-group">
+          <h2 class="tag-group-heading">{tt.label}</h2>
+          <div class="tag-grid">
+            {group.map((tag: any) => (
+              <a href={tagSearchUrl(tag)} class="tag-pill">{tag.name}</a>
+            ))}
+          </div>
+        </div>
+      );
+    })}
+
+    {Object.keys(tagsByType).length === 0 && !errorMsg && (
+      <p class="empty-msg">No tags found. Try a different search or filter.</p>
+    )}
+  </section>
 </Base>
 
 <style is:global>
-  @import '../../styles/theme.css';
-
   .tags-page {
-    padding: var(--space-4) 0;
+    max-width: 72rem;
+    margin: 0 auto;
+    padding: var(--space-8) var(--space-4);
   }
 
-  .tags-header {
+  .page-title {
+    font: var(--md-sys-typescale-headline-medium);
+    margin: 0 0 var(--space-6) 0;
+  }
+
+  .error-banner {
+    background: var(--md-sys-color-error);
+    color: var(--md-sys-color-on-error);
+    border-radius: var(--md-sys-shape-corner-small);
+    padding: var(--space-3) var(--space-4);
+    margin-bottom: var(--space-6);
+    font: var(--md-sys-typescale-body-medium);
+  }
+
+  /* ── Filter Bar ──────────────────────────────────────────── */
+  .filter-bar {
     margin-bottom: var(--space-6);
   }
 
-  .tags-title {
-    font: var(--md-sys-typescale-headline-large);
-    color: var(--md-sys-color-on-surface);
-    margin: 0 0 var(--space-6);
-  }
-
-  /* ── Filter Chips ── */
-  .filter-chips {
+  .filter-form {
     display: flex;
-    flex-wrap: wrap;
+    flex-direction: column;
+    gap: var(--space-3);
+  }
+
+  .search-row {
+    display: flex;
     gap: var(--space-2);
-    margin-bottom: var(--space-4);
-  }
-
-  .chip {
-    font: var(--md-sys-typescale-label-large);
-    color: var(--md-sys-color-on-surface-variant);
-    background: var(--md-sys-color-surface-container-low);
-    border: 1px solid var(--md-sys-color-outline-variant);
-    border-radius: var(--md-sys-shape-corner-small);
-    padding: var(--space-2) var(--space-4);
-    cursor: pointer;
-    transition: background var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard),
-                color var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard),
-                border-color var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard);
-    user-select: none;
-  }
-
-  .chip:hover {
-    background: var(--md-sys-color-surface-container-high);
-  }
-
-  .chip.active {
-    background: var(--md-sys-color-secondary-container);
-    color: var(--md-sys-color-on-secondary-container);
-    border-color: transparent;
-  }
-
-  /* ── Search ── */
-  .search-bar {
-    max-width: 480px;
   }
 
   .search-input {
-    width: 100%;
+    flex: 1;
     font: var(--md-sys-typescale-body-large);
     color: var(--md-sys-color-on-surface);
-    background: var(--md-sys-color-surface-container-high);
+    background: var(--md-sys-color-surface-container);
     border: 1px solid var(--md-sys-color-outline-variant);
-    border-radius: var(--md-sys-shape-corner-medium);
+    border-radius: var(--md-sys-shape-corner-small);
     padding: var(--space-3) var(--space-4);
     outline: none;
     transition: border-color var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard);
   }
+  .search-input:focus { border-color: var(--md-sys-color-primary); }
 
-  .search-input::placeholder {
-    color: var(--md-sys-color-outline);
+  .type-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-2);
   }
 
-  .search-input:focus {
+  .type-chip {
+    font: var(--md-sys-typescale-label-large);
+    color: var(--md-sys-color-on-surface-variant);
+    background: var(--md-sys-color-surface-container);
+    border: 1px solid var(--md-sys-color-outline-variant);
+    border-radius: var(--md-sys-shape-corner-full);
+    padding: var(--space-2) var(--space-4);
+    cursor: pointer;
+    text-decoration: none;
+    transition: background var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard),
+                border-color var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard);
+  }
+  .type-chip:hover {
+    background: var(--md-sys-color-surface-container-high);
+  }
+  .type-chip--active {
+    background: var(--md-sys-color-primary);
+    color: var(--md-sys-color-on-primary);
     border-color: var(--md-sys-color-primary);
   }
 
-  /* ── Tag Grid ── */
-  .tag-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
-    gap: var(--space-3);
+  .btn-sm {
+    padding: var(--space-2) var(--space-6);
   }
 
-  .tag-card {
+  .results-meta {
+    font: var(--md-sys-typescale-body-medium);
+    color: var(--md-sys-color-on-surface-variant);
+    margin: 0 0 var(--space-4) 0;
+  }
+
+  /* ── Tag Groups ─────────────────────────────────────────── */
+  .tag-group {
+    margin-bottom: var(--space-8);
+  }
+
+  .tag-group-heading {
+    font: var(--md-sys-typescale-title-large);
+    color: var(--md-sys-color-on-surface);
+    margin: 0 0 var(--space-4) 0;
+    font-size: 1.1rem;
+  }
+
+  .tag-grid {
     display: flex;
     flex-wrap: wrap;
-    align-items: baseline;
     gap: var(--space-2);
-    background: var(--md-sys-color-surface-container);
-    border: 1px solid var(--md-sys-color-outline-variant);
-    border-radius: var(--md-sys-shape-corner-medium);
-    padding: var(--space-3) var(--space-4);
-    text-decoration: none;
-    color: var(--md-sys-color-on-surface);
-    transition: background var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard),
-                box-shadow var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard);
   }
 
-  .tag-card:hover {
-    background: var(--md-sys-color-surface-container-high);
-    box-shadow: var(--md-sys-elevation-1);
-    text-decoration: none;
-  }
-
-  .tag-name {
-    font: var(--md-sys-typescale-body-large);
-    color: var(--md-sys-color-on-surface);
-    word-break: break-word;
-  }
-
-  .tag-badge {
-    font: var(--md-sys-typescale-body-small);
-    padding: 1px var(--space-2);
-    border-radius: var(--md-sys-shape-corner-full);
-    text-transform: capitalize;
-    line-height: 1.2;
-  }
-
-  .tag-count {
-    font: var(--md-sys-typescale-body-small);
-    color: var(--md-sys-color-outline);
-    margin-left: auto;
-    white-space: nowrap;
-  }
-
-  /* ── Type badge accent colors (within Obsidian palette) ── */
-  .badge-fandom {
-    background: var(--md-sys-color-primary-container);
+  .tag-pill {
+    font: var(--md-sys-typescale-body-medium);
     color: var(--md-sys-color-on-primary-container);
+    background: var(--md-sys-color-primary-container);
+    border-radius: var(--md-sys-shape-corner-full);
+    padding: var(--space-2) var(--space-4);
+    text-decoration: none;
+    transition: opacity var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard);
   }
+  .tag-pill:hover { opacity: 0.85; }
 
-  .badge-character {
-    background: var(--md-sys-color-secondary-container);
-    color: var(--md-sys-color-on-secondary-container);
-  }
-
-  .badge-relationship {
-    background: var(--md-sys-color-tertiary-container);
-    color: var(--md-sys-color-on-tertiary-container);
-  }
-
-  .badge-freeform {
-    background: var(--md-sys-color-surface-container-highest);
+  .empty-msg {
     color: var(--md-sys-color-on-surface-variant);
-  }
-
-  .badge-rating {
-    background: #3D2F1D;
-    color: #E8C88A;
-  }
-
-  .badge-warning {
-    background: var(--md-sys-color-error-container);
-    color: var(--md-sys-color-on-error-container);
-  }
-
-  .badge-category {
-    background: var(--md-sys-color-surface-container-high);
-    color: var(--md-sys-color-on-surface-variant);
-  }
-
-  /* ── Empty state ── */
-  .tag-empty {
-    text-align: center;
-    padding: var(--space-10);
     font: var(--md-sys-typescale-body-large);
-    color: var(--md-sys-color-outline);
   }
 
-  /* ── Responsive ── */
-  @media (max-width: 640px) {
-    .tag-grid {
-      grid-template-columns: 1fr;
-    }
+  .btn-filled {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font: var(--md-sys-typescale-label-large);
+    color: var(--md-sys-color-on-primary);
+    background: var(--md-sys-color-primary);
+    border: none;
+    border-radius: var(--md-sys-shape-corner-full);
+    padding: var(--space-3) var(--space-8);
+    cursor: pointer;
+    transition: opacity var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard);
   }
+  .btn-filled:hover { opacity: 0.88; }
 </style>
-
-<script define:vars={{ initialTags }}>
-  const tagGrid = document.getElementById('tag-grid');
-  const tagEmpty = document.getElementById('tag-empty');
-  const searchInput = document.getElementById('tag-search');
-  const chips = document.querySelectorAll('#filter-chips .chip');
-
-  let currentType = '';
-  let currentQ = '';
-  let debounceTimer = null;
-
-  // Render tag cards into the grid
-  function renderTags(tags) {
-    if (tags.length === 0) {
-      tagGrid.innerHTML = '';
-      tagEmpty.style.display = '';
-      return;
-    }
-    tagEmpty.style.display = 'none';
-    tagGrid.innerHTML = tags.map(tag => `
-      <a href="/works?tag_id=${encodeURIComponent(tag.id)}" class="tag-card" data-type="${escapeHtml(tag.type)}">
-        <span class="tag-name">${escapeHtml(tag.name)}</span>
-        <span class="tag-badge badge-${escapeHtml(tag.type)}">${escapeHtml(tag.type)}</span>
-        <span class="tag-count">${tag.work_count} ${tag.work_count === 1 ? 'work' : 'works'}</span>
-      </a>
-    `).join('');
-  }
-
-  // Quick HTML escape
-  function escapeHtml(str) {
-    const div = document.createElement('div');
-    div.textContent = str;
-    return div.innerHTML;
-  }
-
-  // Fetch from browse API
-  async function fetchTags() {
-    const params = new URLSearchParams();
-    if (currentType) params.set('type', currentType);
-    if (currentQ) params.set('q', currentQ);
-    try {
-      const res = await fetch('/api/tags/browse?' + params.toString());
-      if (res.ok) {
-        const tags = await res.json();
-        renderTags(tags);
-      }
-    } catch {
-      // silently fail — keep existing content
-    }
-  }
-
-  // Chip click handler
-  chips.forEach(chip => {
-    chip.addEventListener('click', () => {
-      chips.forEach(c => {
-        c.classList.remove('active');
-        c.setAttribute('aria-selected', 'false');
-      });
-      chip.classList.add('active');
-      chip.setAttribute('aria-selected', 'true');
-      currentType = chip.dataset.type;
-      fetchTags();
-    });
-  });
-
-  // Search input handler with debounce
-  searchInput.addEventListener('input', () => {
-    clearTimeout(debounceTimer);
-    debounceTimer = setTimeout(() => {
-      currentQ = searchInput.value.trim();
-      fetchTags();
-    }, 300);
-  });
-</script>

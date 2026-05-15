@@ -1,183 +1,402 @@
 ---
+/**
+ * Admin Audit Log Page — Auth: required, founder/admin only
+ * Displays audit log entries with filters and pagination.
+ */
 export const prerender = false;
-import Base from '@/layouts/Base.astro';
-import { getDrizzle } from '@/lib/db';
-import { UserRole, ROLE_LEVEL } from '@/lib/types';
-import { users, sessions } from '@/lib/schema';
-import { eq, and, gt, sql } from 'drizzle-orm';
+import Base from '@/v2/layouts/Base.astro';
+import type { D1Database } from '@cloudflare/workers-types';
+import { getDb } from '@/v2/lib/db';
+import { auditLog, users } from '@/v2/lib/schema/index';
+import { desc, eq, and, sql, count } from 'drizzle-orm';
 
-// Auth gate: admin+ required
-const cookie = Astro.request.headers.get('cookie') ?? '';
-const sessionMatch = cookie.match(/session=([a-f0-9]+)/);
-if (!sessionMatch) return Astro.redirect('/login');
+const user = Astro.locals.user;
 
-const d1 = Astro.locals.runtime.env.DB as D1Database;
-const db = getDrizzle(d1);
-const session = await db.select({ userId: sessions.userId }).from(sessions).where(and(eq(sessions.token, sessionMatch[1]), gt(sessions.expiresAt, sql`datetime('now')`))).get();
-if (!session) return Astro.redirect('/login');
+// Auth check: admin+ only
+if (!user || !['founder', 'admin'].includes(user.role)) {
+  return Astro.redirect('/login');
+}
 
-const currentUser = await db.select({ id: users.id, role: users.role }).from(users).where(eq(users.id, session.userId)).get();
-if (!currentUser) return Astro.redirect('/login');
+const d1 = locals.runtime.env.DB as D1Database;
+const db = getDb(d1);
 
-const userLevel = ROLE_LEVEL[currentUser.role as UserRole] ?? 0;
-if (userLevel < ROLE_LEVEL[UserRole.Mod]) return Astro.redirect('/');
-
-const page = parseInt(Astro.url.searchParams.get('page') || '1');
-const limit = 50;
+// Parse query params
+const url = new URL(Astro.request.url);
+const page = Math.max(1, Number(url.searchParams.get('page')) || 1);
+const limit = 20;
 const offset = (page - 1) * limit;
+const actionFilter = url.searchParams.get('action') || '';
+const targetTypeFilter = url.searchParams.get('targetType') || '';
 
-const { results: logRows } = await d1.prepare(`
-  SELECT al.id, al.action, al.target_type, al.target_id, al.details, al.created_at,
-    u.email as actor_email, u.role as actor_role
-  FROM audit_log al
-  JOIN users u ON u.id = al.actor_id
-  ORDER BY al.created_at DESC
-  LIMIT ? OFFSET ?
-`).bind(limit, offset).all<{
-  id: number; action: string; target_type: string; target_id: number;
-  details: string | null; created_at: string;
-  actor_email: string; actor_role: string;
-}>();
+// Build conditions
+const conditions = [];
+if (actionFilter) {
+  conditions.push(eq(auditLog.action, actionFilter));
+}
+if (targetTypeFilter && ['user', 'work', 'comment'].includes(targetTypeFilter)) {
+  conditions.push(eq(auditLog.targetType, targetTypeFilter));
+}
+const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
 
-const { results: countRow } = await d1.prepare('SELECT COUNT(*) as total FROM audit_log').all<{ total: number }>();
-const totalCount = countRow[0]?.total ?? 0;
-const totalPages = Math.ceil(totalCount / limit);
+// Count
+const [{ total }] = await db.select({ total: count() }).from(auditLog).where(whereClause);
+const totalPages = Math.ceil(total / limit);
 
-const allLog = (logRows ?? []).map(l => ({
-  id: l.id,
-  action: l.action,
-  targetType: l.target_type,
-  targetId: l.target_id,
-  details: l.details,
-  createdAt: l.created_at,
-  actorEmail: l.actor_email,
-  actorRole: l.actor_role,
+// Fetch entries
+const rows = await db
+  .select({
+    id: auditLog.id,
+    actorId: auditLog.actorId,
+    action: auditLog.action,
+    targetType: auditLog.targetType,
+    targetId: auditLog.targetId,
+    details: auditLog.details,
+    createdAt: auditLog.createdAt,
+  })
+  .from(auditLog)
+  .where(whereClause)
+  .orderBy(desc(auditLog.createdAt))
+  .limit(limit)
+  .offset(offset);
+
+// Enrich with actor emails
+const actorIds = [...new Set(rows.map(r => r.actorId).filter((id): id is number => id !== null))];
+let actorMap: Record<number, string> = {};
+if (actorIds.length > 0) {
+  const actorRows = await db
+    .select({ id: users.id, email: users.email })
+    .from(users)
+    .where(sql`${users.id} IN (${sql.join(actorIds.map(id => sql`${id}`), sql`, `)})`);
+  for (const a of actorRows) {
+    actorMap[a.id] = a.email;
+  }
+}
+
+const entries = rows.map(r => ({
+  ...r,
+  actorEmail: r.actorId && actorMap[r.actorId] ? actorMap[r.actorId] : null,
 }));
 
-const actionLabels: Record<string, string> = {
-  'user.ban': 'Ban User',
-  'user.unban': 'Unban User',
-  'user.approve': 'Approve User',
-  'user.revoke': 'Revoke Approval',
-  'user.suspend': 'Suspend User',
-  'user.unsuspend': 'Lift Suspension',
-  'user.role_change': 'Change Role',
-  'comment.delete': 'Delete Comment',
-  'comment.edit': 'Edit Comment',
-  'tag.merge': 'Merge Tag',
-  'report.resolve': 'Resolve Report',
-  'report.dismiss': 'Dismiss Report',
-  'collection.delete': 'Delete Collection',
-  'work.delete': 'Delete Work',
-};
+// Build filter query string
+const filterParams: string[] = [];
+if (actionFilter) filterParams.push(`action=${encodeURIComponent(actionFilter)}`);
+if (targetTypeFilter) filterParams.push(`targetType=${encodeURIComponent(targetTypeFilter)}`);
+const filterQs = filterParams.length > 0 ? '&' + filterParams.join('&') : '';
+
+const actionTypes = ['user.approve', 'user.ban', 'user.suspend', 'report.resolve', 'report.dismiss'];
+const targetTypes = ['user', 'work', 'comment'];
+
+function actionBadgeClass(action: string): string {
+  if (action.startsWith('user.approve')) return 'success';
+  if (action.startsWith('user.ban')) return 'error';
+  if (action.startsWith('user.suspend')) return 'warning';
+  if (action.startsWith('report.resolve')) return 'info';
+  if (action.startsWith('report.dismiss')) return 'muted';
+  return 'muted';
+}
 ---
 
-<Base title="Audit Log — Admin">
-  <h1 class="admin-heading">Audit Log</h1>
+<Base title="Admin: Audit Log — fanfiction.fyi" description="Audit log">
+  <section class="admin-page">
+    <h1 class="page-title">Audit Log</h1>
 
-  <p class="admin-subtitle">{totalCount.toLocaleString()} entries{page > 1 ? ` · Page ${page} of ${totalPages}` : ''}</p>
-
-  <div class="table-wrap">
-    <table class="admin-table">
-      <thead>
-        <tr>
-          <th>Time</th>
-          <th>Actor</th>
-          <th>Action</th>
-          <th>Target</th>
-          <th>Details</th>
-        </tr>
-      </thead>
-      <tbody>
-        {allLog.map(l => (
-          <tr>
-            <td class="date-cell">{new Date(l.createdAt.replace(' ', 'T') + 'Z').toLocaleString()}</td>
-            <td class="email-cell">
-              {l.actorEmail}
-              <span class="role-badge">{l.actorRole}</span>
-            </td>
-            <td>
-              <span class="action-badge action-{l.action.split('.')[0]}">{actionLabels[l.action] ?? l.action}</span>
-            </td>
-            <td>
-              <span class="target-type">{l.targetType}</span> #{l.targetId}
-            </td>
-            <td class="details-cell">
-              {l.details ? (
-                <details>
-                  <summary>Show</summary>
-                  <pre class="details-json">{JSON.stringify(JSON.parse(l.details), null, 2)}</pre>
-                </details>
-              ) : '—'}
-            </td>
-          </tr>
-        ))}
-      </tbody>
-    </table>
-  </div>
-
-  {totalPages > 1 && (
-    <nav class="pagination">
-      {page > 1 && <a href={`/admin/audit?page=${page - 1}`} class="page-btn">← Previous</a>}
-      <span class="page-info">Page {page} of {totalPages}</span>
-      {page < totalPages && <a href={`/admin/audit?page=${page + 1}`} class="page-btn">Next →</a>}
+    <nav class="admin-nav" aria-label="Admin sections">
+      <a href="/admin/users" class="admin-nav-link">Users</a>
+      <a href="/admin/invite-codes" class="admin-nav-link">Invite Codes</a>
+      <a href="/admin/reports" class="admin-nav-link">Reports</a>
+      <a href="/admin/audit" class="admin-nav-link admin-nav-link--active">Audit Log</a>
+      <a href="/admin/tags" class="admin-nav-link">Tags</a>
+      <a href="/admin/content" class="admin-nav-link">Content</a>
     </nav>
-  )}
+
+    <!-- ── Action Filter Chips ──────────────────────────────────────── -->>
+    <div class="filter-bar">
+      <form method="GET" class="filter-form">
+        <div class="form-field">
+          <label>Action Type</label>
+          <div class="chip-group">
+            <a href={`/admin/audit${targetTypeFilter ? `?targetType=${targetTypeFilter}` : ''}`}
+               class={`chip ${!actionFilter ? 'chip-active' : ''}`}>All</a>
+            {actionTypes.map(a => (
+              <a href={`/admin/audit?action=${a}${targetTypeFilter ? `&targetType=${targetTypeFilter}` : ''}`}
+                 class={`chip ${actionFilter === a ? 'chip-active' : ''}`}>
+                {a}
+              </a>
+            ))}
+          </div>
+        </div>
+        <div class="form-field">
+          <label>Target Type</label>
+          <div class="chip-group">
+            <a href={`/admin/audit${actionFilter ? `?action=${actionFilter}` : ''}`}
+               class={`chip ${!targetTypeFilter ? 'chip-active' : ''}`}>All</a>
+            {targetTypes.map(t => (
+              <a href={`/admin/audit?${actionFilter ? `action=${actionFilter}&` : ''}targetType=${t}`}
+                 class={`chip ${targetTypeFilter === t ? 'chip-active' : ''}`}>
+                {t.charAt(0).toUpperCase() + t.slice(1)}
+              </a>
+            ))}
+          </div>
+        </div>
+      </form>
+    </div>
+
+    <!-- ── Audit Log Table ──────────────────────────────────────────── -->
+    <div class="card">
+      <div class="table-wrapper">
+        <table class="admin-table">
+          <thead>
+            <tr>
+              <th>Timestamp</th>
+              <th>Actor</th>
+              <th>Action</th>
+              <th>Target Type</th>
+              <th>Target ID</th>
+              <th>Details</th>
+            </tr>
+          </thead>
+          <tbody>
+            {entries.map(entry => (
+              <tr>
+                <td class="date-cell">{entry.createdAt ? new Date(entry.createdAt).toLocaleString() : '—'}</td>
+                <td class="email-cell">{entry.actorEmail || `User #${entry.actorId}`}</td>
+                <td>
+                  <span class={`badge badge-${actionBadgeClass(entry.action)}`}>
+                    {entry.action}
+                  </span>
+                </td>
+                <td>{entry.targetType || '—'}</td>
+                <td>{entry.targetId ?? '—'}</td>
+                <td class="details-cell">
+                  {entry.details ? (
+                    <button class="btn-sm btn-muted details-toggle" data-details={entry.details}>
+                      View
+                    </button>
+                  ) : (
+                    <span class="text-muted">—</span>
+                  )}
+                </td>
+              </tr>
+            ))}
+            {entries.length === 0 && (
+              <tr><td colspan="6" class="empty-state">No audit log entries found.</td></tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+
+      <!-- ── Pagination ─────────────────────────────────────────────── -->
+      {totalPages > 1 && (
+        <nav class="pagination" aria-label="Pagination">
+          {page > 1 && <a href={`?page=${page - 1}${filterQs}`} class="btn-sm">Previous</a>}
+          <span class="pagination-info">Page {page} of {totalPages}</span>
+          {page < totalPages && <a href={`?page=${page + 1}${filterQs}`} class="btn-sm">Next</a>}
+        </nav>
+      )}
+    </div>
+
+    <!-- ── Details Modal ─────────────────────────────────────────────── -->
+    <div id="details-modal" class="modal-overlay" style="display:none;">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h2 class="modal-title">Audit Entry Details</h2>
+          <button id="modal-close" class="btn-sm btn-muted">&times;</button>
+        </div>
+        <pre id="details-json" class="details-json"></pre>
+      </div>
+    </div>
+  </section>
 </Base>
 
+<script define:vars={{}}>
+  // Details toggle — show JSON in modal
+  document.querySelectorAll('.details-toggle').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const details = btn.getAttribute('data-details');
+      if (!details) return;
+      const modal = document.getElementById('details-modal');
+      const jsonEl = document.getElementById('details-json');
+      try {
+        const parsed = JSON.parse(details);
+        jsonEl.textContent = JSON.stringify(parsed, null, 2);
+      } catch {
+        jsonEl.textContent = details;
+      }
+      modal.style.display = 'flex';
+    });
+  });
+
+  document.getElementById('modal-close').addEventListener('click', () => {
+    document.getElementById('details-modal').style.display = 'none';
+  });
+
+  document.getElementById('details-modal').addEventListener('click', (e) => {
+    if (e.target === e.currentTarget) {
+      e.currentTarget.style.display = 'none';
+    }
+  });
+</script>
+
 <style is:global>
-  @import '../../styles/theme.css';
+  .admin-page {
+    max-width: 72rem;
+    margin: 0 auto;
+    padding: var(--space-8) var(--space-4);
+  }
 
-  .admin-subtitle {
+  .page-title {
+    font: var(--md-sys-typescale-headline-medium);
+    margin: 0 0 var(--space-4) 0;
+  }
+
+  .admin-nav {
+    display: flex;
+    gap: var(--space-2);
+    margin-bottom: var(--space-6);
+    border-bottom: 1px solid var(--md-sys-color-outline-variant);
+    padding-bottom: var(--space-2);
+  }
+
+  .admin-nav-link {
+    font: var(--md-sys-typescale-label-large);
+    color: var(--md-sys-color-on-surface-variant);
+    text-decoration: none;
+    padding: var(--space-1) var(--space-3);
+    border-radius: var(--md-sys-shape-corner-small);
+    transition: background var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard);
+  }
+  .admin-nav-link:hover { background: var(--md-sys-color-surface-container); }
+  .admin-nav-link--active {
+    color: var(--md-sys-color-primary);
+    background: var(--md-sys-color-primary-container);
+    font-weight: 600;
+  }
+
+  .filter-bar {
+    margin-bottom: var(--space-6);
+  }
+
+  .filter-form {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-4);
+  }
+
+  .form-field {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+  }
+
+  .form-field label {
+    font: var(--md-sys-typescale-body-small);
+    color: var(--md-sys-color-on-surface-variant);
+  }
+
+  .chip-group {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-1);
+  }
+
+  .chip {
+    font: var(--md-sys-typescale-body-small);
+    padding: var(--space-1) var(--space-2);
+    border-radius: var(--md-sys-shape-corner-small);
+    background: var(--md-sys-color-surface-container);
+    color: var(--md-sys-color-on-surface-variant);
+    text-decoration: none;
+    border: 1px solid var(--md-sys-color-outline-variant);
+    transition: background var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard);
+  }
+  .chip:hover { background: var(--md-sys-color-surface-container-high); }
+  .chip-active {
+    background: var(--md-sys-color-primary-container);
+    color: var(--md-sys-color-on-primary-container);
+    border-color: var(--md-sys-color-primary);
+    font-weight: 600;
+  }
+
+  .card {
+    background: var(--md-sys-color-surface-container);
+    border: 1px solid var(--md-sys-color-outline-variant);
+    border-radius: var(--md-sys-shape-corner-large);
+    padding: var(--space-6);
+  }
+
+  .table-wrapper {
+    overflow-x: auto;
+  }
+
+  .admin-table {
+    width: 100%;
+    border-collapse: collapse;
     font: var(--md-sys-typescale-body-medium);
+  }
+
+  .admin-table th {
+    font: var(--md-sys-typescale-label-large);
     color: var(--md-sys-color-on-surface-variant);
-    margin: 0 0 var(--space-4);
+    text-align: left;
+    padding: var(--space-3) var(--space-4);
+    border-bottom: 2px solid var(--md-sys-color-outline-variant);
   }
 
-  .date-cell { font-size: 0.8rem; white-space: nowrap; }
-  .email-cell { font-size: 0.8rem; }
-  .details-cell { font-size: 0.75rem; max-width: 200px; }
+  .admin-table td {
+    padding: var(--space-3) var(--space-4);
+    border-bottom: 1px solid var(--md-sys-color-outline-variant);
+    vertical-align: middle;
+  }
 
-  .role-badge {
-    display: inline-block;
-    font-size: 0.65rem;
-    padding: 0.1rem 0.3rem;
-    border-radius: 3px;
-    margin-left: 0.3rem;
-    background: var(--md-sys-color-surface-container-high);
+  .email-cell {
+    font: var(--md-sys-typescale-body-medium);
+    max-width: 200px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .date-cell {
+    white-space: nowrap;
     color: var(--md-sys-color-on-surface-variant);
-    text-transform: capitalize;
   }
 
-  .action-badge {
+  .details-cell {
+    max-width: 80px;
+  }
+
+  .badge {
     display: inline-block;
-    padding: 0.15rem 0.4rem;
-    border-radius: 4px;
-    font-size: 0.75rem;
+    font: var(--md-sys-typescale-body-small);
+    padding: var(--space-1) var(--space-2);
+    border-radius: var(--md-sys-shape-corner-small);
+    white-space: nowrap;
   }
-  .action-user { background: rgba(107, 144, 190, 0.15); color: #6B8FA8; }
-  .action-comment { background: rgba(107, 168, 130, 0.15); color: #6BA882; }
-  .action-tag { background: rgba(190, 107, 150, 0.15); color: #BE6B96; }
-  .action-report { background: rgba(200, 170, 100, 0.15); color: #D4B872; }
-  .action-collection { background: rgba(170, 130, 190, 0.15); color: #AA82BE; }
-  .action-work { background: rgba(190, 107, 107, 0.15); color: #BE6B6B; }
+  .badge-success { background: #c8e6c9; color: #1b5e20; }
+  .badge-error { background: #ffcdd2; color: #b71c1c; }
+  .badge-warning { background: #fff9c4; color: #e65100; }
+  .badge-muted { background: var(--md-sys-color-surface-container-highest); color: var(--md-sys-color-on-surface-variant); }
+  .badge-info { background: #bbdefb; color: #0d47a1; }
 
-  .target-type {
-    font-size: 0.75rem;
-    padding: 0.1rem 0.3rem;
-    border-radius: 3px;
-    background: var(--md-sys-color-surface-container-high);
-    text-transform: capitalize;
+  .text-muted {
+    color: var(--md-sys-color-on-surface-variant);
   }
 
-  .details-json {
-    font-size: 0.7rem;
-    margin: 0.25rem 0 0;
-    max-height: 120px;
-    overflow: auto;
-    background: var(--md-sys-color-surface-container-lowest);
-    padding: 0.5rem;
-    border-radius: 4px;
+  .btn-sm {
+    font: var(--md-sys-typescale-body-small);
+    padding: var(--space-1) var(--space-3);
+    border-radius: var(--md-sys-shape-corner-small);
+    border: none;
+    cursor: pointer;
+    transition: opacity var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard);
+  }
+  .btn-sm:hover { opacity: 0.88; }
+  .btn-muted { background: var(--md-sys-color-surface-container-highest); color: var(--md-sys-color-on-surface-variant); }
+
+  .empty-state {
+    text-align: center;
+    padding: var(--space-8);
+    color: var(--md-sys-color-on-surface-variant);
   }
 
   .pagination {
@@ -185,22 +404,61 @@ const actionLabels: Record<string, string> = {
     align-items: center;
     justify-content: center;
     gap: var(--space-4);
-    margin-top: var(--space-4);
+    margin-top: var(--space-6);
   }
-  .page-btn {
-    padding: 0.5rem 1rem;
-    border-radius: var(--md-sys-shape-corner-full);
-    background: var(--md-sys-color-secondary-container);
-    color: var(--md-sys-color-on-secondary-container);
-    text-decoration: none;
-    font: var(--md-sys-typescale-label-large);
-  }
-  .page-btn:hover {
-    background: var(--md-sys-color-secondary);
-    color: var(--md-sys-color-on-secondary);
-  }
-  .page-info {
+
+  .pagination-info {
     font: var(--md-sys-typescale-body-medium);
     color: var(--md-sys-color-on-surface-variant);
   }
+
+  /* ── Modal ──────────────────────────────────────────────────────── */
+  .modal-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.5);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1000;
+  }
+
+  .modal-content {
+    background: var(--md-sys-color-surface-container);
+    border: 1px solid var(--md-sys-color-outline-variant);
+    border-radius: var(--md-sys-shape-corner-large);
+    padding: var(--space-6);
+    max-width: 40rem;
+    width: 90%;
+    max-height: 80vh;
+    overflow-y: auto;
+  }
+
+  .modal-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: var(--space-4);
+  }
+
+  .modal-title {
+    font: var(--md-sys-typescale-title-medium);
+    margin: 0;
+  }
+
+  .details-json {
+    background: var(--md-sys-color-surface-container-low);
+    border: 1px solid var(--md-sys-color-outline-variant);
+    border-radius: var(--md-sys-shape-corner-small);
+    padding: var(--space-4);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.85rem;
+    overflow-x: auto;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
 </style>
+
+<script define:vars={{}}>
+  // Helper to determine badge class from action — available for future client-side use
+</script>
