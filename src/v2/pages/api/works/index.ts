@@ -209,6 +209,7 @@ export const GET: APIRoute = async ({ request, url, locals }) => {
     language: w.language,
     wordCount: w.wordCount,
     complete: w.complete,
+    draft: w.draft,
     workSkin: w.workSkin,
     publishedAt: w.publishedAt,
     createdAt: w.createdAt,
