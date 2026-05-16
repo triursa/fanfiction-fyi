@@ -10,8 +10,8 @@
  */
 
 import { defineMiddleware } from 'astro:middleware';
-import { getDb } from './lib/db';
-import { users, sessions } from './lib/schema/index';
+import { getDb } from '@/v2/lib/db';
+import { users, sessions } from '@/v2/lib/schema/index';
 import { eq, and, gt, sql } from 'drizzle-orm';
 import type { D1Database } from '@cloudflare/workers-types';
 
