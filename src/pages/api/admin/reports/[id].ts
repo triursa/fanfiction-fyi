@@ -9,6 +9,8 @@ import { requireAuth } from '@/v2/lib/auth';
 import { getDb } from '@/v2/lib/db';
 import { contentReports } from '@/v2/lib/schema/index';
 import { validateBody, resolveReportSchema } from '@/v2/lib/validation';
+import { logAudit } from '@/v2/lib/audit';
+import { notify } from '@/v2/lib/notify';
 import { eq } from 'drizzle-orm';
 
 function requireMod(user: { role: string }): void {
@@ -58,6 +60,25 @@ export const PATCH: APIRoute = async ({ request, params, locals }) => {
       updatedAt: now,
     })
     .where(eq(contentReports.id, reportId));
+
+  // Audit log
+  const auditAction = data.status === 'resolved' ? 'report.resolve' : 'report.dismiss';
+  await logAudit(d1, auth.user.id, auditAction, 'report', reportId, {
+    status: data.status,
+    resolution: data.resolution || null,
+  });
+
+  // Notify report submitter when report is resolved
+  try {
+    if (report.reporterId) {
+      await notify(d1, report.reporterId, {
+        type: 'report.resolved',
+        title: 'Your report has been resolved',
+        body: `Report #${reportId} has been ${data.status}.` + (data.resolution ? ` Resolution: ${data.resolution}` : ''),
+        link: `/admin/reports`,
+      });
+    }
+  } catch { /* notification failure should not break report resolution */ }
 
   const updated = await db.select().from(contentReports).where(eq(contentReports.id, reportId)).get();
 

@@ -4,8 +4,9 @@ import { getDb } from '@/v2/lib/db';
 import { requireAuth, checkApproved, getAuth } from '@/v2/lib/auth';
 import { validateBody } from '@/v2/lib/validation';
 import { createCommentSchema } from '@/v2/lib/validation';
-import { comments, works, pseuds } from '@/v2/lib/schema/index';
+import { comments, works, pseuds, creatorships } from '@/v2/lib/schema/index';
 import { eq, desc } from 'drizzle-orm';
+import { notify } from '@/v2/lib/notify';
 
 export const config = { auth: 'optional' as const };
 
@@ -52,13 +53,39 @@ export const POST: APIRoute = async ({ request, locals }) => {
     return new Response(JSON.stringify({ error: 'No pseud found' }), { status: 400, headers: { 'Content-Type': 'application/json' } });
   }
 
+  const workId = data.workId ?? 0;
   const newComment = await db.insert(comments).values({
-    workId: data.workId ?? 0,
+    workId,
     chapterId: data.chapterId ?? null,
     pseudId: defaultPseud.id,
     parentId: data.parentId ?? null,
     content: data.content,
   }).returning();
+
+  // Notify work owner of new comment
+  try {
+    const work = await db.select().from(works).where(eq(works.id, workId)).get();
+    if (work) {
+      // Find all creator pseuds for this work
+      const creatorLinks = await db.select({ pseudId: creatorships.pseudId })
+        .from(creatorships)
+        .where(eq(creatorships.workId, workId));
+      for (const link of creatorLinks) {
+        const pseud = await db.select({ userId: pseuds.userId })
+          .from(pseuds)
+          .where(eq(pseuds.id, link.pseudId))
+          .get();
+        if (pseud && pseud.userId !== auth.user.id) {
+          await notify(d1, pseud.userId, {
+            type: 'comment.new',
+            title: 'New comment on your work',
+            body: `${auth.user.displayName || 'Someone'} commented on "${work.title}"`,
+            link: `/works/${workId}`,
+          });
+        }
+      }
+    }
+  } catch { /* notification failure should not break comment creation */ }
 
   return new Response(JSON.stringify({ data: newComment[0] }), {
     status: 201, headers: { 'Content-Type': 'application/json' },

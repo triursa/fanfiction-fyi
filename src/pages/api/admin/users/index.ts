@@ -10,6 +10,7 @@ import { requireAuth } from '@/v2/lib/auth';
 import { getDb } from '@/v2/lib/db';
 import { users, inviteCodes } from '@/v2/lib/schema/index';
 import { updateUserRoleSchema, suspendUserSchema, validateBody } from '@/v2/lib/validation';
+import { logAudit } from '@/v2/lib/audit';
 import { eq, and, sql, desc, count } from 'drizzle-orm';
 
 // ─── Admin role check ──────────────────────────────────────────────
@@ -165,8 +166,12 @@ export const PATCH: APIRoute = async ({ request, locals }) => {
       updateData.suspendedUntil = d.toISOString();
     }
     updateData.banned = 0; // Unsuspend if currently banned
+    await logAudit(d1, auth.user.id, 'user.suspend', 'user', userId, {
+      suspendedUntil: updateData.suspendedUntil,
+    });
   } else if (action === 'unsuspend') {
     updateData.suspendedUntil = null;
+    await logAudit(d1, auth.user.id, 'user.unsuspend', 'user', userId, {});
   } else if (action === 'changeRole') {
     const [roleData, roleError] = [body, null];
     if (!['founder', 'admin', 'mod', 'user'].includes(body.role)) {
@@ -183,6 +188,10 @@ export const PATCH: APIRoute = async ({ request, locals }) => {
       });
     }
     updateData.role = body.role;
+    await logAudit(d1, auth.user.id, 'user.role_change', 'user', userId, {
+      oldRole: targetUser.role,
+      newRole: body.role,
+    });
   } else {
     return new Response(JSON.stringify({ error: 'Invalid action. Use: approve, ban, unban, suspend, unsuspend, changeRole' }), {
       status: 422,

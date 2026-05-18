@@ -6,6 +6,7 @@ import { hashPassword, createSession, sessionCookie, validateInviteCode, markInv
 import { users, pseuds } from '@/v2/lib/schema/index';
 import { z } from 'zod';
 import { validateBody } from '@/v2/lib/validation';
+import { notify } from '@/v2/lib/notify';
 
 const signupSchema = z.object({
   email: z.string().email('Invalid email address'),
@@ -56,6 +57,31 @@ export const POST: APIRoute = async ({ request, locals }) => {
     name: data.displayName || data.email.split('@')[0],
     isDefault: 1,
   });
+
+  // Notify admins of new signup
+  try {
+    const admins = await db.select().from(users).where(eq(users.role, 'admin'));
+    for (const admin of admins) {
+      await notify(d1, admin.id, {
+        type: 'user.signup',
+        title: 'New user signup',
+        body: `${data.displayName || data.email.split('@')[0]} just registered`,
+        link: `/admin/users`,
+      });
+    }
+    // Also notify founder
+    const founders = await db.select().from(users).where(eq(users.role, 'founder'));
+    for (const founder of founders) {
+      if (!admins.find((a) => a.id === founder.id)) {
+        await notify(d1, founder.id, {
+          type: 'user.signup',
+          title: 'New user signup',
+          body: `${data.displayName || data.email.split('@')[0]} just registered`,
+          link: `/admin/users`,
+        });
+      }
+    }
+  } catch { /* notification failure should not break signup */ }
 
   // Create session
   const token = await createSession(d1, userId);

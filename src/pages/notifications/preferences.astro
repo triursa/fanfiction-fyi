@@ -1,0 +1,282 @@
+---
+/**
+ * Notification Preferences Page
+ * Auth: required
+ */
+export const prerender = false;
+import Base from '@/v2/layouts/Base.astro';
+
+const user = Astro.locals.user;
+
+if (!user) {
+  return Astro.redirect('/login');
+}
+
+// Fetch preferences via internal API
+let preferences: Array<{ type: string; enabled: boolean }> = [];
+let error: string | null = null;
+
+try {
+  const res = await fetch(new URL('/api/notifications/preferences', Astro.url), {
+    headers: { cookie: Astro.request.headers.get('cookie') || '' },
+  });
+  if (res.ok) {
+    const json = await res.json();
+    preferences = json.data;
+  } else {
+    error = 'Failed to load preferences.';
+  }
+} catch {
+  error = 'Network error loading preferences.';
+}
+
+const typeLabels: Record<string, string> = {
+  'comment.new': 'New comments on your works',
+  'comment.reply': 'Replies to your comments',
+  'kudos': 'Kudos on your works',
+  'work.update': 'Work updates',
+  'report.resolved': 'Report resolutions',
+  'user.signup': 'New user signups (admin)',
+  'user.approved': 'User approvals',
+};
+---
+
+<Base title="Notification Preferences — fanfiction.fyi" description="Manage your notification preferences">
+  <section class="preferences-page">
+    <h1 class="page-title">Notification Preferences</h1>
+
+    {error && <div class="error-banner" role="alert">{error}</div>}
+
+    <div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+    <div class="card">
+      <form id="prefs-form" class="settings-form">
+        {preferences.map((pref) => (
+          <div class="pref-row">
+            <label class="pref-label" for={`pref-${pref.type}`}>
+              <span class="pref-name">{typeLabels[pref.type] || pref.type}</span>
+            </label>
+            <div class="toggle-wrapper">
+              <input
+                type="checkbox"
+                id={`pref-${pref.type}`}
+                name={pref.type}
+                checked={pref.enabled}
+                class="toggle-input"
+              />
+              <span class="toggle-track">
+                <span class="toggle-thumb"></span>
+              </span>
+            </div>
+          </div>
+        ))}
+        <button type="submit" class="btn-filled">Save Preferences</button>
+      </form>
+    </div>
+
+    <a href="/notifications" class="btn-text back-link">← Back to Notifications</a>
+  </section>
+</Base>
+
+<script>
+  function showToast(message: string, type: 'success' | 'error' = 'success') {
+    const toast = document.getElementById('toast')!;
+    toast.textContent = message;
+    toast.className = `toast toast--${type} toast--show`;
+    setTimeout(() => { toast.className = 'toast'; }, 3000);
+  }
+
+  const form = document.getElementById('prefs-form') as HTMLFormElement | null;
+  if (form) {
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const preferences: Array<{ type: string; enabled: boolean }> = [];
+
+      form.querySelectorAll('.toggle-input').forEach((input) => {
+        const el = input as HTMLInputElement;
+        preferences.push({ type: el.name, enabled: el.checked });
+      });
+
+      try {
+        const res = await fetch('/api/notifications/preferences', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ preferences }),
+        });
+        if (res.ok) {
+          showToast('Preferences saved!');
+        } else {
+          const data = await res.json();
+          showToast(data.error || 'Failed to save preferences.', 'error');
+        }
+      } catch {
+        showToast('Network error.', 'error');
+      }
+    });
+  }
+</script>
+
+<style is:global>
+  .preferences-page {
+    max-width: 48rem;
+    margin: 0 auto;
+    padding: var(--space-8) var(--space-4);
+  }
+
+  .page-title {
+    font: var(--md-sys-typescale-headline-medium);
+    margin: 0 0 var(--space-6) 0;
+  }
+
+  .error-banner {
+    background: var(--md-sys-color-error);
+    color: var(--md-sys-color-on-error);
+    border-radius: var(--md-sys-shape-corner-small);
+    padding: var(--space-3) var(--space-4);
+    margin-bottom: var(--space-6);
+    font: var(--md-sys-typescale-body-medium);
+  }
+
+  .toast {
+    position: fixed;
+    bottom: var(--space-8);
+    left: 50%;
+    transform: translateX(-50%) translateY(100px);
+    border-radius: var(--md-sys-shape-corner-small);
+    padding: var(--space-3) var(--space-6);
+    font: var(--md-sys-typescale-body-medium);
+    z-index: 1000;
+    opacity: 0;
+    transition: transform 0.3s var(--md-sys-motion-easing-standard), opacity 0.3s var(--md-sys-motion-easing-standard);
+    pointer-events: none;
+  }
+  .toast--show {
+    transform: translateX(-50%) translateY(0);
+    opacity: 1;
+  }
+  .toast--success {
+    background: var(--md-sys-color-primary-container);
+    color: var(--md-sys-color-on-primary-container);
+  }
+  .toast--error {
+    background: var(--md-sys-color-error);
+    color: var(--md-sys-color-on-error);
+  }
+
+  .card {
+    background: var(--md-sys-color-surface-container);
+    border: 1px solid var(--md-sys-color-outline-variant);
+    border-radius: var(--md-sys-shape-corner-large);
+    padding: var(--space-6);
+    margin-bottom: var(--space-6);
+  }
+
+  .settings-form {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-4);
+  }
+
+  .pref-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-4);
+    padding: var(--space-2) 0;
+  }
+
+  .pref-label {
+    flex: 1;
+  }
+
+  .pref-name {
+    font: var(--md-sys-typescale-body-large);
+    color: var(--md-sys-color-on-surface);
+  }
+
+  /* ── Toggle switch ────────────────────────────── */
+  .toggle-wrapper {
+    position: relative;
+    width: 52px;
+    height: 32px;
+    flex-shrink: 0;
+  }
+
+  .toggle-input {
+    position: absolute;
+    opacity: 0;
+    width: 0;
+    height: 0;
+  }
+
+  .toggle-track {
+    position: absolute;
+    inset: 0;
+    border-radius: 16px;
+    background: var(--md-sys-color-surface-variant);
+    border: 2px solid var(--md-sys-color-outline);
+    transition: background var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard),
+                border-color var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard);
+  }
+
+  .toggle-thumb {
+    position: absolute;
+    top: 2px;
+    left: 2px;
+    width: 24px;
+    height: 24px;
+    border-radius: 12px;
+    background: var(--md-sys-color-outline);
+    transition: transform var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard),
+                background var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard);
+  }
+
+  .toggle-input:checked + .toggle-track {
+    background: var(--md-sys-color-primary);
+    border-color: var(--md-sys-color-primary);
+  }
+
+  .toggle-input:checked + .toggle-track .toggle-thumb {
+    transform: translateX(20px);
+    background: var(--md-sys-color-on-primary);
+  }
+
+  .toggle-input:focus-visible + .toggle-track {
+    outline: 2px solid var(--md-sys-color-primary);
+    outline-offset: 2px;
+  }
+
+  .btn-filled {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font: var(--md-sys-typescale-label-large);
+    color: var(--md-sys-color-on-primary);
+    background: var(--md-sys-color-primary);
+    border: none;
+    border-radius: var(--md-sys-shape-corner-full);
+    padding: var(--space-3) var(--space-8);
+    cursor: pointer;
+    transition: opacity var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard);
+  }
+  .btn-filled:hover { opacity: 0.88; }
+
+  .btn-text {
+    font: var(--md-sys-typescale-label-large);
+    color: var(--md-sys-color-primary);
+    background: none;
+    border: none;
+    cursor: pointer;
+    padding: var(--space-2) var(--space-3);
+    border-radius: var(--md-sys-shape-corner-full);
+    text-decoration: none;
+    transition: background var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard);
+  }
+  .btn-text:hover {
+    background: var(--md-sys-color-surface-container);
+  }
+
+  .back-link {
+    display: inline-block;
+  }
+</style>
