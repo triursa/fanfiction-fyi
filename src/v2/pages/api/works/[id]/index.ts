@@ -208,6 +208,18 @@ export const PUT: APIRoute = async ({ request, locals, params }) => {
     }
   }
 
+  // Check if pseudId changed — update creatorship
+  if (data.pseudId) {
+    const currentPseudId = creatorship.creatorships.pseudId;
+    if (data.pseudId !== currentPseudId) {
+      // Verify the new pseud belongs to the user
+      const newPseud = await db.select().from(pseuds).where(and(eq(pseuds.id, data.pseudId), eq(pseuds.userId, auth.user.id))).get();
+      if (newPseud) {
+        await db.update(creatorships).set({ pseudId: data.pseudId }).where(and(eq(creatorships.workId, workId), eq(creatorships.pseudId, currentPseudId)));
+      }
+    }
+  }
+
   // Fetch updated work
   const updatedWork = await db.select().from(works).where(eq(works.id, workId)).get();
 

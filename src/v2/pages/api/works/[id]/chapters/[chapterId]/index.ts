@@ -4,8 +4,8 @@ import { getDb } from '../../../../../../../lib/db';
 import { requireAuth, checkApproved } from '../../../../../../../lib/auth';
 import { validateBody } from '../../../../../../../lib/validation';
 import { updateChapterSchema } from '../../../../../../../lib/validation';
-import { chapters, creatorships, pseuds } from '../../../../../../../lib/schema/index';
-import { eq, and } from 'drizzle-orm';
+import { chapters, creatorships, pseuds, works } from '../../../../../../../lib/schema/index';
+import { eq, and, sql } from 'drizzle-orm';
 
 export const config = { auth: 'public' as const };
 
@@ -66,11 +66,17 @@ export const PUT: APIRoute = async ({ params, request, locals }) => {
   }
   if (data.contentHtml !== undefined) updates.contentHtml = data.contentHtml;
   if (data.mood !== undefined) updates.mood = data.mood;
+  if (data.draft !== undefined) {
+    updates.draft = data.draft ? 1 : 0;
+  }
 
   const updated = await db.update(chapters).set(updates).where(and(eq(chapters.id, chapterId), eq(chapters.workId, workId))).returning();
   if (!updated.length) {
     return new Response(JSON.stringify({ error: 'Chapter not found' }), { status: 404, headers: { 'Content-Type': 'application/json' } });
   }
+
+  // Recalculate work word count (only published chapters)
+  await recalcWorkWordCount(db, workId);
 
   return new Response(JSON.stringify({ data: updated[0] }), {
     status: 200,
@@ -112,12 +118,17 @@ export const DELETE: APIRoute = async ({ params, request, locals }) => {
     }
   }
 
-  // Update work word count
-  const totalWords = remaining.reduce((sum, c) => sum + c.wordCount, 0);
-  await db.update(works).set({ wordCount: totalWords, updatedAt: new Date().toISOString() }).where(eq(works.id, workId));
+  // Update work word count (only published chapters)
+  await recalcWorkWordCount(db, workId);
 
   return new Response(JSON.stringify({ data: { deleted: true } }), {
     status: 200,
     headers: { 'Content-Type': 'application/json' },
   });
 };
+
+// Recalculate work word count from published chapters only
+async function recalcWorkWordCount(db: any, workId: number) {
+  const result = await db.select({ total: sql`COALESCE(SUM(${chapters.wordCount}), 0)` }).from(chapters).where(and(eq(chapters.workId, workId), eq(chapters.draft, 0))).get();
+  await db.update(works).set({ wordCount: result.total, updatedAt: new Date().toISOString() }).where(eq(works.id, workId));
+}

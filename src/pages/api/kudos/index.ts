@@ -3,7 +3,7 @@ import type { D1Database } from '@cloudflare/workers-types';
 import { getDb } from '@/v2/lib/db';
 import { requireAuth, checkApproved, getAuth } from '@/v2/lib/auth';
 import { kudos, pseuds } from '@/v2/lib/schema/index';
-import { eq, count } from 'drizzle-orm';
+import { eq, count, and } from 'drizzle-orm';
 
 export const config = { auth: 'optional' as const };
 
@@ -40,7 +40,7 @@ export const POST: APIRoute = async ({ request, locals }) => {
 
   // Check if already given
   const existing = await db.select().from(kudos)
-    .where(eq(kudos.workId, workId) /* AND pseud */).get();
+    .where(and(eq(kudos.workId, workId), eq(kudos.pseudId, defaultPseud!.id))).get();
 
   if (existing) {
     await db.delete(kudos).where(eq(kudos.id, existing.id));
