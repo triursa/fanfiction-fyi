@@ -2,66 +2,53 @@
 export const prerender = false;
 export const config = { auth: 'public' };
 import Base from '@/v2/layouts/Base.astro';
-
-// Check for error params from redirect
-const errorParam = Astro.url.searchParams.get('error');
-const resetParam = Astro.url.searchParams.get('reset');
-const errorMessage = errorParam === 'invalid' ? 'Invalid email or password.'
-  : errorParam === 'banned' ? 'This account has been banned.'
-  : errorParam === 'suspended' ? 'This account is suspended.'
-  : '';
-const resetMessage = resetParam === 'success' ? 'Your password has been reset. Please sign in with your new password.' : '';
 ---
 
-<Base title="Sign In — fanfiction.fyi">
+<Base title="Forgot Password — fanfiction.fyi">
   <div class="auth-container">
     <a href="/" class="auth-logo">fanfiction.fyi</a>
-    <h1 class="auth-title">Sign In</h1>
+    <h1 class="auth-title">Forgot Password</h1>
 
-    <form id="login-form" class="auth-form">
+    <form id="forgot-form" class="auth-form">
       <div class="form-field">
         <label for="email">Email</label>
         <input type="email" id="email" name="email" required autocomplete="email" placeholder="you@example.com" />
       </div>
-      <div class="form-field">
-        <label for="password">Password</label>
-        <input type="password" id="password" name="password" required autocomplete="current-password" placeholder="Your password" />
-      </div>
-      <a href="/forgot-password" class="forgot-link">Forgot password?</a>
-      {errorMessage && <div class="form-error" role="alert">{errorMessage}</div>}
-      {resetMessage && <div class="form-success" role="status">{resetMessage}</div>}
-      <div id="login-error" class="form-error" role="alert"></div>
-      <button type="submit" class="btn-primary">Sign In</button>
+      <div id="forgot-error" class="form-error" role="alert"></div>
+      <div id="forgot-success" class="form-success" role="status"></div>
+      <button type="submit" class="btn-primary">Send Reset Link</button>
     </form>
 
-    <p class="auth-alt">Don't have an account? <a href="/signup">Request an invite</a></p>
+    <p class="auth-alt"><a href="/login">Back to Sign In</a></p>
   </div>
 </Base>
 
 <script>
-  const form = document.getElementById('login-form') as HTMLFormElement;
-  const errorEl = document.getElementById('login-error') as HTMLElement;
+  const form = document.getElementById('forgot-form') as HTMLFormElement;
+  const errorEl = document.getElementById('forgot-error') as HTMLElement;
+  const successEl = document.getElementById('forgot-success') as HTMLElement;
 
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
     errorEl.textContent = '';
+    successEl.textContent = '';
 
     const email = (document.getElementById('email') as HTMLInputElement).value;
-    const password = (document.getElementById('password') as HTMLInputElement).value;
 
     try {
-      const res = await fetch('/api/auth/login', {
+      const res = await fetch('/api/auth/forgot-password', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, password }),
+        body: JSON.stringify({ email }),
       });
 
       const data = await res.json();
 
       if (res.ok) {
-        window.location.href = '/';
+        form.style.display = 'none';
+        successEl.textContent = 'If an account with that email exists, a reset link has been sent.';
       } else {
-        errorEl.textContent = data.error || 'Login failed. Please try again.';
+        errorEl.textContent = data.error || 'Something went wrong. Please try again.';
       }
     } catch {
       errorEl.textContent = 'Network error. Please try again.';
@@ -121,7 +108,6 @@ const resetMessage = resetParam === 'success' ? 'Your password has been reset. P
     transition: border-color var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard);
   }
   .form-field input:focus { border-color: var(--md-sys-color-primary); }
-  .form-field input.field-error { border-color: var(--md-sys-color-error); }
 
   .form-error {
     font: var(--md-sys-typescale-body-small);
@@ -130,18 +116,11 @@ const resetMessage = resetParam === 'success' ? 'Your password has been reset. P
   }
 
   .form-success {
-    font: var(--md-sys-typescale-body-small);
+    font: var(--md-sys-typescale-body-medium);
     color: var(--md-sys-color-primary);
     min-height: 1.2em;
+    text-align: center;
   }
-
-  .forgot-link {
-    font: var(--md-sys-typescale-body-small);
-    color: var(--md-sys-color-primary);
-    text-decoration: none;
-    text-align: right;
-  }
-  .forgot-link:hover { text-decoration: underline; }
 
   .btn-primary {
     font: var(--md-sys-typescale-label-large);

@@ -11,3 +11,4 @@ export * from './annotations';
 export * from './search';
 export * from './canon';
 export * from './characters';
+export * from './password-reset';

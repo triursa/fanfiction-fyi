@@ -2,6 +2,7 @@
 export const prerender = false;
 import { ViewTransitions } from 'astro:transitions';
 import { getTheme, DEFAULT_THEME } from '../styles/themes';
+import NotificationBell from '../components/NotificationBell.astro';
 
 interface Props {
   title?: string;
@@ -79,6 +80,7 @@ const ssrThemeStyle = (() => {
             {['founder', 'admin', 'mod'].includes(user.role) && (
               <a href="/admin/reports" class="nav-link nav-link--admin">Admin</a>
             )}
+            <NotificationBell />
             <a href="/studio" class="nav-link">My Works</a>
             <a href="/settings" class="nav-link">Settings</a>
             <form method="POST" action="/api/auth/logout" style="display:inline">
