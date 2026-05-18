@@ -10,8 +10,8 @@
  */
 
 import { defineMiddleware } from 'astro:middleware';
-import { getDb } from './lib/db';
-import { users, sessions } from './lib/schema/index';
+import { getDb } from '@/v2/lib/db';
+import { users, sessions } from '@/v2/lib/schema/index';
 import { eq, and, gt, sql } from 'drizzle-orm';
 import type { D1Database } from '@cloudflare/workers-types';
 
@@ -46,21 +46,23 @@ declare module 'astro:middleware' {
 // Reads the route's `config.auth` export if present, otherwise defaults to 'required'.
 
 function getAuthLevel(pathname: string, request: Request): AuthLevel {
-  // ─── Public pages (no auth needed) ──────────────────────────
-  if (pathname === '/' || pathname === '/login' || pathname === '/signup') return 'public';
+  // ─── Public pages (no auth, never needs user context) ───────
+  if (pathname === '/login' || pathname === '/signup') return 'public';
   if (pathname === '/pending-approval') return 'public';
   if (pathname === '/privacy' || pathname === '/terms') return 'public';
   if (pathname === '/feed.xml') return 'public';
 
-  // Public content: browse, read, search, tags, pseuds, works
-  if (pathname === '/works' || pathname.startsWith('/works/')) return 'public';
-  if (pathname === '/pseuds' || pathname.startsWith('/pseuds/')) return 'public';
-  if (pathname === '/tags' || pathname.startsWith('/tags/')) return 'public';
-  if (pathname === '/series' || pathname.startsWith('/series/')) return 'public';
-  if (pathname === '/collections' || pathname.startsWith('/collections/')) return 'public';
-  if (pathname === '/canon' || pathname.startsWith('/canon/')) return 'public';
-  if (pathname === '/characters' || pathname.startsWith('/characters/')) return 'public';
-  if (pathname === '/search') return 'public';
+  // ─── Optional pages (accessible without auth, but resolve user if session exists) ──
+  // Homepage and browse pages need user context for personalized nav (Sign In vs Profile)
+  if (pathname === '/') return 'optional';
+  if (pathname === '/works' || pathname.startsWith('/works/')) return 'optional';
+  if (pathname === '/pseuds' || pathname.startsWith('/pseuds/')) return 'optional';
+  if (pathname === '/tags' || pathname.startsWith('/tags/')) return 'optional';
+  if (pathname === '/series' || pathname.startsWith('/series/')) return 'optional';
+  if (pathname === '/collections' || pathname.startsWith('/collections/')) return 'optional';
+  if (pathname === '/canon' || pathname.startsWith('/canon/')) return 'optional';
+  if (pathname === '/characters' || pathname.startsWith('/characters/')) return 'optional';
+  if (pathname === '/search') return 'optional';
 
   // Static assets
   if (pathname.startsWith('/_astro/') || pathname.startsWith('/favicon')) return 'public';
@@ -237,6 +239,15 @@ export const onRequest = defineMiddleware(async (context, next) => {
     .get();
 
   if (!session) {
+    // Optional routes: invalid/expired session → continue as guest (clear stale cookie)
+    if (authLevel === 'optional') {
+      const response = await next();
+      response.headers.set('Set-Cookie', CLEAR_COOKIE);
+      for (const [header, value] of Object.entries(cspHeaders())) {
+        response.headers.set(header, value);
+      }
+      return response;
+    }
     const headers: Record<string, string> = { 'Set-Cookie': CLEAR_COOKIE };
     if (isApi) {
       return jsonResponse({ error: 'Unauthorized' }, 401, headers);
@@ -259,6 +270,15 @@ export const onRequest = defineMiddleware(async (context, next) => {
     .get();
 
   if (!user) {
+    // Optional routes: user not found → continue as guest
+    if (authLevel === 'optional') {
+      const response = await next();
+      response.headers.set('Set-Cookie', CLEAR_COOKIE);
+      for (const [header, value] of Object.entries(cspHeaders())) {
+        response.headers.set(header, value);
+      }
+      return response;
+    }
     const headers: Record<string, string> = { 'Set-Cookie': CLEAR_COOKIE };
     if (isApi) {
       return jsonResponse({ error: 'Unauthorized' }, 401, headers);
@@ -269,6 +289,15 @@ export const onRequest = defineMiddleware(async (context, next) => {
   // ─── Banned users: destroy session, redirect ──────────────
   if (user.banned) {
     await db.delete(sessions).where(eq(sessions.token, token));
+    // Optional routes: banned → continue as guest (session already deleted)
+    if (authLevel === 'optional') {
+      const response = await next();
+      response.headers.set('Set-Cookie', CLEAR_COOKIE);
+      for (const [header, value] of Object.entries(cspHeaders())) {
+        response.headers.set(header, value);
+      }
+      return response;
+    }
     if (isApi) {
       return jsonResponse({ error: 'Banned' }, 403);
     }
@@ -279,6 +308,14 @@ export const onRequest = defineMiddleware(async (context, next) => {
   if (user.suspendedUntil) {
     const suspendedTime = new Date(user.suspendedUntil + 'Z').getTime();
     if (Date.now() < suspendedTime) {
+      // Optional routes: suspended → continue as guest
+      if (authLevel === 'optional') {
+        const response = await next();
+        for (const [header, value] of Object.entries(cspHeaders())) {
+          response.headers.set(header, value);
+        }
+        return response;
+      }
       if (isApi) {
         return jsonResponse({ error: 'suspended', suspendedUntil: user.suspendedUntil }, 403);
       }
@@ -289,6 +326,14 @@ export const onRequest = defineMiddleware(async (context, next) => {
   }
 
   // ─── Unapproved users: only access pending-approval page ──
+  // Optional routes: unapproved → treat as guest (no personalized features)
+  if (!user.approved && authLevel === 'optional') {
+    const response = await next();
+    for (const [header, value] of Object.entries(cspHeaders())) {
+      response.headers.set(header, value);
+    }
+    return response;
+  }
   if (!user.approved) {
     if (pathname === '/pending-approval' || pathname === '/api/auth/me' || pathname === '/api/auth/logout') {
       context.locals.user = user;

@@ -1,7 +1,0 @@
----
-export const prerender = false;
-// Redirect old /works/[id]/edit to /works/[id]/settings
-const workId = Astro.params.id;
-if (workId) return Astro.redirect(`/works/${workId}/settings`);
-return Astro.redirect('/works');
----
