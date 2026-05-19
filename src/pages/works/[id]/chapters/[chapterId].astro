@@ -50,8 +50,17 @@ const currentIndex = chapters.findIndex((c: any) => c.id === chapterId);
 const prevChapter = currentIndex > 0 ? chapters[currentIndex - 1] : null;
 const nextChapter = currentIndex >= 0 && currentIndex < chapters.length - 1 ? chapters[currentIndex + 1] : null;
 const authorPseuds = work.authors?.map((a: any) => a.name).join(', ') ?? 'Unknown';
-// Render content: prefer HTML, fall back to markdown-as-plain
-const chapterContent = chapter.contentHtml ?? chapter.contentMd?.split('\n').map((p: string) => `<p>${p}</p>`).join('\n') ?? '<p><em>No content.</em></p>';
+// Render content: prefer pre-rendered HTML, fall back to Markdown rendering
+let chapterContent: string;
+if (chapter.contentHtml) {
+  chapterContent = chapter.contentHtml;
+} else if (chapter.contentMd) {
+  // Use server-side markdown rendering as fallback
+  const { renderMarkdown } = await import('@/v2/lib/markdown');
+  chapterContent = renderMarkdown(chapter.contentMd);
+} else {
+  chapterContent = '<p><em>No content.</em></p>';
+}
 
 // Derive sidebar data
 const fandoms = work.tags?.filter((t: any) => t.type === 'fandom') ?? [];

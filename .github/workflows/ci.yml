@@ -19,14 +19,16 @@ jobs:
 
       - run: npm ci
 
-      - name: Type check
-        run: npx astro check --tsconfig tsconfig.json || true
-
       - name: Build
         run: npm run build
 
+      - name: Type check
+        run: npx astro check --tsconfig tsconfig.json
+        continue-on-error: true
+
       - name: Lint
-        run: npx eslint src/ --max-warnings 0 || true
+        run: npx eslint src/ --max-warnings 0
+        continue-on-error: true
 
   test:
     runs-on: ubuntu-latest
@@ -41,4 +43,5 @@ jobs:
       - run: npm ci
 
       - name: Unit tests
-        run: npx vitest run --reporter=verbose || true
+        run: npx vitest run --reporter=verbose
+        continue-on-error: true
