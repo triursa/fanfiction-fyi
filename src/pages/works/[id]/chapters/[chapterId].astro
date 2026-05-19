@@ -52,6 +52,23 @@ const nextChapter = currentIndex >= 0 && currentIndex < chapters.length - 1 ? ch
 const authorPseuds = work.authors?.map((a: any) => a.name).join(', ') ?? 'Unknown';
 // Render content: prefer HTML, fall back to markdown-as-plain
 const chapterContent = chapter.contentHtml ?? chapter.contentMd?.split('\n').map((p: string) => `<p>${p}</p>`).join('\n') ?? '<p><em>No content.</em></p>';
+
+// Derive sidebar data
+const fandoms = work.tags?.filter((t: any) => t.type === 'fandom') ?? [];
+const characters = work.tags?.filter((t: any) => t.type === 'character') ?? [];
+const relationships = work.tags?.filter((t: any) => t.type === 'relationship') ?? [];
+const freeforms = work.tags?.filter((t: any) => t.type === 'freeform') ?? [];
+
+const chapterWordCount = chapter.wordCount?.toLocaleString() ?? '0';
+const chapterPubDate = chapter.publishedAt
+  ? new Date(chapter.publishedAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+  : null;
+
+// Author notes: prefer chapter-level notes, fall back to work notes
+const chapterNotes = chapter.notes ?? null;
+const endNotes = work.endNotes ?? null;
+
+const user = Astro.locals.user;
 ---
 
 <Base title={`${chapter.title || `Chapter ${chapter.position}`} — ${work.title}`} description={work.summary || ''}>
@@ -60,47 +77,168 @@ const chapterContent = chapter.contentHtml ?? chapter.contentMd?.split('\n').map
       <p class="error-msg">{errorMsg}</p>
     ) : (
       <div class="reader-layout">
-        {/* ─── Progress bar ──────────────────────────── */}
+        {/* ─── Progress bar (spans full width above grid) ─── */}
         <div class="progress-bar" id="progress-bar" role="progressbar" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100">
           <div class="progress-fill" id="progress-fill"></div>
         </div>
 
-        {/* ─── Chapter header ─────────────────────────── */}
-        <header class="reader-header">
-          <nav class="breadcrumb" aria-label="Breadcrumb">
-            <a href="/works">{work.title}</a>
-            <span aria-hidden="true">›</span>
-            <span>{chapter.title || `Chapter ${chapter.position}`}</span>
+        {/* ─── Main column ──────────────────────────────── */}
+        <main class="reader-main">
+          {/* ─── Chapter header ─────────────────────────── */}
+          <header class="reader-header">
+            <nav class="breadcrumb" aria-label="Breadcrumb">
+              <a href="/works">{work.title}</a>
+              <span aria-hidden="true">›</span>
+              <span>{chapter.title || `Chapter ${chapter.position}`}</span>
+            </nav>
+            <h1 class="chapter-title">{chapter.title || `Chapter ${chapter.position}`}</h1>
+            <p class="chapter-meta">by {authorPseuds} · {chapter.wordCount?.toLocaleString() ?? '0'} words</p>
+          </header>
+
+          {/* ─── Chapter content ────────────────────────── */}
+          <article class="reader-content" set:html={chapterContent} />
+
+          {/* ─── End notes ───────────────────────────────── */}
+          {endNotes && (
+            <section class="end-notes">
+              <h2 class="section-heading">End Notes</h2>
+              <div set:html={endNotes} />
+            </section>
+          )}
+
+          {/* ─── Chapter navigation ──────────────────────── */}
+          <nav class="chapter-nav" aria-label="Chapter navigation">
+            {prevChapter ? (
+              <a href={`/works/${workId}/chapters/${prevChapter.id}`} class="btn-outlined" rel="prev">
+                ← Previous
+              </a>
+            ) : <span />}
+            <a href={`/works/${workId}`} class="btn-outlined">↑ Back to Work</a>
+            {nextChapter ? (
+              <a href={`/works/${workId}/chapters/${nextChapter.id}`} class="btn-filled" rel="next">
+                Next →
+              </a>
+            ) : <span />}
           </nav>
-          <h1 class="chapter-title">{chapter.title || `Chapter ${chapter.position}`}</h1>
-          <p class="chapter-meta">by {authorPseuds} · {chapter.wordCount?.toLocaleString() ?? '0'} words</p>
-        </header>
+        </main>
 
-        {/* ─── Chapter content ────────────────────────── */}
-        <article class="reader-content" set:html={chapterContent} />
+        {/* ─── Sidebar ──────────────────────────────────── */}
+        <aside class="reader-sidebar">
+          <div class="sidebar-inner">
+            {/* 1. Chapter Navigation */}
+            {chapters.length > 1 && (
+              <div class="sidebar-section">
+                <h3 class="sidebar-heading">Chapters</h3>
+                <div class="chapter-nav-dropdown">
+                  <select id="chapter-jump" aria-label="Jump to chapter">
+                    {chapters.map((c: any, i: number) => (
+                      <option value={c.id} selected={c.id === chapterId}>
+                        {i + 1}. {c.title || `Chapter ${c.position}`}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <ol class="chapter-list">
+                  {chapters.map((c: any, i: number) => (
+                    <li class={c.id === chapterId ? 'current' : ''}>
+                      <a href={`/works/${workId}/chapters/${c.id}`} aria-current={c.id === chapterId ? 'page' : undefined}>
+                        <span class="chapter-num">{i + 1}.</span> {c.title || `Chapter ${c.position}`}
+                        <span class="chapter-meta-inline">{c.wordCount?.toLocaleString() ?? '0'} words</span>
+                      </a>
+                    </li>
+                  ))}
+                </ol>
+              </div>
+            )}
 
-        {/* ─── End notes ───────────────────────────────── */}
-        {work.endNotes && (
-          <section class="end-notes">
-            <h2 class="section-heading">End Notes</h2>
-            <div set:html={work.endNotes} />
-          </section>
-        )}
+            {/* 2. Metadata */}
+            <div class="sidebar-section">
+              <h3 class="sidebar-heading">Chapter Info</h3>
+              <dl class="meta-grid">
+                <dt>Words</dt>
+                <dd>{chapterWordCount}</dd>
+                {chapterPubDate && (
+                  <><dt>Published</dt><dd>{chapterPubDate}</dd></>
+                )}
+              </dl>
+            </div>
 
-        {/* ─── Chapter navigation ──────────────────────── */}
-        <nav class="chapter-nav" aria-label="Chapter navigation">
-          {prevChapter ? (
-            <a href={`/works/${workId}/chapters/${prevChapter.id}`} class="btn-outlined" rel="prev">
-              ← Previous
-            </a>
-          ) : <span />}
-          <a href={`/works/${workId}`} class="btn-outlined">↑ Back to Work</a>
-          {nextChapter ? (
-            <a href={`/works/${workId}/chapters/${nextChapter.id}`} class="btn-filled" rel="next">
-              Next →
-            </a>
-          ) : <span />}
-        </nav>
+            {/* 3. Author's Notes */}
+            {chapterNotes && (
+              <div class="sidebar-section">
+                <h3 class="sidebar-heading">Author's Notes</h3>
+                <div class="sidebar-notes-content" id="sidebar-notes">
+                  <div set:html={chapterNotes} />
+                </div>
+                <button class="notes-toggle" id="notes-toggle" aria-expanded="false" aria-controls="sidebar-notes" style="display:none;">
+                  Show more
+                </button>
+              </div>
+            )}
+
+            {/* 4. Tags */}
+            {(fandoms.length > 0 || characters.length > 0 || relationships.length > 0 || freeforms.length > 0) && (
+              <div class="sidebar-section">
+                <h3 class="sidebar-heading">Tags</h3>
+                {fandoms.length > 0 && (
+                  <div class="tag-group">
+                    <span class="tag-group-label">Fandoms</span>
+                    <div class="tag-cluster">
+                      {fandoms.map((t: any) => (
+                        <a href={`/works?fandom=${encodeURIComponent(t.name)}`} class="sidebar-tag sidebar-tag-fandom">{t.name}</a>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                {characters.length > 0 && (
+                  <div class="tag-group">
+                    <span class="tag-group-label">Characters</span>
+                    <div class="tag-cluster">
+                      {characters.map((t: any) => (
+                        <a href={`/works?character=${encodeURIComponent(t.name)}`} class="sidebar-tag sidebar-tag-character">{t.name}</a>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                {relationships.length > 0 && (
+                  <div class="tag-group">
+                    <span class="tag-group-label">Relationships</span>
+                    <div class="tag-cluster">
+                      {relationships.map((t: any) => (
+                        <a href={`/works?relationship=${encodeURIComponent(t.name)}`} class="sidebar-tag sidebar-tag-relationship">{t.name}</a>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                {freeforms.length > 0 && (
+                  <div class="tag-group">
+                    <span class="tag-group-label">Additional</span>
+                    <div class="tag-cluster">
+                      {freeforms.map((t: any) => (
+                        <a href={`/works?freeform=${encodeURIComponent(t.name)}`} class="sidebar-tag sidebar-tag-freeform">{t.name}</a>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* 5. React */}
+            <div class="sidebar-section">
+              <h3 class="sidebar-heading">React</h3>
+              <div class="action-row">
+                <button id="kudos-btn" class="btn-outlined action-btn" data-work-id={workId}>
+                  ❤ <span id="kudos-count">{work.kudosCount ?? 0}</span> Kudos
+                </button>
+                {user && (
+                  <button id="bookmark-btn" class="btn-outlined action-btn" data-work-id={workId}>
+                    ★ Mark for Later
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
+        </aside>
       </div>
     )}
   </section>
@@ -119,6 +257,77 @@ const chapterContent = chapter.contentHtml ?? chapter.contentMd?.split('\n').map
   }
   window.addEventListener('scroll', updateProgress, { passive: true });
   updateProgress();
+
+  // Chapter jump dropdown
+  const chapterJump = document.getElementById('chapter-jump') as HTMLSelectElement | null;
+  if (chapterJump) {
+    chapterJump.addEventListener('change', () => {
+      // Derive workId from the current URL path
+      const pathMatch = window.location.pathname.match(/\/works\/(\d+)\//);
+      if (pathMatch && chapterJump.value) {
+        window.location.href = `/works/${pathMatch[1]}/chapters/${chapterJump.value}`;
+      }
+    });
+  }
+
+  // Author's notes collapsible (mobile)
+  const notesEl = document.getElementById('sidebar-notes');
+  const notesToggle = document.getElementById('notes-toggle');
+  if (notesEl && notesToggle) {
+    const checkOverflow = () => {
+      if (notesEl.scrollHeight > 120) {
+        notesToggle.style.display = '';
+        notesEl.classList.add('notes-collapsed');
+      } else {
+        notesToggle.style.display = 'none';
+        notesEl.classList.remove('notes-collapsed');
+      }
+    };
+    checkOverflow();
+    notesToggle.addEventListener('click', () => {
+      const expanded = notesToggle.getAttribute('aria-expanded') === 'true';
+      notesToggle.setAttribute('aria-expanded', String(!expanded));
+      notesToggle.textContent = expanded ? 'Show more' : 'Show less';
+      notesEl.classList.toggle('notes-collapsed', !expanded);
+    });
+  }
+
+  // Kudos button
+  const kudosBtn = document.getElementById('kudos-btn');
+  if (kudosBtn) {
+    kudosBtn.addEventListener('click', async () => {
+      const workIdAttr = kudosBtn.getAttribute('data-work-id');
+      try {
+        const res = await fetch(`/api/works/${workIdAttr}/kudos`, { method: 'POST' });
+        if (res.ok) {
+          const countEl = document.getElementById('kudos-count');
+          if (countEl) countEl.textContent = String(Number(countEl.textContent) + 1);
+          kudosBtn.classList.add('kudos-given');
+          kudosBtn.textContent = '❤ Kudos Given';
+          (kudosBtn as HTMLButtonElement).disabled = true;
+        }
+      } catch { /* non-fatal */ }
+    });
+  }
+
+  // Bookmark / Mark for later
+  const bookmarkBtn = document.getElementById('bookmark-btn');
+  if (bookmarkBtn) {
+    bookmarkBtn.addEventListener('click', async () => {
+      const workIdAttr = bookmarkBtn.getAttribute('data-work-id');
+      try {
+        const res = await fetch('/api/readings', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ workId: Number(workIdAttr), forLater: true }),
+        });
+        if (res.ok) {
+          bookmarkBtn.textContent = '★ Marked for Later';
+          (bookmarkBtn as HTMLButtonElement).disabled = true;
+        }
+      } catch { /* non-fatal */ }
+    });
+  }
 </script>
 
 <style is:global>
@@ -128,18 +337,40 @@ const chapterContent = chapter.contentHtml ?? chapter.contentMd?.split('\n').map
   }
 
   .reader-layout {
-    max-width: 42rem;
+    max-width: 82rem;
     margin: 0 auto;
     padding: 0 var(--space-4) var(--space-12);
   }
 
-  /* ─── Progress bar ────────────────────────────────── */
+  /* ─── Grid layout ─────────────────────────────────────── */
+  .reader-layout {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: var(--space-6);
+  }
+
+  @media (min-width: 768px) {
+    .reader-layout {
+      grid-template-columns: 1fr 260px;
+      gap: var(--space-8);
+    }
+  }
+
+  @media (min-width: 1024px) {
+    .reader-layout {
+      grid-template-columns: 1fr 300px;
+      gap: var(--space-10);
+    }
+  }
+
+  /* ─── Progress bar (spans full width above grid) ──────── */
   .progress-bar {
     position: sticky;
     top: 0;
     height: 3px;
     background: var(--md-sys-color-surface-container);
     z-index: 50;
+    grid-column: 1 / -1;
   }
 
   .progress-fill {
@@ -149,7 +380,19 @@ const chapterContent = chapter.contentHtml ?? chapter.contentMd?.split('\n').map
     transition: width 100ms linear;
   }
 
-  /* ─── Chapter header ───────────────────────────────── */
+  /* ─── Main column ─────────────────────────────────────── */
+  .reader-main {
+    max-width: 42rem;
+    min-width: 0;
+  }
+
+  @media (min-width: 768px) {
+    .reader-main {
+      max-width: none; /* let grid control width */
+    }
+  }
+
+  /* ─── Chapter header ─────────────────────────────────── */
   .reader-header {
     margin-top: var(--space-8);
     margin-bottom: var(--space-8);
@@ -183,7 +426,7 @@ const chapterContent = chapter.contentHtml ?? chapter.contentMd?.split('\n').map
     margin: 0;
   }
 
-  /* ─── Reader content ───────────────────────────────── */
+  /* ─── Reader content ─────────────────────────────────── */
   .reader-content {
     font-family: 'Merriweather', serif;
     font-size: 1.0625rem;
@@ -217,7 +460,7 @@ const chapterContent = chapter.contentHtml ?? chapter.contentMd?.split('\n').map
     max-width: 12rem;
   }
 
-  /* ─── End notes ────────────────────────────────────── */
+  /* ─── End notes ──────────────────────────────────────── */
   .end-notes {
     margin-top: var(--space-12);
     padding-top: var(--space-6);
@@ -233,7 +476,7 @@ const chapterContent = chapter.contentHtml ?? chapter.contentMd?.split('\n').map
     margin: 0 0 var(--space-2) 0;
   }
 
-  /* ─── Chapter navigation ───────────────────────────── */
+  /* ─── Chapter navigation ─────────────────────────────── */
   .chapter-nav {
     display: flex;
     justify-content: space-between;
@@ -256,9 +499,11 @@ const chapterContent = chapter.contentHtml ?? chapter.contentMd?.split('\n').map
     border-radius: var(--md-sys-shape-corner-full);
     padding: var(--space-2) var(--space-4);
     text-decoration: none;
+    cursor: pointer;
     transition: background var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard);
   }
   .btn-outlined:hover { background: var(--md-sys-color-primary-container); }
+  .btn-outlined:disabled { opacity: 0.5; cursor: default; }
 
   .btn-filled {
     display: inline-flex;
@@ -273,6 +518,323 @@ const chapterContent = chapter.contentHtml ?? chapter.contentMd?.split('\n').map
     transition: opacity var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard);
   }
   .btn-filled:hover { opacity: 0.88; }
+
+  /* ─── Sidebar ──────────────────────────────────────────── */
+  .reader-sidebar {
+    display: flex;
+    flex-direction: column;
+  }
+
+  @media (min-width: 768px) {
+    .reader-sidebar {
+      /* Sidebar itself is not sticky; the inner wrapper is */
+    }
+  }
+
+  .sidebar-inner {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-6);
+  }
+
+  @media (min-width: 768px) {
+    .sidebar-inner {
+      position: sticky;
+      top: 1rem;
+      max-height: calc(100vh - 2rem);
+      overflow-y: auto;
+      scrollbar-width: thin;
+    }
+  }
+
+  .sidebar-section {
+    margin: 0;
+  }
+
+  .sidebar-heading {
+    font: var(--md-sys-typescale-label-large);
+    color: var(--md-sys-color-on-surface-variant);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    font-size: 0.75rem;
+    margin: 0 0 var(--space-2) 0;
+    padding-bottom: var(--space-1);
+    border-bottom: 1px solid var(--md-sys-color-outline-variant);
+  }
+
+  /* ─── Chapter jump dropdown (mobile) / list (desktop) ── */
+  .chapter-nav-dropdown {
+    display: block;
+    margin-bottom: var(--space-3);
+  }
+
+  @media (min-width: 768px) {
+    .chapter-nav-dropdown {
+      display: none;
+    }
+  }
+
+  .chapter-nav-dropdown select {
+    width: 100%;
+    font: var(--md-sys-typescale-body-medium);
+    padding: var(--space-2) var(--space-3);
+    border: 1px solid var(--md-sys-color-outline);
+    border-radius: var(--md-sys-shape-corner-small);
+    background: var(--md-sys-color-surface-container);
+    color: var(--md-sys-color-on-surface);
+    cursor: pointer;
+  }
+
+  .chapter-list {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+  }
+
+  /* Hide chapter list on mobile (use dropdown instead) */
+  @media (max-width: 767px) {
+    .chapter-list {
+      display: flex;
+      flex-wrap: nowrap;
+      overflow-x: auto;
+      gap: var(--space-2);
+      padding-bottom: var(--space-2);
+      -webkit-overflow-scrolling: touch;
+      scrollbar-width: thin;
+    }
+
+    .chapter-list li {
+      border-bottom: none;
+      flex-shrink: 0;
+    }
+
+    .chapter-list a {
+      display: block;
+      padding: var(--space-1) var(--space-3);
+      border-radius: var(--md-sys-shape-corner-full);
+      font: var(--md-sys-typescale-body-small);
+      white-space: nowrap;
+    }
+
+    .chapter-num { display: none; }
+    .chapter-meta-inline { display: none; }
+  }
+
+  @media (min-width: 768px) {
+    .chapter-list li {
+      border-bottom: 1px solid var(--md-sys-color-outline-variant);
+    }
+    .chapter-list li:last-child { border-bottom: none; }
+    .chapter-list li.current {
+      background: var(--md-sys-color-surface-container);
+      border-radius: var(--md-sys-shape-corner-small);
+    }
+
+    .chapter-list a {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      padding: var(--space-2) 0;
+      text-decoration: none;
+      color: var(--md-sys-color-primary);
+      font: var(--md-sys-typescale-body-medium);
+    }
+
+    .chapter-list a[aria-current="page"] {
+      color: var(--md-sys-color-on-surface);
+      font-weight: 600;
+    }
+
+    .chapter-num {
+      color: var(--md-sys-color-on-surface-variant);
+      margin-right: var(--space-1);
+    }
+
+    .chapter-meta-inline {
+      font: var(--md-sys-typescale-body-small);
+      color: var(--md-sys-color-on-surface-variant);
+      margin-left: var(--space-2);
+      white-space: nowrap;
+    }
+  }
+
+  /* ─── Metadata ──────────────────────────────────────── */
+  .meta-grid {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: var(--space-1) var(--space-4);
+    margin: 0;
+  }
+
+  .meta-grid dt {
+    font: var(--md-sys-typescale-label-large);
+    color: var(--md-sys-color-on-surface-variant);
+    font-size: 0.8rem;
+  }
+
+  .meta-grid dd {
+    font: var(--md-sys-typescale-body-medium);
+    color: var(--md-sys-color-on-surface);
+    margin: 0;
+  }
+
+  /* ─── Author's Notes (sidebar) ────────────────────────── */
+  .sidebar-notes-content {
+    font: var(--md-sys-typescale-body-small);
+    color: var(--md-sys-color-on-surface-variant);
+    line-height: 1.6;
+  }
+
+  .sidebar-notes-content.notes-collapsed {
+    max-height: 120px;
+    overflow: hidden;
+    position: relative;
+  }
+
+  .sidebar-notes-content.notes-collapsed::after {
+    content: '';
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    height: 40px;
+    background: linear-gradient(transparent, var(--md-sys-color-surface));
+    pointer-events: none;
+  }
+
+  .notes-toggle {
+    font: var(--md-sys-typescale-label-large);
+    color: var(--md-sys-color-primary);
+    background: transparent;
+    border: none;
+    cursor: pointer;
+    padding: var(--space-1) 0;
+    margin-top: var(--space-1);
+  }
+
+  .notes-toggle:hover {
+    text-decoration: underline;
+  }
+
+  /* ─── Tags ─────────────────────────────────────────────── */
+  .tag-group {
+    margin-bottom: var(--space-3);
+  }
+
+  .tag-group:last-child {
+    margin-bottom: 0;
+  }
+
+  .tag-group-label {
+    font: var(--md-sys-typescale-label-small);
+    color: var(--md-sys-color-on-surface-variant);
+    display: block;
+    margin-bottom: var(--space-1);
+  }
+
+  .tag-cluster {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-1);
+  }
+
+  .sidebar-tag {
+    font: var(--md-sys-typescale-body-small);
+    border-radius: var(--md-sys-shape-corner-full);
+    padding: 2px 10px;
+    text-decoration: none;
+    border: 1px solid transparent;
+    transition: opacity var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard),
+                box-shadow var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard);
+    display: inline-block;
+  }
+  .sidebar-tag:hover { opacity: 0.88; box-shadow: 0 1px 3px rgba(0,0,0,0.12); }
+
+  /* Color-coded sidebar tags by type */
+  .sidebar-tag-fandom {
+    color: #1565c0;
+    background: #e3f2fd;
+    border-color: #90caf9;
+  }
+  .sidebar-tag-character {
+    color: #2e7d32;
+    background: #e8f5e9;
+    border-color: #a5d6a7;
+  }
+  .sidebar-tag-relationship {
+    color: #7b1fa2;
+    background: #f3e5f5;
+    border-color: #ce93d8;
+  }
+  .sidebar-tag-freeform {
+    color: #e65100;
+    background: #fff3e0;
+    border-color: #ffcc80;
+  }
+
+  /* ─── React section ──────────────────────────────────── */
+  .action-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-2);
+  }
+
+  .action-btn {
+    font: var(--md-sys-typescale-label-large);
+    flex: 1;
+    min-width: fit-content;
+  }
+
+  .kudos-given {
+    color: #c62828;
+    border-color: #c62828;
+  }
+
+  /* ─── Mobile: sidebar sits below main ────────────────── */
+  @media (max-width: 767px) {
+    .reader-main {
+      max-width: 42rem;
+      margin: 0 auto;
+    }
+
+    .reader-sidebar {
+      margin-top: var(--space-6);
+      padding-top: var(--space-6);
+      border-top: 1px solid var(--md-sys-color-outline-variant);
+    }
+
+    /* On mobile, Author's notes are always collapsed initially */
+    .sidebar-notes-content {
+      max-height: 120px;
+      overflow: hidden;
+      position: relative;
+    }
+
+    .sidebar-notes-content::after {
+      content: '';
+      position: absolute;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      height: 40px;
+      background: linear-gradient(transparent, var(--md-sys-color-surface));
+      pointer-events: none;
+    }
+
+    .sidebar-notes-content:not(.notes-collapsed) {
+      max-height: none;
+      overflow: visible;
+    }
+
+    .sidebar-notes-content:not(.notes-collapsed)::after {
+      display: none;
+    }
+
+    /* Always show toggle on mobile if notes exist */
+    .notes-toggle {
+      display: block !important;
+    }
+  }
 
   .error-msg {
     color: var(--md-sys-color-error);

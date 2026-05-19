@@ -52,6 +52,15 @@ const skinOptions = [
 
     <div id="toast" class="toast" role="status" aria-live="polite"></div>
 
+    <!-- ── Navigation ────────────────────────────────────────────── -->
+    <nav class="settings-nav">
+      <a href="/settings/aliases" class="settings-nav__item">
+        <span class="settings-nav__icon">👥</span>
+        <span class="settings-nav__label">Manage Aliases</span>
+        <span class="settings-nav__arrow">→</span>
+      </a>
+    </nav>
+
     {profile && (
       <>
         <!-- ── Profile Section ──────────────────────────────── -->
@@ -410,4 +419,40 @@ const skinOptions = [
   }
   .btn-filled:hover { opacity: 0.88; }
   .btn-filled:disabled { opacity: 0.5; cursor: not-allowed; }
+
+  /* ─── Settings Nav ──────────────────────────────────────── */
+  .settings-nav {
+    margin-bottom: var(--space-6);
+  }
+
+  .settings-nav__item {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    padding: var(--space-4) var(--space-5);
+    background: var(--md-sys-color-surface-container);
+    border: 1px solid var(--md-sys-color-outline-variant);
+    border-radius: var(--md-sys-shape-corner-large);
+    text-decoration: none;
+    color: var(--md-sys-color-on-surface);
+    transition: background 0.15s;
+  }
+
+  .settings-nav__item:hover {
+    background: var(--md-sys-color-surface-container-high);
+  }
+
+  .settings-nav__icon {
+    font-size: 1.25rem;
+  }
+
+  .settings-nav__label {
+    font: var(--md-sys-typescale-title-medium);
+    flex: 1;
+  }
+
+  .settings-nav__arrow {
+    font: var(--md-sys-typescale-body-large);
+    color: var(--md-sys-color-on-surface-variant);
+  }
 </style>

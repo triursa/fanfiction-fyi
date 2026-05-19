@@ -2,8 +2,9 @@ import type { APIRoute } from 'astro';
 import type { D1Database } from '@cloudflare/workers-types';
 import { getDb } from '@/v2/lib/db';
 import { requireAuth, checkApproved, getAuth } from '@/v2/lib/auth';
-import { kudos, pseuds } from '@/v2/lib/schema/index';
+import { kudos, pseuds, works, creatorships } from '@/v2/lib/schema/index';
 import { eq, count, and } from 'drizzle-orm';
+import { notify } from '@/v2/lib/notify';
 
 export const config = { auth: 'optional' as const };
 
@@ -50,6 +51,31 @@ export const POST: APIRoute = async ({ request, locals }) => {
   }
 
   await db.insert(kudos).values({ workId, pseudId: defaultPseud!.id });
+
+  // Notify work owner of new kudos
+  try {
+    const work = await db.select().from(works).where(eq(works.id, workId)).get();
+    if (work) {
+      const creatorLinks = await db.select({ pseudId: creatorships.pseudId })
+        .from(creatorships)
+        .where(eq(creatorships.workId, workId));
+      for (const link of creatorLinks) {
+        const pseud = await db.select({ userId: pseuds.userId })
+          .from(pseuds)
+          .where(eq(pseuds.id, link.pseudId))
+          .get();
+        if (pseud && pseud.userId !== auth.user.id) {
+          await notify(d1, pseud.userId, {
+            type: 'kudos',
+            title: 'New kudos on your work',
+            body: `Someone left kudos on "${work.title}"`,
+            link: `/works/${workId}`,
+          });
+        }
+      }
+    }
+  } catch { /* notification failure should not break kudos creation */ }
+
   return new Response(JSON.stringify({ data: { kudosGiven: true } }), {
     status: 201, headers: { 'Content-Type': 'application/json' },
   });

@@ -1,0 +1,434 @@
+---
+/**
+ * Studio: Chapter Version History — View, compare, and restore previous versions.
+ * Auth: required (enforced by middleware default).
+ */
+export const prerender = false;
+import Base from '@/v2/layouts/Base.astro';
+
+const workId = Number(Astro.params.id);
+const chapterId = Number(Astro.params.chapterId);
+if (!workId || Number.isNaN(workId) || !chapterId || Number.isNaN(chapterId)) {
+  return Astro.redirect('/studio');
+}
+
+// Fetch work, chapter, and version data
+let work: any = null;
+let chapter: any = null;
+let versions: any[] = [];
+let errorMsg: string | null = null;
+
+try {
+  const [workRes, chapterRes, versionsRes] = await Promise.all([
+    fetch(new URL(`/api/works/${workId}`, Astro.url), {
+      headers: { cookie: Astro.request.headers.get('cookie') || '' },
+    }),
+    fetch(new URL(`/api/works/${workId}/chapters/${chapterId}`, Astro.url), {
+      headers: { cookie: Astro.request.headers.get('cookie') || '' },
+    }),
+    fetch(new URL(`/api/works/${workId}/chapters/${chapterId}/versions`, Astro.url), {
+      headers: { cookie: Astro.request.headers.get('cookie') || '' },
+    }),
+  ]);
+
+  if (workRes.ok) {
+    work = (await workRes.json()).data;
+  } else {
+    return Astro.redirect('/studio');
+  }
+
+  if (chapterRes.ok) {
+    chapter = (await chapterRes.json()).data;
+  } else {
+    return Astro.redirect(`/studio/${workId}/edit`);
+  }
+
+  if (versionsRes.ok) {
+    versions = (await versionsRes.json()).data;
+  }
+} catch {
+  errorMsg = 'Failed to load version history.';
+}
+---
+
+<Base title={`History: ${chapter?.title ?? 'Chapter'} — ${work?.title ?? 'Work'} — fanfiction.fyi`} description="Chapter version history">
+  <section class="studio-page">
+    <div class="studio-header">
+      <a href={`/studio/${workId}/chapters/${chapterId}/edit`} class="back-link">← Back to Edit</a>
+      <h1 class="studio-title">Version History</h1>
+      <p class="subtitle">{chapter?.title ?? 'Chapter'}</p>
+    </div>
+
+    {errorMsg && <p class="error-msg">{errorMsg}</p>}
+
+    {versions.length === 0 && !errorMsg && (
+      <p class="empty-msg">No version history yet. Versions are saved automatically when you update a chapter.</p>
+    )}
+
+    {versions.length > 0 && (
+      <ol class="version-timeline" id="version-list">
+        {versions.map((v: any, i: number) => {
+          const prevVersion = versions[i + 1]; // next item is older (list is desc by version number)
+          const wordDiff = prevVersion ? v.wordCount - prevVersion.wordCount : null;
+          const diffClass = wordDiff !== null && wordDiff > 0 ? 'diff-positive' : wordDiff !== null && wordDiff < 0 ? 'diff-negative' : 'diff-neutral';
+          const diffLabel = wordDiff !== null
+            ? wordDiff > 0 ? `+${wordDiff} words` : wordDiff < 0 ? `${wordDiff} words` : 'No change'
+            : '';
+          return (
+            <li class="version-item" data-version-id={v.id} data-version={v.version}>
+              <div class="version-header">
+                <span class="version-number">v{v.version}</span>
+                <span class="version-date">{new Date(v.createdAt).toLocaleString()}</span>
+              </div>
+              <div class="version-meta">
+                <span class="version-word-count">{v.wordCount} words</span>
+                {diffLabel && <span class={`version-diff ${diffClass}`}>{diffLabel}</span>}
+                {v.note && <span class="version-note">"{v.note}"</span>}
+              </div>
+              <div class="version-actions">
+                <button type="button" class="btn-outlined btn-sm view-btn" data-version-id={v.id}>View</button>
+                <button type="button" class="btn-danger-outline btn-sm restore-btn" data-version-id={v.id} data-version={v.version}>Restore</button>
+              </div>
+            </li>
+          );
+        })}
+      </ol>
+    )}
+
+    <!-- Version preview dialog -->
+    <dialog id="preview-dialog" class="preview-dialog">
+      <div class="preview-header">
+        <h3 id="preview-title">Version Preview</h3>
+        <button type="button" class="close-btn" id="close-preview">&times;</button>
+      </div>
+      <div id="preview-content" class="preview-content"></div>
+      <div class="dialog-actions">
+        <button type="button" class="btn-outlined" id="close-preview-btn">Close</button>
+      </div>
+    </dialog>
+
+    <!-- Restore confirmation dialog -->
+    <dialog id="restore-dialog" class="restore-dialog">
+      <form method="dialog">
+        <h3>Restore this version?</h3>
+        <p>The current content will be saved as a new version before restoring. You won't lose any work.</p>
+        <div class="dialog-actions">
+          <button type="submit" class="btn-outlined" value="cancel">Cancel</button>
+          <button type="submit" class="btn-filled" id="confirm-restore-btn" value="confirm">Restore</button>
+        </div>
+      </form>
+    </dialog>
+  </section>
+</Base>
+
+<script define:vars={{ workId, chapterId }}>
+  // ─── View version preview ──────────────────────────────────────────
+  const versionList = document.getElementById('version-list');
+  const previewDialog = document.getElementById('preview-dialog') as HTMLDialogElement;
+  const previewTitle = document.getElementById('preview-title') as HTMLElement;
+  const previewContent = document.getElementById('preview-content') as HTMLElement;
+  const closePreview = document.getElementById('close-preview') as HTMLButtonElement;
+  const closePreviewBtn = document.getElementById('close-preview-btn') as HTMLButtonElement;
+
+  closePreview.addEventListener('click', () => previewDialog.close());
+  closePreviewBtn.addEventListener('click', () => previewDialog.close());
+
+  versionList?.addEventListener('click', async (e: Event) => {
+    const target = e.target as HTMLElement;
+
+    // View button
+    if (target.classList.contains('view-btn')) {
+      const versionId = target.dataset.versionId;
+      try {
+        const res = await fetch(`/api/works/${workId}/chapters/${chapterId}/versions?id=${versionId}`);
+        if (res.ok) {
+          const { data } = await res.json();
+          previewTitle.textContent = `Version ${data.version}`;
+          previewContent.textContent = data.contentMd || '(empty)';
+          previewDialog.showModal();
+        }
+      } catch {
+        // Ignore fetch errors for preview
+      }
+    }
+
+    // Restore button
+    if (target.classList.contains('restore-btn')) {
+      const versionId = Number(target.dataset.versionId);
+      const versionNum = target.dataset.version;
+      const restoreDialog = document.getElementById('restore-dialog') as HTMLDialogElement;
+      const confirmBtn = document.getElementById('confirm-restore-btn') as HTMLButtonElement;
+
+      restoreDialog.showModal();
+      confirmBtn.onclick = async () => {
+        try {
+          const res = await fetch(`/api/works/${workId}/chapters/${chapterId}/versions`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ versionId }),
+          });
+          if (res.ok) {
+            window.location.reload();
+          } else {
+            const data = await res.json();
+            alert(data.error || 'Failed to restore version.');
+          }
+        } catch {
+          alert('Network error. Please try again.');
+        }
+        restoreDialog.close();
+      };
+    }
+  });
+</script>
+
+<style is:global>
+  .studio-page {
+    max-width: 48rem;
+    margin: 0 auto;
+    padding: var(--space-8) var(--space-4);
+  }
+
+  .studio-header {
+    margin-bottom: var(--space-8);
+  }
+
+  .back-link {
+    font: var(--md-sys-typescale-body-medium);
+    color: var(--md-sys-color-primary);
+    text-decoration: none;
+    display: inline-block;
+    margin-bottom: var(--space-2);
+  }
+
+  .studio-title {
+    font: var(--md-sys-typescale-headline-medium);
+    margin: 0 0 var(--space-1) 0;
+  }
+
+  .subtitle {
+    font: var(--md-sys-typescale-body-medium);
+    color: var(--md-sys-color-on-surface-variant);
+    margin: 0;
+  }
+
+  .empty-msg {
+    font: var(--md-sys-typescale-body-large);
+    color: var(--md-sys-color-on-surface-variant);
+  }
+
+  .error-msg {
+    color: var(--md-sys-color-error);
+    font: var(--md-sys-typescale-body-large);
+  }
+
+  /* Version timeline */
+  .version-timeline {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-4);
+  }
+
+  .version-item {
+    background: var(--md-sys-color-surface-container);
+    border: 1px solid var(--md-sys-color-outline-variant);
+    border-radius: var(--md-sys-shape-corner-medium);
+    padding: var(--space-4) var(--space-5);
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+  }
+
+  .version-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: var(--space-2);
+  }
+
+  .version-number {
+    font: var(--md-sys-typescale-label-large);
+    color: var(--md-sys-color-primary);
+    font-weight: 600;
+  }
+
+  .version-date {
+    font: var(--md-sys-typescale-body-small);
+    color: var(--md-sys-color-on-surface-variant);
+  }
+
+  .version-meta {
+    display: flex;
+    gap: var(--space-4);
+    align-items: center;
+    flex-wrap: wrap;
+  }
+
+  .version-word-count {
+    font: var(--md-sys-typescale-body-small);
+    color: var(--md-sys-color-on-surface-variant);
+  }
+
+  .version-diff {
+    font: var(--md-sys-typescale-body-small);
+    font-weight: 500;
+  }
+
+  .diff-positive {
+    color: #2e7d32;
+  }
+
+  .diff-negative {
+    color: #c62828;
+  }
+
+  .diff-neutral {
+    color: var(--md-sys-color-on-surface-variant);
+  }
+
+  .version-note {
+    font: var(--md-sys-typescale-body-small);
+    color: var(--md-sys-color-on-surface-variant);
+    font-style: italic;
+  }
+
+  .version-actions {
+    display: flex;
+    gap: var(--space-3);
+    margin-top: var(--space-1);
+  }
+
+  .btn-sm {
+    padding: var(--space-1) var(--space-4);
+    font: var(--md-sys-typescale-label-medium);
+  }
+
+  .btn-outlined {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font: var(--md-sys-typescale-label-large);
+    color: var(--md-sys-color-primary);
+    background: transparent;
+    border: 1px solid var(--md-sys-color-outline);
+    border-radius: var(--md-sys-shape-corner-full);
+    padding: var(--space-3) var(--space-8);
+    text-decoration: none;
+    cursor: pointer;
+    transition: background var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard);
+  }
+
+  .btn-outlined:hover {
+    background: var(--md-sys-color-primary-container);
+  }
+
+  .btn-danger-outline {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font: var(--md-sys-typescale-label-large);
+    color: var(--md-sys-color-error);
+    background: transparent;
+    border: 1px solid var(--md-sys-color-error);
+    border-radius: var(--md-sys-shape-corner-full);
+    padding: var(--space-3) var(--space-8);
+    cursor: pointer;
+    transition: background var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard);
+  }
+
+  .btn-danger-outline:hover {
+    background: #fce4ec;
+  }
+
+  .btn-filled {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font: var(--md-sys-typescale-label-large);
+    color: var(--md-sys-color-on-primary);
+    background: var(--md-sys-color-primary);
+    border: none;
+    border-radius: var(--md-sys-shape-corner-full);
+    padding: var(--space-3) var(--space-8);
+    cursor: pointer;
+    transition: opacity var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard);
+  }
+
+  .btn-filled:hover { opacity: 0.88; }
+
+  /* Preview dialog */
+  .preview-dialog {
+    border: 1px solid var(--md-sys-color-outline-variant);
+    border-radius: var(--md-sys-shape-corner-large);
+    padding: var(--space-6);
+    background: var(--md-sys-color-surface);
+    max-width: 700px;
+    width: 90vw;
+    max-height: 80vh;
+  }
+
+  .preview-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: var(--space-4);
+  }
+
+  .preview-header h3 {
+    font: var(--md-sys-typescale-title-large);
+    margin: 0;
+  }
+
+  .close-btn {
+    background: none;
+    border: none;
+    font-size: 1.5rem;
+    cursor: pointer;
+    color: var(--md-sys-color-on-surface-variant);
+    padding: 0 var(--space-2);
+  }
+
+  .preview-content {
+    font-family: 'Merriweather', serif;
+    font-size: 1rem;
+    line-height: 1.75;
+    color: var(--md-sys-color-on-surface);
+    white-space: pre-wrap;
+    word-wrap: break-word;
+    max-height: 50vh;
+    overflow-y: auto;
+    padding: var(--space-4);
+    background: var(--md-sys-color-surface-container);
+    border-radius: var(--md-sys-shape-corner-small);
+  }
+
+  /* Restore dialog */
+  .restore-dialog {
+    border: 1px solid var(--md-sys-color-outline-variant);
+    border-radius: var(--md-sys-shape-corner-large);
+    padding: var(--space-6);
+    background: var(--md-sys-color-surface);
+    max-width: 400px;
+  }
+
+  .restore-dialog h3 {
+    font: var(--md-sys-typescale-title-large);
+    margin: 0 0 var(--space-4) 0;
+  }
+
+  .restore-dialog p {
+    font: var(--md-sys-typescale-body-medium);
+    color: var(--md-sys-color-on-surface-variant);
+    margin: 0 0 var(--space-6) 0;
+  }
+
+  .dialog-actions {
+    display: flex;
+    gap: var(--space-4);
+    justify-content: flex-end;
+  }
+</style>
