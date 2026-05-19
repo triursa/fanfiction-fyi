@@ -5,7 +5,7 @@ import { requireAuth, checkApproved } from '@/v2/lib/auth';
 import { validateBody } from '@/v2/lib/validation';
 import { createBookmarkSchema } from '@/v2/lib/validation';
 import { bookmarks, works, pseuds } from '@/v2/lib/schema/index';
-import { eq, desc } from 'drizzle-orm';
+import { eq, desc, inArray, and } from 'drizzle-orm';
 
 export const config = { auth: 'required' as const };
 
@@ -23,7 +23,7 @@ export const GET: APIRoute = async ({ url, request, locals }) => {
     id: bookmarks.id, pseudId: bookmarks.pseudId, workId: bookmarks.workId,
     notes: bookmarks.notes, private: bookmarks.private, createdAt: bookmarks.createdAt,
   }).from(bookmarks)
-    .where(eq(bookmarks.pseudId, pseudIds[0]))
+    .where(inArray(bookmarks.pseudId, pseudIds))
     .orderBy(desc(bookmarks.createdAt));
 
   // Enrich with work data
@@ -54,7 +54,7 @@ export const POST: APIRoute = async ({ request, locals }) => {
 
   // Check if already bookmarked
   const existing = await db.select().from(bookmarks)
-    .where(eq(bookmarks.workId, data.workId ?? 0)).get(); // simplified
+    .where(and(eq(bookmarks.workId, data.workId ?? 0), eq(bookmarks.pseudId, defaultPseud!.id))).get();
 
   if (existing) {
     // Toggle: delete bookmark

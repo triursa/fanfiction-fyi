@@ -126,9 +126,10 @@ CREATE TABLE IF NOT EXISTS readings (
 -- Tags
 CREATE TABLE IF NOT EXISTS tags (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
-  name TEXT NOT NULL UNIQUE,
+  name TEXT NOT NULL,
   type TEXT NOT NULL CHECK(type IN ('fandom', 'character', 'relationship', 'freeform', 'rating', 'warning', 'category'))
 );
+CREATE UNIQUE INDEX IF NOT EXISTS idx_v2_tags_name_type ON tags(name, type);
 CREATE INDEX IF NOT EXISTS idx_v2_tags_type ON tags(type);
 CREATE INDEX IF NOT EXISTS idx_v2_tags_name ON tags(name);
 

@@ -5,13 +5,15 @@ import { chapters } from './works';
 
 export const tags = sqliteTable('tags', {
   id: integer('id').primaryKey({ autoIncrement: true }),
-  name: text('name').notNull().unique(),
+  name: text('name').notNull(),
   type: text('type', { enum: ['fandom', 'character', 'relationship', 'freeform', 'rating', 'warning', 'category'] }).notNull(),
   description: text('description'),
   canonical: integer('canonical').notNull().default(0),
   createdAt: text('created_at').notNull().default("(datetime('now'))"),
   updatedAt: text('updated_at').notNull().default("(datetime('now'))"),
-});
+}, (table) => ({
+  uniqueNameType: uniqueIndex('idx_v2_tags_name_type').on(table.name, table.type),
+}));
 
 export const taggings = sqliteTable('taggings', {
   id: integer('id').primaryKey({ autoIncrement: true }),

@@ -2,7 +2,7 @@ import type { APIRoute } from 'astro';
 import type { D1Database } from '@cloudflare/workers-types';
 import { getDb } from '@/v2/lib/db';
 import { requireAuth, checkApproved } from '@/v2/lib/auth';
-import { comments } from '@/v2/lib/schema/index';
+import { comments, pseuds } from '@/v2/lib/schema/index';
 import { eq } from 'drizzle-orm';
 
 export const config = { auth: 'required' as const };
@@ -24,7 +24,9 @@ export const DELETE: APIRoute = async ({ params, request, locals }) => {
   }
 
   // Only comment author or mod+ can delete
-  if (comment.pseudId !== auth.user.id && !['mod', 'admin', 'founder'].includes(auth.user.role)) {
+  const userPseuds = await db.select({ id: pseuds.id }).from(pseuds).where(eq(pseuds.userId, auth.user.id));
+  const pseudIds = userPseuds.map(p => p.id);
+  if (!pseudIds.includes(comment.pseudId) && !['mod', 'admin', 'founder'].includes(auth.user.role)) {
     return new Response(JSON.stringify({ error: 'Forbidden' }), { status: 403, headers: { 'Content-Type': 'application/json' } });
   }
 

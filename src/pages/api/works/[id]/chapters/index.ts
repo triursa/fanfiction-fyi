@@ -90,6 +90,11 @@ export const POST: APIRoute = async ({ params, request, locals }) => {
     mood: data.mood ?? null,
   }).returning();
 
+  // Recalculate work word count (new chapters start as draft, so count won't change,
+  // but this also updates updatedAt on the work)
+  const wordResult = await db.select({ total: sql`COALESCE(SUM(${chapters.wordCount}), 0)` }).from(chapters).where(and(eq(chapters.workId, workId), eq(chapters.draft, 0))).get();
+  await db.update(works).set({ wordCount: wordResult.total, updatedAt: new Date().toISOString() }).where(eq(works.id, workId));
+
   return new Response(JSON.stringify({ data: newChapter[0] }), {
     status: 201,
     headers: { 'Content-Type': 'application/json' },

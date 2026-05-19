@@ -2,8 +2,8 @@ import type { APIRoute } from 'astro';
 import type { D1Database } from '@cloudflare/workers-types';
 import { getDb } from '@/v2/lib/db';
 import { requireAuth } from '@/v2/lib/auth';
-import { readings, works } from '@/v2/lib/schema/index';
-import { eq, desc } from 'drizzle-orm';
+import { readings, works, pseuds } from '@/v2/lib/schema/index';
+import { eq, desc, inArray, and } from 'drizzle-orm';
 
 export const config = { auth: 'required' as const };
 
@@ -13,11 +13,14 @@ export const GET: APIRoute = async ({ request, locals }) => {
   const db = getDb(d1);
   const auth = await requireAuth(d1, request);
 
+  const userPseuds = await db.select({ id: pseuds.id }).from(pseuds).where(eq(pseuds.userId, auth.user.id));
+  const pseudIds = userPseuds.map(p => p.id);
+
   const userReadings = await db.select({
     id: readings.id, workId: readings.workId, forLater: readings.forLater,
     lastChapter: readings.lastChapter, updatedAt: readings.updatedAt,
   }).from(readings)
-    .where(eq(readings.pseudId, auth.user.id))
+    .where(inArray(readings.pseudId, pseudIds))
     .orderBy(desc(readings.updatedAt));
 
   // Enrich with work data
@@ -50,14 +53,15 @@ export const POST: APIRoute = async ({ request, locals }) => {
   if (forLater !== undefined) updates.forLater = forLater ? 1 : 0;
 
   // Upsert reading
+  const [defaultPseud] = await db.select({ id: pseuds.id }).from(pseuds).where(eq(pseuds.userId, auth.user.id)).limit(1);
   const existing = await db.select().from(readings)
-    .where(eq(readings.workId, workId) /* AND pseud */).get();
+    .where(and(eq(readings.workId, workId), eq(readings.pseudId, defaultPseud.id))).get();
 
   if (existing) {
     await db.update(readings).set(updates).where(eq(readings.id, existing.id));
   } else {
     await db.insert(readings).values({
-      pseudId: auth.user.id,
+      pseudId: defaultPseud.id,
       workId,
       ...updates,
     });
