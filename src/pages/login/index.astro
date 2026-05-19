@@ -59,7 +59,11 @@ const resetMessage = resetParam === 'success' ? 'Your password has been reset. P
       const data = await res.json();
 
       if (res.ok) {
-        window.location.href = '/';
+        if (data.approved === 1) {
+          window.location.href = '/';
+        } else {
+          window.location.href = '/pending-approval';
+        }
       } else {
         errorEl.textContent = data.error || 'Login failed. Please try again.';
       }

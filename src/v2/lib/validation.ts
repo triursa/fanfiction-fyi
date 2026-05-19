@@ -94,12 +94,15 @@ export const updatePseudSchema = createPseudSchema.partial().extend({
 
 export const createCommentSchema = z.object({
   content: z.string().min(1, 'Comment cannot be empty').max(10000, 'Comment too long'),
+  workId: z.number().int().positive(),
+  chapterId: z.number().int().positive().optional(),
   parentId: z.number().int().positive().optional(),
 });
 
 // ─── Bookmarks ────────────────────────────────────────────────────
 
 export const createBookmarkSchema = z.object({
+  workId: z.number().int().positive(),
   notes: z.string().max(2000).optional(),
   private: z.boolean().default(false),
 });

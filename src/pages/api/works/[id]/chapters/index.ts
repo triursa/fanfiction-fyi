@@ -6,6 +6,7 @@ import { requireAuth, checkApproved } from '@/v2/lib/auth';
 import { validateBody } from '@/v2/lib/validation';
 import { createChapterSchema } from '@/v2/lib/validation';
 import { chapters, works, creatorships, pseuds } from '@/v2/lib/schema/index';
+import { renderMarkdown } from '@/v2/lib/markdown';
 
 export const config = { auth: 'public' as const };
 
@@ -75,15 +76,17 @@ export const POST: APIRoute = async ({ params, request, locals }) => {
   const existing = await db.select().from(chapters).where(eq(chapters.workId, workId));
   const nextPosition = existing.length + 1;
 
-  // Calculate word count
-  const wordCount = data.contentMd ? data.contentMd.split(/\s+/).filter(Boolean).length : 0;
+  // Calculate word count and render HTML from Markdown
+  const contentMd = data.contentMd ?? null;
+  const wordCount = contentMd ? contentMd.split(/\s+/).filter(Boolean).length : 0;
+  const contentHtml = contentMd ? renderMarkdown(contentMd) : null;
 
   const newChapter = await db.insert(chapters).values({
     workId,
     position: nextPosition,
     title: data.title,
-    contentMd: data.contentMd ?? null,
-    contentHtml: null,
+    contentMd,
+    contentHtml,
     draft: 1,
     wordCount,
     images: '[]',

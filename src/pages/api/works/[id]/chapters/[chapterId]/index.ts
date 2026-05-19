@@ -6,6 +6,7 @@ import { validateBody } from '@/v2/lib/validation';
 import { updateChapterSchema } from '@/v2/lib/validation';
 import { chapters, creatorships, pseuds, works } from '@/v2/lib/schema/index';
 import { eq, and, sql } from 'drizzle-orm';
+import { renderMarkdown } from '@/v2/lib/markdown';
 
 export const config = { auth: 'public' as const };
 
@@ -62,9 +63,13 @@ export const PUT: APIRoute = async ({ params, request, locals }) => {
   if (data.title !== undefined) updates.title = data.title;
   if (data.contentMd !== undefined) {
     updates.contentMd = data.contentMd;
+    updates.contentHtml = renderMarkdown(data.contentMd);
     updates.wordCount = data.contentMd.split(/\s+/).filter(Boolean).length;
   }
-  if (data.contentHtml !== undefined) updates.contentHtml = data.contentHtml;
+  if (data.contentHtml !== undefined) {
+    // Allow explicit contentHtml override, but normally contentHtml is auto-rendered
+    updates.contentHtml = data.contentHtml;
+  }
   if (data.mood !== undefined) updates.mood = data.mood;
   if (data.draft !== undefined) {
     updates.draft = data.draft ? 1 : 0;
