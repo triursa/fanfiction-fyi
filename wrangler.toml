@@ -8,6 +8,7 @@ pages_build_output_dir = "./dist"
 binding = "DB"
 database_name = "ffy-dev"
 database_id = "b74e9280-a0a6-40c2-aa7d-840f6260c5ca"
+migrations_dir = "drizzle/v2"
 
 [[r2_buckets]]
 binding = "MEDIA"
@@ -26,6 +27,7 @@ name = "fanfiction-fyi-staging"
 binding = "DB"
 database_name = "ffy-staging"
 database_id = "3ef61c14-917d-4d77-9bb2-76498bf4173e"
+migrations_dir = "drizzle/v2"
 
 [[env.preview.r2_buckets]]
 binding = "MEDIA"
@@ -42,6 +44,7 @@ name = "fanfiction-fyi-prod"
 binding = "DB"
 database_name = "ffy-prod"
 database_id = "9f22ddcb-c003-4c5a-9065-7c30368e7978"
+migrations_dir = "drizzle/v2"
 
 [[env.production.r2_buckets]]
 binding = "MEDIA"
