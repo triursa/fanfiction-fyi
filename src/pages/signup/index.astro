@@ -60,7 +60,7 @@ import Base from '@/v2/layouts/Base.astro';
       const data = await res.json();
 
       if (res.ok) {
-        // Check if user is approved or pending
+        // Signup returns { approved: 0 } for pending users (new accounts are unapproved by default)
         if (data.approved) {
           window.location.href = '/';
         } else {
