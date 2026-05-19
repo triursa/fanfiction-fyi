@@ -48,6 +48,7 @@
     "drizzle-orm": "^0.45.2",
     "lowlight": "^3.3.0",
     "preact": "^10.0.0",
+    "resend": "^6.12.3",
     "zod": "^3.24.0"
   },
   "devDependencies": {
