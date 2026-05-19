@@ -57,16 +57,86 @@ try {
         )}
       </div>
 
+      <!-- ─── Rating (single-select radio chips) ─── -->
       <div class="form-field">
-        <label for="tags-input">Tags</label>
-        <div class="tags-input-wrapper">
-          <div id="tags-container" class="tags-container"></div>
-          <input type="text" id="tags-input" placeholder="Start typing to add tags (e.g. fandom, characters)..." />
-          <div id="tags-suggestions" class="suggestions-dropdown" style="display:none;"></div>
+        <label>Rating</label>
+        <div class="chip-group" id="rating-group" role="radiogroup" aria-label="Rating">
+          <button type="button" class="filter-chip" data-value="General Audiences" data-type="rating">General Audiences</button>
+          <button type="button" class="filter-chip" data-value="Teen And Up Audiences" data-type="rating">Teen And Up Audiences</button>
+          <button type="button" class="filter-chip" data-value="Mature" data-type="rating">Mature</button>
+          <button type="button" class="filter-chip" data-value="Explicit" data-type="rating">Explicit</button>
+          <button type="button" class="filter-chip" data-value="Not Rated" data-type="rating">Not Rated</button>
         </div>
-        <input type="hidden" id="tags-json" name="tags" value="[]" />
-        <p class="field-hint">Press Enter or comma to add a tag. Click × to remove.</p>
       </div>
+
+      <!-- ─── Archive Warnings (multi-select checkbox chips) ─── -->
+      <div class="form-field">
+        <label>Archive Warnings</label>
+        <div class="chip-group" id="warnings-group" role="group" aria-label="Archive Warnings">
+          <button type="button" class="filter-chip" data-value="No Archive Warnings Apply" data-type="warning">No Archive Warnings Apply</button>
+          <button type="button" class="filter-chip" data-value="Graphic Depictions Of Violence" data-type="warning">Graphic Depictions Of Violence</button>
+          <button type="button" class="filter-chip" data-value="Major Character Death" data-type="warning">Major Character Death</button>
+          <button type="button" class="filter-chip" data-value="Rape/Non-Con" data-type="warning">Rape/Non-Con</button>
+          <button type="button" class="filter-chip" data-value="Underage Sex" data-type="warning">Underage Sex</button>
+        </div>
+      </div>
+
+      <!-- ─── Categories (multi-select checkbox chips) ─── -->
+      <div class="form-field">
+        <label>Categories</label>
+        <div class="chip-group" id="categories-group" role="group" aria-label="Categories">
+          <button type="button" class="filter-chip" data-value="F/F" data-type="category">F/F</button>
+          <button type="button" class="filter-chip" data-value="F/M" data-type="category">F/M</button>
+          <button type="button" class="filter-chip" data-value="Gen" data-type="category">Gen</button>
+          <button type="button" class="filter-chip" data-value="M/M" data-type="category">M/M</button>
+          <button type="button" class="filter-chip" data-value="Multi" data-type="category">Multi</button>
+          <button type="button" class="filter-chip" data-value="Other" data-type="category">Other</button>
+        </div>
+      </div>
+
+      <!-- ─── Fandoms (tokenized autocomplete) ─── -->
+      <div class="form-field">
+        <label for="fandoms-input">Fandoms</label>
+        <div class="tokenized-input-wrapper" data-tag-type="fandom">
+          <div class="token-chips-container" id="fandoms-chips"></div>
+          <input type="text" id="fandoms-input" placeholder="Type to search fandoms..." autocomplete="off" />
+          <div class="suggestions-dropdown" id="fandoms-suggestions" style="display:none;"></div>
+        </div>
+      </div>
+
+      <!-- ─── Characters (tokenized autocomplete) ─── -->
+      <div class="form-field">
+        <label for="characters-input">Characters</label>
+        <div class="tokenized-input-wrapper" data-tag-type="character">
+          <div class="token-chips-container" id="characters-chips"></div>
+          <input type="text" id="characters-input" placeholder="Type to search characters..." autocomplete="off" />
+          <div class="suggestions-dropdown" id="characters-suggestions" style="display:none;"></div>
+        </div>
+      </div>
+
+      <!-- ─── Relationships (tokenized autocomplete) ─── -->
+      <div class="form-field">
+        <label for="relationships-input">Relationships</label>
+        <div class="tokenized-input-wrapper" data-tag-type="relationship">
+          <div class="token-chips-container" id="relationships-chips"></div>
+          <input type="text" id="relationships-input" placeholder="Type to search relationships..." autocomplete="off" />
+          <div class="suggestions-dropdown" id="relationships-suggestions" style="display:none;"></div>
+        </div>
+      </div>
+
+      <!-- ─── Additional Tags (tokenized autocomplete) ─── -->
+      <div class="form-field">
+        <label for="freeform-input">Additional Tags</label>
+        <div class="tokenized-input-wrapper" data-tag-type="freeform">
+          <div class="token-chips-container" id="freeform-chips"></div>
+          <input type="text" id="freeform-input" placeholder="Type to search or add tags..." autocomplete="off" />
+          <div class="suggestions-dropdown" id="freeform-suggestions" style="display:none;"></div>
+        </div>
+        <p class="field-hint">Press Enter, comma, or Tab to add a tag. Click × to remove.</p>
+      </div>
+
+      <!-- Hidden input carrying ALL tags for form submission -->
+      <input type="hidden" id="tags-json" name="tags" value="[]" />
 
       <details class="form-details">
         <summary class="form-details-summary">First Chapter (optional)</summary>
@@ -96,96 +166,268 @@ try {
 </Base>
 
 <script>
-  // ─── Tag autocomplete ─────────────────────────────────────────────
-  const TAG_TYPES = ['fandom', 'character', 'relationship', 'freeform', 'rating', 'warning', 'category'];
-  const tagsInput = document.getElementById('tags-input') as HTMLInputElement;
-  const tagsContainer = document.getElementById('tags-container') as HTMLDivElement;
+  // ─── Shared state ──────────────────────────────────────────────────
+  // All selected tags across every category, stored as {id?, name, type}
+  const allTags: { id?: number; name: string; type: string }[] = [];
   const tagsJson = document.getElementById('tags-json') as HTMLInputElement;
-  const suggestions = document.getElementById('tags-suggestions') as HTMLDivElement;
-  let selectedTags: { id?: number; name: string; type: string }[] = [];
 
-  function renderTags() {
-    tagsContainer.innerHTML = '';
-    selectedTags.forEach((tag, idx) => {
-      const pill = document.createElement('span');
-      pill.className = 'tag-pill';
-      pill.innerHTML = `<span class="tag-pill-label">${tag.name}</span><span class="tag-pill-type">${tag.type}</span><button type="button" class="tag-pill-remove" data-idx="${idx}">×</button>`;
-      tagsContainer.appendChild(pill);
+  function syncHiddenInput() {
+    tagsJson.value = JSON.stringify(allTags);
+  }
+
+  function addTag(tag: { id?: number; name: string; type: string }): boolean {
+    // Prevent duplicates by name+type
+    if (allTags.some(t => t.name === tag.name && t.type === tag.type)) return false;
+    allTags.push(tag);
+    syncHiddenInput();
+    return true;
+  }
+
+  function removeTag(name: string, type: string) {
+    const idx = allTags.findIndex(t => t.name === name && t.type === type);
+    if (idx !== -1) {
+      allTags.splice(idx, 1);
+      syncHiddenInput();
+    }
+  }
+
+  // ─── Rating (single-select) ──────────────────────────────────────────
+  const ratingGroup = document.getElementById('rating-group')!;
+  const ratingBtns = ratingGroup.querySelectorAll<HTMLButtonElement>('.filter-chip');
+
+  ratingBtns.forEach(btn => {
+    btn.addEventListener('click', () => {
+      const value = btn.dataset.value!;
+      const type = btn.dataset.type!;
+
+      // Check if already selected → deselect
+      const isCurrentlySelected = btn.classList.contains('selected');
+
+      // Deselect all
+      ratingBtns.forEach(b => b.classList.remove('selected'));
+      // Remove any existing rating from allTags
+      const existingIdx = allTags.findIndex(t => t.type === 'rating');
+      if (existingIdx !== -1) allTags.splice(existingIdx, 1);
+
+      if (!isCurrentlySelected) {
+        // Select this one
+        btn.classList.add('selected');
+        addTag({ name: value, type });
+      }
+
+      syncHiddenInput();
     });
-    tagsJson.value = JSON.stringify(selectedTags);
+  });
 
-    // Bind remove handlers
-    tagsContainer.querySelectorAll('.tag-pill-remove').forEach(btn => {
-      btn.addEventListener('click', (e) => {
-        const idx = Number((e.currentTarget as HTMLElement).getAttribute('data-idx'));
-        selectedTags.splice(idx, 1);
-        renderTags();
-      });
+  // ─── Warnings (multi-select) ─────────────────────────────────────────
+  const warningsGroup = document.getElementById('warnings-group')!;
+  const warningBtns = warningsGroup.querySelectorAll<HTMLButtonElement>('.filter-chip');
+
+  warningBtns.forEach(btn => {
+    btn.addEventListener('click', () => {
+      const value = btn.dataset.value!;
+      const type = btn.dataset.type!;
+      const isSelected = btn.classList.contains('selected');
+
+      if (isSelected) {
+        btn.classList.remove('selected');
+        removeTag(value, type);
+      } else {
+        btn.classList.add('selected');
+        addTag({ name: value, type });
+      }
+    });
+  });
+
+  // ─── Categories (multi-select) ───────────────────────────────────────
+  const categoriesGroup = document.getElementById('categories-group')!;
+  const categoryBtns = categoriesGroup.querySelectorAll<HTMLButtonElement>('.filter-chip');
+
+  categoryBtns.forEach(btn => {
+    btn.addEventListener('click', () => {
+      const value = btn.dataset.value!;
+      const type = btn.dataset.type!;
+      const isSelected = btn.classList.contains('selected');
+
+      if (isSelected) {
+        btn.classList.remove('selected');
+        removeTag(value, type);
+      } else {
+        btn.classList.add('selected');
+        addTag({ name: value, type });
+      }
+    });
+  });
+
+  // ─── Tokenized Tag Input (reusable) ──────────────────────────────────
+
+  // Chip color map per tag type
+  const CHIP_COLORS: Record<string, { bg: string; text: string; border: string }> = {
+    fandom:       { bg: 'var(--chip-fandom-bg, #e3f2fd)',       text: 'var(--chip-fandom-text, #1565c0)',  border: 'var(--chip-fandom-border, #90caf9)' },
+    character:    { bg: 'var(--chip-character-bg, #e8f5e9)',   text: 'var(--chip-character-text, #2e7d32)', border: 'var(--chip-character-border, #a5d6a7)' },
+    relationship: { bg: 'var(--chip-relationship-bg, #f3e5f5)', text: 'var(--chip-relationship-text, #7b1fa2)', border: 'var(--chip-relationship-border, #ce93d8)' },
+    freeform:     { bg: 'var(--chip-freeform-bg, #fff3e0)',    text: 'var(--chip-freeform-text, #e65100)',  border: 'var(--chip-freeform-border, #ffcc80)' },
+  };
+
+  interface TokenizedInput {
+    wrapper: HTMLDivElement;
+    input: HTMLInputElement;
+    chipsContainer: HTMLDivElement;
+    suggestionsEl: HTMLDivElement;
+    tagType: string;
+    chips: { id?: number; name: string; type: string }[];
+    debounceTimer: ReturnType<typeof setTimeout> | null;
+  }
+
+  const tokenizedInputs: TokenizedInput[] = [];
+
+  function initTokenizedInput(wrapperEl: HTMLDivElement) {
+    const tagType = wrapperEl.dataset.tagType!;
+    const input = wrapperEl.querySelector('input') as HTMLInputElement;
+    const chipsContainer = wrapperEl.querySelector('.token-chips-container') as HTMLDivElement;
+    const suggestionsEl = wrapperEl.querySelector('.suggestions-dropdown') as HTMLDivElement;
+
+    const instance: TokenizedInput = {
+      wrapper: wrapperEl,
+      input,
+      chipsContainer,
+      suggestionsEl,
+      tagType,
+      chips: [],
+      debounceTimer: null,
+    };
+
+    tokenizedInputs.push(instance);
+    renderChips(instance);
+
+    // Autocomplete on input
+    input.addEventListener('input', () => {
+      if (instance.debounceTimer) clearTimeout(instance.debounceTimer);
+      const q = input.value.trim();
+      if (q.length < 2) { suggestionsEl.style.display = 'none'; return; }
+
+      instance.debounceTimer = setTimeout(async () => {
+        try {
+          const res = await fetch(`/api/tags?q=${encodeURIComponent(q)}&type=${tagType}&limit=10`);
+          if (res.ok) {
+            const json = await res.json();
+            const items = json.data ?? [];
+            if (items.length === 0) { suggestionsEl.style.display = 'none'; return; }
+
+            suggestionsEl.innerHTML = items.map((t: any) =>
+              `<div class="suggestion-item" data-id="${t.id}" data-name="${t.name}" data-type="${t.type}">
+                <span class="suggestion-name">${t.name}</span>
+                <span class="suggestion-type">${t.type}</span>
+              </div>`
+            ).join('');
+            suggestionsEl.style.display = 'block';
+
+            suggestionsEl.querySelectorAll('.suggestion-item').forEach(el => {
+              el.addEventListener('mousedown', (e) => {
+                // Use mousedown so it fires before blur
+                e.preventDefault();
+                const item = el as HTMLElement;
+                const id = Number(item.dataset.id);
+                const name = item.dataset.name!;
+                addChipToInstance(instance, { id, name, type: tagType });
+              });
+            });
+          }
+        } catch { /* non-fatal */ }
+      }, 300);
+    });
+
+    // Enter/comma/tab to tokenize
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ',' || e.key === 'Tab') {
+        e.preventDefault();
+        const name = input.value.trim().replace(/,+$/, '');
+        if (name) {
+          addChipToInstance(instance, { name, type: tagType });
+        }
+        return;
+      }
+
+      // Backspace on empty input removes last chip
+      if (e.key === 'Backspace' && input.value === '' && instance.chips.length > 0) {
+        const lastChip = instance.chips[instance.chips.length - 1];
+        removeChipFromInstance(instance, lastChip.name, lastChip.type);
+      }
+    });
+
+    // Close suggestions on blur
+    input.addEventListener('blur', () => {
+      suggestionsEl.style.display = 'none';
+    });
+
+    // Click on wrapper focuses the input
+    wrapperEl.addEventListener('click', (e) => {
+      if ((e.target as HTMLElement).closest('.token-chip-remove') === null) {
+        input.focus();
+      }
     });
   }
 
-  let debounceTimer: ReturnType<typeof setTimeout>;
-  tagsInput.addEventListener('input', () => {
-    clearTimeout(debounceTimer);
-    const q = tagsInput.value.trim();
-    if (q.length < 2) { suggestions.style.display = 'none'; return; }
-
-    debounceTimer = setTimeout(async () => {
-      try {
-        // Try autocomplete with each tag type
-        const res = await fetch(`/api/tags?q=${encodeURIComponent(q)}&limit=10`);
-        if (res.ok) {
-          const json = await res.json();
-          const items = json.data ?? [];
-          if (items.length === 0) { suggestions.style.display = 'none'; return; }
-
-          suggestions.innerHTML = items.map((t: any) =>
-            `<div class="suggestion-item" data-id="${t.id}" data-name="${t.name}" data-type="${t.type}">
-              <span class="suggestion-name">${t.name}</span>
-              <span class="suggestion-type">${t.type}</span>
-            </div>`
-          ).join('');
-          suggestions.style.display = 'block';
-
-          suggestions.querySelectorAll('.suggestion-item').forEach(el => {
-            el.addEventListener('click', () => {
-              const item = el as HTMLElement;
-              const id = Number(item.dataset.id);
-              const name = item.dataset.name!;
-              const type = item.dataset.type!;
-              if (!selectedTags.some(t => t.id === id)) {
-                selectedTags.push({ id, name, type });
-                renderTags();
-              }
-              tagsInput.value = '';
-              suggestions.style.display = 'none';
-            });
-          });
-        }
-      } catch { /* non-fatal */ }
-    }, 300);
-  });
-
-  // Enter/comma to add freeform tags
-  tagsInput.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter' || e.key === ',') {
-      e.preventDefault();
-      const name = tagsInput.value.trim().replace(/,+$/, '');
-      if (name && !selectedTags.some(t => t.name === name)) {
-        selectedTags.push({ name, type: 'freeform' });
-        renderTags();
-      }
-      tagsInput.value = '';
-      suggestions.style.display = 'none';
+  function addChipToInstance(instance: TokenizedInput, tag: { id?: number; name: string; type: string }) {
+    // Deduplicate within this instance
+    if (instance.chips.some(c => c.name === tag.name && c.type === tag.type)) {
+      instance.input.value = '';
+      instance.suggestionsEl.style.display = 'none';
+      return;
     }
-  });
 
-  // Close suggestions on blur
-  document.addEventListener('click', (e) => {
-    if (!e.target || !(e.target as HTMLElement).closest('.tags-input-wrapper')) {
-      suggestions.style.display = 'none';
+    instance.chips.push(tag);
+    addTag(tag);
+    renderChips(instance);
+    instance.input.value = '';
+    instance.suggestionsEl.style.display = 'none';
+  }
+
+  function removeChipFromInstance(instance: TokenizedInput, name: string, type: string) {
+    const idx = instance.chips.findIndex(c => c.name === name && c.type === type);
+    if (idx !== -1) {
+      instance.chips.splice(idx, 1);
     }
-  });
+    removeTag(name, type);
+    renderChips(instance);
+  }
+
+  function renderChips(instance: TokenizedInput) {
+    instance.chipsContainer.innerHTML = '';
+    const colors = CHIP_COLORS[instance.tagType] || CHIP_COLORS.freeform;
+
+    instance.chips.forEach(chip => {
+      const pill = document.createElement('span');
+      pill.className = 'token-chip';
+      pill.style.backgroundColor = colors.bg;
+      pill.style.color = colors.text;
+      pill.style.borderColor = colors.border;
+      pill.innerHTML = `${escapeHtml(chip.name)}<button type="button" class="token-chip-remove" aria-label="Remove ${escapeHtml(chip.name)}">×</button>`;
+
+      pill.querySelector('.token-chip-remove')!.addEventListener('click', (e) => {
+        e.stopPropagation();
+        removeChipFromInstance(instance, chip.name, chip.type);
+      });
+
+      instance.chipsContainer.appendChild(pill);
+    });
+
+    // Show overflow indicator if more than 5 chips
+    if (instance.chips.length > 5) {
+      instance.chipsContainer.classList.add('chips-overflow');
+    } else {
+      instance.chipsContainer.classList.remove('chips-overflow');
+    }
+  }
+
+  function escapeHtml(str: string): string {
+    const div = document.createElement('div');
+    div.textContent = str;
+    return div.innerHTML;
+  }
+
+  // Initialize all tokenized inputs on the page
+  document.querySelectorAll<HTMLDivElement>('.tokenized-input-wrapper').forEach(initTokenizedInput);
 
   // ─── Form submission ──────────────────────────────────────────────
   const form = document.getElementById('new-work-form') as HTMLFormElement;
@@ -322,39 +564,112 @@ try {
   }
   .field-hint a { color: var(--md-sys-color-primary); }
 
-  /* Tags input */
-  .tags-input-wrapper {
-    position: relative;
+  /* ─── M3 Filter Chips (Rating / Warnings / Categories) ─── */
+  .chip-group {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-2);
   }
-  .tags-container {
+
+  .filter-chip {
+    display: inline-flex;
+    align-items: center;
+    font: var(--md-sys-typescale-label-large);
+    color: var(--md-sys-color-on-surface-variant);
+    background: transparent;
+    border: 1px solid var(--md-sys-color-outline);
+    border-radius: var(--md-sys-shape-corner-full);
+    padding: var(--space-1) var(--space-4);
+    cursor: pointer;
+    transition: all var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard);
+    user-select: none;
+    white-space: nowrap;
+  }
+  .filter-chip:hover {
+    background: var(--md-sys-color-surface-container-high);
+  }
+  .filter-chip.selected {
+    color: var(--md-sys-color-on-secondary-container);
+    background: var(--md-sys-color-secondary-container);
+    border-color: transparent;
+  }
+  .filter-chip.selected:hover {
+    background: var(--md-sys-color-secondary-container-high, var(--md-sys-color-secondary-container));
+  }
+
+  /* ─── Tokenized Tag Input ─── */
+  .tokenized-input-wrapper {
+    position: relative;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-1);
+    background: var(--md-sys-color-surface-container);
+    border: 1px solid var(--md-sys-color-outline-variant);
+    border-radius: var(--md-sys-shape-corner-small);
+    padding: var(--space-2) var(--space-3);
+    cursor: text;
+    transition: border-color var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard);
+    min-height: 44px;
+  }
+  .tokenized-input-wrapper:focus-within {
+    border-color: var(--md-sys-color-primary);
+  }
+
+  .token-chips-container {
     display: flex;
     flex-wrap: wrap;
     gap: var(--space-1);
-    margin-bottom: var(--space-2);
+    max-height: 7.5em;
+    overflow-y: auto;
+    scrollbar-width: thin;
   }
-  .tag-pill {
+  .token-chips-container.chips-overflow {
+    padding-right: var(--space-1);
+  }
+
+  .tokenized-input-wrapper input {
+    flex: 1;
+    min-width: 120px;
+    border: none;
+    background: transparent;
+    color: var(--md-sys-color-on-surface);
+    font: var(--md-sys-typescale-body-large);
+    padding: 0;
+    outline: none;
+  }
+  .tokenized-input-wrapper input::placeholder {
+    color: var(--md-sys-color-on-surface-variant);
+    opacity: 0.6;
+  }
+
+  .token-chip {
     display: inline-flex;
     align-items: center;
-    gap: var(--space-1);
-    background: var(--md-sys-color-primary-container);
-    color: var(--md-sys-color-on-primary-container);
+    gap: 4px;
+    border: 1px solid;
     border-radius: var(--md-sys-shape-corner-full);
-    padding: 2px 10px;
+    padding: 2px 8px 2px 10px;
     font: var(--md-sys-typescale-body-small);
+    line-height: 1.4;
+    white-space: nowrap;
   }
-  .tag-pill-type {
-    opacity: 0.7;
-    font-size: 0.7rem;
-  }
-  .tag-pill-remove {
+  .token-chip-remove {
     background: none;
     border: none;
-    color: var(--md-sys-color-on-primary-container);
+    color: inherit;
     cursor: pointer;
-    padding: 0;
+    padding: 0 2px;
     font-size: 1rem;
     line-height: 1;
+    opacity: 0.7;
+    transition: opacity var(--md-sys-motion-duration-short4);
   }
+  .token-chip-remove:hover {
+    opacity: 1;
+  }
+
+  /* Suggestions dropdown (reused across all tokenized inputs) */
   .suggestions-dropdown {
     position: absolute;
     top: 100%;
@@ -366,6 +681,7 @@ try {
     max-height: 200px;
     overflow-y: auto;
     z-index: 50;
+    margin-top: 2px;
   }
   .suggestion-item {
     display: flex;

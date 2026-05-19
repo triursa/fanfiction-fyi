@@ -89,11 +89,17 @@ if (!chapter && !errorMsg) {
           <span>Keep as Draft</span>
         </label>
 
+        <div class="form-field">
+          <label for="version-note">Version Note <span class="field-hint-inline">(optional — describe what changed)</span></label>
+          <input type="text" id="version-note" name="versionNote" maxlength="500" placeholder="e.g. Fixed typos, Added scene, Revised ending" />
+        </div>
+
         <div class="form-actions">
           <button type="submit" class="btn-filled" id="submit-btn">
             <span class="btn-text">Save Chapter</span>
             <span class="btn-loading" style="display:none;">Saving...</span>
           </button>
+          <a href={`/studio/${workId}/chapters/${chapterId}/history`} class="btn-outlined">History</a>
           <a href={`/studio/${workId}/edit`} class="btn-outlined">Cancel</a>
           <button type="button" id="delete-btn" class="btn-danger-outline">Delete Chapter</button>
         </div>
@@ -145,8 +151,10 @@ if (!chapter && !errorMsg) {
     const contentMd = contentEditor.value || null;
     const mood = (document.getElementById('mood') as HTMLInputElement).value || null;
     const draft = (document.getElementById('draft-toggle') as HTMLInputElement).checked;
+    const versionNote = (document.getElementById('version-note') as HTMLInputElement).value || null;
 
     const body: Record<string, any> = { title, contentMd, mood, draft: draft };
+    if (versionNote) body.versionNote = versionNote;
 
     // Handle position change via reorder API
     const position = parseInt((document.getElementById('position') as HTMLInputElement).value, 10);
