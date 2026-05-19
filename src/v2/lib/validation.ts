@@ -51,6 +51,7 @@ export const createChapterSchema = z.object({
   contentMd: z.string().optional(),
   contentHtml: z.string().optional(),
   mood: z.string().max(100).optional(),
+  versionNote: z.string().max(500, 'Version note too long').optional(),
 });
 
 export const updateChapterSchema = createChapterSchema.partial();
@@ -83,7 +84,9 @@ export const createPseudSchema = z.object({
   themeColor: z.string().regex(/^#[0-9a-fA-F]{6}$/, 'Must be a hex color').optional(),
 });
 
-export const updatePseudSchema = createPseudSchema.partial();
+export const updatePseudSchema = createPseudSchema.partial().extend({
+  isDefault: z.number().int().min(0).max(1).optional(),
+});
 
 // ─── Comments ─────────────────────────────────────────────────────
 

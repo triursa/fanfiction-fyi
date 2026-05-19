@@ -5,7 +5,7 @@ import { getDb } from '../../../../../../lib/db';
 import { requireAuth, checkApproved } from '../../../../../../lib/auth';
 import { validateBody } from '../../../../../../lib/validation';
 import { createChapterSchema } from '../../../../../../lib/validation';
-import { chapters, works, creatorships, pseuds } from '../../../../../../lib/schema/index';
+import { chapters, chapterVersions, works, creatorships, pseuds } from '../../../../../../lib/schema/index';
 
 export const config = { auth: 'public' as const };
 
@@ -89,6 +89,17 @@ export const POST: APIRoute = async ({ params, request, locals }) => {
     images: '[]',
     mood: data.mood ?? null,
   }).returning();
+
+  // Create version 1 for the new chapter
+  if (newChapter[0]) {
+    await db.insert(chapterVersions).values({
+      chapterId: newChapter[0].id,
+      version: 1,
+      contentMd: newChapter[0].contentMd,
+      contentHtml: newChapter[0].contentHtml,
+      note: data.versionNote ?? null,
+    });
+  }
 
   return new Response(JSON.stringify({ data: newChapter[0] }), {
     status: 201,

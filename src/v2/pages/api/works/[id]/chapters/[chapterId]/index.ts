@@ -4,8 +4,8 @@ import { getDb } from '../../../../../../../lib/db';
 import { requireAuth, checkApproved } from '../../../../../../../lib/auth';
 import { validateBody } from '../../../../../../../lib/validation';
 import { updateChapterSchema } from '../../../../../../../lib/validation';
-import { chapters, creatorships, pseuds } from '../../../../../../../lib/schema/index';
-import { eq, and } from 'drizzle-orm';
+import { chapters, chapterVersions, creatorships, pseuds } from '../../../../../../../lib/schema/index';
+import { eq, and, sql } from 'drizzle-orm';
 
 export const config = { auth: 'public' as const };
 
@@ -57,6 +57,24 @@ export const PUT: APIRoute = async ({ params, request, locals }) => {
 
   const [data, error] = await validateBody(request, updateChapterSchema);
   if (error) return error;
+
+  // ─── Save current content as a new version before updating ───
+  const currentChapter = await db.select().from(chapters).where(and(eq(chapters.id, chapterId), eq(chapters.workId, workId))).get();
+  if (currentChapter) {
+    const maxVersionRow = await db.select({ maxVer: sql<number>`COALESCE(MAX(${chapterVersions.version}), 0)` })
+      .from(chapterVersions)
+      .where(eq(chapterVersions.chapterId, chapterId))
+      .get();
+    const nextVersion = (maxVersionRow?.maxVer ?? 0) + 1;
+
+    await db.insert(chapterVersions).values({
+      chapterId,
+      version: nextVersion,
+      contentMd: currentChapter.contentMd,
+      contentHtml: currentChapter.contentHtml,
+      note: data.versionNote ?? null,
+    });
+  }
 
   const updates: Record<string, any> = { updatedAt: new Date().toISOString() };
   if (data.title !== undefined) updates.title = data.title;
