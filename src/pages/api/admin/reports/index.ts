@@ -113,7 +113,7 @@ export const GET: APIRoute = async ({ request, url, locals }) => {
 
 // ─── PATCH /api/admin/reports/:id ──────────────────────────────────────
 // NOTE: This file handles /api/admin/reports/:id via Astro's dynamic route.
-// The :id param is available at src/v2/pages/api/admin/reports/[id].ts
+// The :id param is available at src/pages/api/admin/reports/[id].ts
 // However, since we need PATCH on the collection route for bulk operations,
 // we also support batch resolution here.
 // For single report resolution, the [id].ts file handles it.

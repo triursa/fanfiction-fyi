@@ -54,7 +54,9 @@ export const createChapterSchema = z.object({
   versionNote: z.string().max(500, 'Version note too long').optional(),
 });
 
-export const updateChapterSchema = createChapterSchema.partial();
+export const updateChapterSchema = createChapterSchema.partial().extend({
+  draft: z.boolean().optional(),
+});
 
 export const reorderChaptersSchema = z.object({
   chapterIds: z.array(z.number().int().positive()).min(1, 'Must provide at least one chapter ID'),
