@@ -33,25 +33,16 @@ try {
 const user = Astro.locals.user;
 const isOwner = user && lore && user.id === lore.ownerUserId;
 
-// Render markdown-like content: convert markdown to basic HTML
-// The API may return contentHtml or raw content (markdown)
-const loreContent = lore
-  ? lore.contentHtml ?? lore.content?.split('\n').map((p: string) => {
-      if (!p.trim()) return '';
-      // Simple markdown conversion: headers, bold, italic, links, lists
-      let html = p
-        .replace(/^### (.+)$/, '<h3>$1</h3>')
-        .replace(/^## (.+)$/, '<h2>$1</h2>')
-        .replace(/^# (.+)$/, '<h1>$1</h1>')
-        .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
-        .replace(/\*(.+?)\*/g, '<em>$1</em>')
-        .replace(/\[(.+?)\]\((.+?)\)/g, '<a href="$2">$1</a>')
-        .replace(/^- (.+)$/, '<li>$1</li>');
-      if (html.startsWith('<li>')) return '<ul>' + html + '</ul>';
-      if (!html.startsWith('<h')) return '<p>' + html + '</p>';
-      return html;
-    }).join('\n') ?? '<p><em>No content.</em></p>'
-  : '';
+// Render markdown-like content: prefer pre-rendered HTML, fall back to Markdown rendering
+const { renderMarkdown: renderMd } = await import('@/v2/lib/markdown');
+let loreContent: string;
+if (lore?.contentHtml) {
+  loreContent = lore.contentHtml;
+} else if (lore?.content) {
+  loreContent = renderMd(lore.content);
+} else {
+  loreContent = '';
+}
 ---
 
 <Base title={`${lore?.title || 'Lore'} — fanfiction.fyi`} description={lore?.content?.slice(0, 160) || 'View lore entry on fanfiction.fyi'}>
