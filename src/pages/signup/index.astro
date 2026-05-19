@@ -38,41 +38,47 @@ import Base from '@/v2/layouts/Base.astro';
 </Base>
 
 <script>
-  const form = document.getElementById('signup-form') as HTMLFormElement;
-  const errorEl = document.getElementById('signup-error') as HTMLElement;
+  function initSignupForm() {
+    const form = document.getElementById('signup-form') as HTMLFormElement | null;
+    const errorEl = document.getElementById('signup-error') as HTMLElement | null;
+    if (!form || !errorEl) return;
 
-  form.addEventListener('submit', async (e) => {
-    e.preventDefault();
-    errorEl.textContent = '';
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      errorEl.textContent = '';
 
-    const inviteCode = (document.getElementById('invite_code') as HTMLInputElement).value;
-    const email = (document.getElementById('email') as HTMLInputElement).value;
-    const password = (document.getElementById('password') as HTMLInputElement).value;
-    const displayName = (document.getElementById('display_name') as HTMLInputElement).value;
+      const inviteCode = (document.getElementById('invite_code') as HTMLInputElement).value;
+      const email = (document.getElementById('email') as HTMLInputElement).value;
+      const password = (document.getElementById('password') as HTMLInputElement).value;
+      const displayName = (document.getElementById('display_name') as HTMLInputElement).value;
 
-    try {
-      const res = await fetch('/api/auth/signup', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ inviteCode, email, password, displayName }),
-      });
+      try {
+        const res = await fetch('/api/auth/signup', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ inviteCode, email, password, displayName }),
+        });
 
-      const data = await res.json();
+        const data = await res.json();
 
-      if (res.ok) {
-        // Signup returns { approved: 0 } for pending users (new accounts are unapproved by default)
-        if (data.approved) {
-          window.location.href = '/';
+        if (res.ok) {
+          // Signup returns { approved: 0 } for pending users (new accounts are unapproved by default)
+          if (data.approved) {
+            window.location.href = '/';
+          } else {
+            window.location.href = '/pending-approval';
+          }
         } else {
-          window.location.href = '/pending-approval';
+          errorEl.textContent = data.error || 'Signup failed. Please try again.';
         }
-      } else {
-        errorEl.textContent = data.error || 'Signup failed. Please try again.';
+      } catch {
+        errorEl.textContent = 'Network error. Please try again.';
       }
-    } catch {
-      errorEl.textContent = 'Network error. Please try again.';
-    }
-  });
+    });
+  }
+
+  initSignupForm();
+  document.addEventListener('astro:after-swap', initSignupForm);
 </script>
 
 <style is:global>

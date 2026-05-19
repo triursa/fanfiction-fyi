@@ -39,38 +39,44 @@ const resetMessage = resetParam === 'success' ? 'Your password has been reset. P
 </Base>
 
 <script>
-  const form = document.getElementById('login-form') as HTMLFormElement;
-  const errorEl = document.getElementById('login-error') as HTMLElement;
+  function initLoginForm() {
+    const form = document.getElementById('login-form') as HTMLFormElement | null;
+    const errorEl = document.getElementById('login-error') as HTMLElement | null;
+    if (!form || !errorEl) return;
 
-  form.addEventListener('submit', async (e) => {
-    e.preventDefault();
-    errorEl.textContent = '';
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      errorEl.textContent = '';
 
-    const email = (document.getElementById('email') as HTMLInputElement).value;
-    const password = (document.getElementById('password') as HTMLInputElement).value;
+      const email = (document.getElementById('email') as HTMLInputElement).value;
+      const password = (document.getElementById('password') as HTMLInputElement).value;
 
-    try {
-      const res = await fetch('/api/auth/login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, password }),
-      });
+      try {
+        const res = await fetch('/api/auth/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email, password }),
+        });
 
-      const data = await res.json();
+        const data = await res.json();
 
-      if (res.ok) {
-        if (data.user?.approved) {
-          window.location.href = '/';
+        if (res.ok) {
+          if (data.user?.approved) {
+            window.location.href = '/';
+          } else {
+            window.location.href = '/pending-approval';
+          }
         } else {
-          window.location.href = '/pending-approval';
+          errorEl.textContent = data.error || 'Login failed. Please try again.';
         }
-      } else {
-        errorEl.textContent = data.error || 'Login failed. Please try again.';
+      } catch {
+        errorEl.textContent = 'Network error. Please try again.';
       }
-    } catch {
-      errorEl.textContent = 'Network error. Please try again.';
-    }
-  });
+    });
+  }
+
+  initLoginForm();
+  document.addEventListener('astro:after-swap', initLoginForm);
 </script>
 
 <style is:global>
