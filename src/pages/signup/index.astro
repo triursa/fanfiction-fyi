@@ -61,7 +61,7 @@ import Base from '@/v2/layouts/Base.astro';
 
       if (res.ok) {
         // Check if user is approved or pending
-        if (data.approved === 1) {
+        if (data.approved) {
           window.location.href = '/';
         } else {
           window.location.href = '/pending-approval';
