@@ -7,6 +7,7 @@ declare namespace Astro {
         DB: D1Database;
         GOOGLE_CLIENT_ID: string;
         GOOGLE_CLIENT_SECRET: string;
+        RESEND_API_KEY: string;
         FOUNDER_EMAIL?: string;
         GITHUB_TOKEN?: string;
       };

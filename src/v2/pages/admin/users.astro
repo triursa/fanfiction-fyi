@@ -141,6 +141,9 @@ const roleOptions = ['user', 'mod', 'admin', 'founder'];
                   {!u.approved && (
                     <button class="btn-sm btn-success" data-action="approve" data-user-id={u.id}>Approve</button>
                   )}
+                  {!u.approved && (
+                    <button class="btn-sm btn-danger" data-action="reject" data-user-id={u.id}>Reject</button>
+                  )}
                   {!u.banned ? (
                     <button class="btn-sm btn-warning" data-action="ban" data-user-id={u.id}>Ban</button>
                   ) : (
@@ -201,7 +204,13 @@ const roleOptions = ['user', 'mod', 'admin', 'founder'];
     btn.addEventListener('click', () => {
       const userId = Number((btn as HTMLElement).dataset.userId);
       const action = (btn as HTMLElement).dataset.action!;
-      if (action === 'suspend') {
+      if (action === 'reject') {
+        if (!confirm('Are you sure you want to reject and delete this account? This cannot be undone.')) return;
+        adminAction(userId, action);
+      } else if (action === 'approve') {
+        if (!confirm('Approve this user? They will gain full access to the site.')) return;
+        adminAction(userId, action);
+      } else if (action === 'suspend') {
         const until = prompt('Suspend until (ISO date, e.g. 2026-12-31T00:00:00Z):');
         if (!until) return;
         adminAction(userId, action, { until });
@@ -365,6 +374,7 @@ const roleOptions = ['user', 'mod', 'admin', 'founder'];
   }
   .btn-sm:hover { opacity: 0.88; }
   .btn-success { background: #c8e6c9; color: #1b5e20; }
+  .btn-danger { background: #ffcdd2; color: #b71c1c; }
   .btn-warning { background: #fff9c4; color: #e65100; }
   .btn-muted { background: var(--md-sys-color-surface-container-highest); color: var(--md-sys-color-on-surface-variant); }
 

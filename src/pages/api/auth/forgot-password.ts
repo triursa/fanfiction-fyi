@@ -3,6 +3,7 @@ import { eq } from 'drizzle-orm';
 import type { D1Database } from '@cloudflare/workers-types';
 import { getDb } from '@/v2/lib/db';
 import { users, passwordResets } from '@/v2/lib/schema/index';
+import { sendPasswordResetEmail } from '@/v2/lib/email';
 import { z } from 'zod';
 import { validateBody } from '@/v2/lib/validation';
 
@@ -14,6 +15,7 @@ export const config = { auth: 'public' as const };
 
 export const POST: APIRoute = async ({ request, locals }) => {
   const d1 = locals.runtime.env.DB as D1Database;
+  const resendApiKey = locals.runtime.env.RESEND_API_KEY;
   const db = getDb(d1);
 
   // Validate request body
@@ -43,10 +45,14 @@ export const POST: APIRoute = async ({ request, locals }) => {
     expiresAt,
   });
 
-  // TODO: Send email with reset link. For now, log the reset URL.
-  // In production, this should use a Cloudflare-compatible email service (e.g. Workers Send Email, Mailgun, Resend).
+  // Send password reset email via Resend
   const resetUrl = `https://fanfiction.fyi/reset-password?token=${token}`;
-  console.log(`[PASSWORD RESET] Reset URL for ${data.email}: ${resetUrl}`);
+  try {
+    await sendPasswordResetEmail(resendApiKey, data.email, resetUrl);
+  } catch (err) {
+    // Log but don't leak email-sending errors to the client
+    console.error('[FORGOT-PASSWORD] Failed to send reset email:', err);
+  }
 
   return new Response(JSON.stringify({ success: true }), {
     status: 200,
