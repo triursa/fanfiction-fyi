@@ -18,7 +18,7 @@ if (!user || !['founder', 'admin', 'mod'].includes(user.role)) {
   return Astro.redirect('/login');
 }
 
-const d1 = locals.runtime.env.DB as D1Database;
+const d1 = Astro.locals.runtime.env.DB as D1Database;
 const db = getDb(d1);
 
 const url = new URL(Astro.request.url);

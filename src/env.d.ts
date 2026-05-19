@@ -14,9 +14,11 @@ declare namespace Astro {
     };
     user?: {
       id: number;
+      email: string;
       role: string;
       approved: number;
       banned: number;
+      suspendedUntil: string | null;
     };
   }
 }

@@ -7,6 +7,7 @@ export const prerender = false;
 import Base from '@/v2/layouts/Base.astro';
 import WorkCard from '@/v2/components/WorkCard.astro';
 import { getDb } from '@/v2/lib/db';
+import type { D1Database } from '@cloudflare/workers-types';
 import { works, creatorships, pseuds } from '@/v2/lib/schema';
 import { eq, inArray, desc, sql } from 'drizzle-orm';
 
