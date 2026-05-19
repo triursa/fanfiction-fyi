@@ -118,59 +118,64 @@ const locationTypes = [
 </Base>
 
 <script>
-  const form = document.getElementById('new-location-form') as HTMLFormElement;
-  const errorEl = document.getElementById('form-error') as HTMLElement;
-  const submitBtn = document.getElementById('submit-btn') as HTMLButtonElement;
+  function initNewLocationForm() {
+    const form = document.getElementById('new-location-form') as HTMLFormElement | null;
+    const errorEl = document.getElementById('form-error') as HTMLElement | null;
+    const submitBtn = document.getElementById('submit-btn') as HTMLButtonElement | null;
+    if (!form || !errorEl || !submitBtn) return;
 
-  form.addEventListener('submit', async (e) => {
-    e.preventDefault();
-    errorEl.textContent = '';
-    submitBtn.disabled = true;
-    (submitBtn.querySelector('.btn-text') as HTMLElement).style.display = 'none';
-    (submitBtn.querySelector('.btn-loading') as HTMLElement).style.display = 'inline';
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      errorEl.textContent = '';
+      submitBtn.disabled = true;
+      (submitBtn.querySelector('.btn-text') as HTMLElement).style.display = 'none';
+      (submitBtn.querySelector('.btn-loading') as HTMLElement).style.display = 'inline';
 
-    const name = (document.getElementById('name') as HTMLInputElement).value.trim();
-    const description = (document.getElementById('description') as HTMLTextAreaElement).value || undefined;
-    const type = (document.getElementById('type') as HTMLSelectElement).value;
-    const parentId = (document.getElementById('parentId') as HTMLSelectElement).value;
-    const pseudId = Number((document.getElementById('pseudId') as HTMLSelectElement).value);
+      const name = (document.getElementById('name') as HTMLInputElement).value.trim();
+      const description = (document.getElementById('description') as HTMLTextAreaElement).value || undefined;
+      const type = (document.getElementById('type') as HTMLSelectElement).value;
+      const parentId = (document.getElementById('parentId') as HTMLSelectElement).value;
+      const pseudId = Number((document.getElementById('pseudId') as HTMLSelectElement).value);
 
-    if (!pseudId) {
-      errorEl.textContent = 'Please select a pseudonym to post as.';
-      submitBtn.disabled = false;
-      (submitBtn.querySelector('.btn-text') as HTMLElement).style.display = 'inline';
-      (submitBtn.querySelector('.btn-loading') as HTMLElement).style.display = 'none';
-      return;
-    }
-
-    const body: Record<string, any> = { name, type, pseudId };
-    if (description) body.description = description;
-    if (parentId) body.parentId = Number(parentId);
-
-    try {
-      const res = await fetch('/api/canon/locations', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-      });
-
-      const data = await res.json();
-      if (!res.ok) {
-        errorEl.textContent = data.error || data.fields?.map((f: any) => `${f.field}: ${f.message}`).join(', ') || 'Failed to create location.';
+      if (!pseudId) {
+        errorEl.textContent = 'Please select a pseudonym to post as.';
         submitBtn.disabled = false;
         (submitBtn.querySelector('.btn-text') as HTMLElement).style.display = 'inline';
         (submitBtn.querySelector('.btn-loading') as HTMLElement).style.display = 'none';
         return;
       }
 
-      window.location.href = `/canon/locations/${data.data.id}`;
-    } catch {
-      errorEl.textContent = 'Network error. Please try again.';
-      submitBtn.disabled = false;
-      (submitBtn.querySelector('.btn-text') as HTMLElement).style.display = 'inline';
-      (submitBtn.querySelector('.btn-loading') as HTMLElement).style.display = 'none';
-    }
-  });
+      const body: Record<string, any> = { name, type, pseudId };
+      if (description) body.description = description;
+      if (parentId) body.parentId = Number(parentId);
+
+      try {
+        const res = await fetch('/api/canon/locations', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        });
+
+        const data = await res.json();
+        if (!res.ok) {
+          errorEl.textContent = data.error || data.fields?.map((f: any) => `${f.field}: ${f.message}`).join(', ') || 'Failed to create location.';
+          submitBtn.disabled = false;
+          (submitBtn.querySelector('.btn-text') as HTMLElement).style.display = 'inline';
+          (submitBtn.querySelector('.btn-loading') as HTMLElement).style.display = 'none';
+          return;
+        }
+
+        window.location.href = `/canon/locations/${data.data.id}`;
+      } catch {
+        errorEl.textContent = 'Network error. Please try again.';
+        submitBtn.disabled = false;
+        (submitBtn.querySelector('.btn-text') as HTMLElement).style.display = 'inline';
+        (submitBtn.querySelector('.btn-loading') as HTMLElement).style.display = 'none';
+      }
+    });
+  }
+  initNewLocationForm();
+  document.addEventListener('astro:after-swap', initNewLocationForm);
 </script>
 
 <style is:global>

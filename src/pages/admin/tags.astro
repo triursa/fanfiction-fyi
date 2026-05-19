@@ -211,67 +211,79 @@ const filterQs = filterParams.length > 0 ? '&' + filterParams.join('&') : '';
 </Base>
 
 <script define:vars={{ typeFilter, searchFilter }}>
-  function showToast(message, type = 'success') {
-    const toast = document.getElementById('toast');
-    toast.textContent = message;
-    toast.className = `toast toast--${type} toast--show`;
-    setTimeout(() => { toast.className = 'toast'; }, 3000);
-  }
-
-  // Toggle new tag form
-  const newTagBtn = document.getElementById('new-tag-btn');
-  const newTagForm = document.getElementById('new-tag-form');
-  const cancelTagBtn = document.getElementById('cancel-tag-btn');
-
-  newTagBtn.addEventListener('click', () => {
-    newTagForm.style.display = newTagForm.style.display === 'none' ? 'block' : 'none';
-    if (newTagForm.style.display === 'block') {
-      document.getElementById('tag-name').focus();
-    }
-  });
-
-  cancelTagBtn.addEventListener('click', () => {
-    newTagForm.style.display = 'none';
-  });
-
-  // Create tag form submission
-  document.getElementById('create-tag-form').addEventListener('submit', async (e) => {
-    e.preventDefault();
-    const form = e.target;
-    const body = {
-      name: form.name.value.trim(),
-      type: form.type.value,
-      description: form.description.value.trim() || undefined,
-      canonical: form.canonical.checked,
-    };
-
-    if (!body.name) {
-      showToast('Tag name is required.', 'error');
-      return;
+  function initAdminTags() {
+    function showToast(message, type = 'success') {
+      const toast = document.getElementById('toast') as HTMLElement | null;
+      if (!toast) return;
+      toast.textContent = message;
+      toast.className = `toast toast--${type} toast--show`;
+      setTimeout(() => { toast.className = 'toast'; }, 3000);
     }
 
-    try {
-      const res = await fetch('/api/admin/tags', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
+    // Toggle new tag form
+    const newTagBtn = document.getElementById('new-tag-btn') as HTMLElement | null;
+    const newTagForm = document.getElementById('new-tag-form') as HTMLElement | null;
+    const cancelTagBtn = document.getElementById('cancel-tag-btn') as HTMLElement | null;
+    const createTagForm = document.getElementById('create-tag-form') as HTMLFormElement | null;
+
+    if (newTagBtn && newTagForm) {
+      newTagBtn.addEventListener('click', () => {
+        newTagForm.style.display = newTagForm.style.display === 'none' ? 'block' : 'none';
+        if (newTagForm.style.display === 'block') {
+          document.getElementById('tag-name')?.focus();
+        }
       });
-      const data = await res.json();
-      if (res.ok || res.status === 201) {
-        showToast('Tag created successfully.');
-        // Rebuild URL preserving current filters
-        const params = new URLSearchParams();
-        if (typeFilter) params.set('type', typeFilter);
-        if (searchFilter) params.set('search', searchFilter);
-        const qs = params.toString();
-        window.location.href = `/admin/tags${qs ? '?' + qs : ''}`;
-      } else {
-        showToast(data.error || 'Failed to create tag.', 'error');
-      }
-    } catch (err) {
-      showToast('Network error.', 'error');
     }
-  });
+
+    if (cancelTagBtn && newTagForm) {
+      cancelTagBtn.addEventListener('click', () => {
+        newTagForm.style.display = 'none';
+      });
+    }
+
+    if (!createTagForm) return;
+
+    // Create tag form submission
+    createTagForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const form = e.target;
+      const body = {
+        name: form.name.value.trim(),
+        type: form.type.value,
+        description: form.description.value.trim() || undefined,
+        canonical: form.canonical.checked,
+      };
+
+      if (!body.name) {
+        showToast('Tag name is required.', 'error');
+        return;
+      }
+
+      try {
+        const res = await fetch('/api/admin/tags', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        });
+        const data = await res.json();
+        if (res.ok || res.status === 201) {
+          showToast('Tag created successfully.');
+          // Rebuild URL preserving current filters
+          const params = new URLSearchParams();
+          if (typeFilter) params.set('type', typeFilter);
+          if (searchFilter) params.set('search', searchFilter);
+          const qs = params.toString();
+          window.location.href = `/admin/tags${qs ? '?' + qs : ''}`;
+        } else {
+          showToast(data.error || 'Failed to create tag.', 'error');
+        }
+      } catch (err) {
+        showToast('Network error.', 'error');
+      }
+    });
+  }
+  initAdminTags();
+  document.addEventListener('astro:after-swap', initAdminTags);
 </script>
 
 <style is:global>

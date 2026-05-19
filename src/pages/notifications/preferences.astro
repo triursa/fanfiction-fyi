@@ -86,8 +86,9 @@ const typeLabels: Record<string, string> = {
     setTimeout(() => { toast.className = 'toast'; }, 3000);
   }
 
-  const form = document.getElementById('prefs-form') as HTMLFormElement | null;
-  if (form) {
+  function initPrefsForm() {
+    const form = document.getElementById('prefs-form') as HTMLFormElement | null;
+    if (!form) return;
     form.addEventListener('submit', async (e) => {
       e.preventDefault();
       const preferences: Array<{ type: string; enabled: boolean }> = [];
@@ -114,6 +115,8 @@ const typeLabels: Record<string, string> = {
       }
     });
   }
+  initPrefsForm();
+  document.addEventListener('astro:after-swap', initPrefsForm);
 </script>
 
 <style is:global>

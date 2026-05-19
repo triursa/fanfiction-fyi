@@ -119,58 +119,63 @@ const loreCategories = [
 </Base>
 
 <script>
-  const form = document.getElementById('new-lore-form') as HTMLFormElement;
-  const errorEl = document.getElementById('form-error') as HTMLElement;
-  const submitBtn = document.getElementById('submit-btn') as HTMLButtonElement;
+  function initNewLoreForm() {
+    const form = document.getElementById('new-lore-form') as HTMLFormElement | null;
+    const errorEl = document.getElementById('form-error') as HTMLElement | null;
+    const submitBtn = document.getElementById('submit-btn') as HTMLButtonElement | null;
+    if (!form || !errorEl || !submitBtn) return;
 
-  form.addEventListener('submit', async (e) => {
-    e.preventDefault();
-    errorEl.textContent = '';
-    submitBtn.disabled = true;
-    (submitBtn.querySelector('.btn-text') as HTMLElement).style.display = 'none';
-    (submitBtn.querySelector('.btn-loading') as HTMLElement).style.display = 'inline';
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      errorEl.textContent = '';
+      submitBtn.disabled = true;
+      (submitBtn.querySelector('.btn-text') as HTMLElement).style.display = 'none';
+      (submitBtn.querySelector('.btn-loading') as HTMLElement).style.display = 'inline';
 
-    const title = (document.getElementById('title') as HTMLInputElement).value.trim();
-    const content = (document.getElementById('content') as HTMLTextAreaElement).value;
-    const category = (document.getElementById('category') as HTMLSelectElement).value;
-    const workId = (document.getElementById('workId') as HTMLSelectElement).value;
-    const pseudId = Number((document.getElementById('pseudId') as HTMLSelectElement).value);
+      const title = (document.getElementById('title') as HTMLInputElement).value.trim();
+      const content = (document.getElementById('content') as HTMLTextAreaElement).value;
+      const category = (document.getElementById('category') as HTMLSelectElement).value;
+      const workId = (document.getElementById('workId') as HTMLSelectElement).value;
+      const pseudId = Number((document.getElementById('pseudId') as HTMLSelectElement).value);
 
-    if (!pseudId) {
-      errorEl.textContent = 'Please select a pseudonym to post as.';
-      submitBtn.disabled = false;
-      (submitBtn.querySelector('.btn-text') as HTMLElement).style.display = 'inline';
-      (submitBtn.querySelector('.btn-loading') as HTMLElement).style.display = 'none';
-      return;
-    }
-
-    const body: Record<string, any> = { title, content, category, pseudId };
-    if (workId) body.workId = Number(workId);
-
-    try {
-      const res = await fetch('/api/canon/lore', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-      });
-
-      const data = await res.json();
-      if (!res.ok) {
-        errorEl.textContent = data.error || data.fields?.map((f: any) => `${f.field}: ${f.message}`).join(', ') || 'Failed to create lore entry.';
+      if (!pseudId) {
+        errorEl.textContent = 'Please select a pseudonym to post as.';
         submitBtn.disabled = false;
         (submitBtn.querySelector('.btn-text') as HTMLElement).style.display = 'inline';
         (submitBtn.querySelector('.btn-loading') as HTMLElement).style.display = 'none';
         return;
       }
 
-      window.location.href = `/canon/lore/${data.data.id}`;
-    } catch {
-      errorEl.textContent = 'Network error. Please try again.';
-      submitBtn.disabled = false;
-      (submitBtn.querySelector('.btn-text') as HTMLElement).style.display = 'inline';
-      (submitBtn.querySelector('.btn-loading') as HTMLElement).style.display = 'none';
-    }
-  });
+      const body: Record<string, any> = { title, content, category, pseudId };
+      if (workId) body.workId = Number(workId);
+
+      try {
+        const res = await fetch('/api/canon/lore', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        });
+
+        const data = await res.json();
+        if (!res.ok) {
+          errorEl.textContent = data.error || data.fields?.map((f: any) => `${f.field}: ${f.message}`).join(', ') || 'Failed to create lore entry.';
+          submitBtn.disabled = false;
+          (submitBtn.querySelector('.btn-text') as HTMLElement).style.display = 'inline';
+          (submitBtn.querySelector('.btn-loading') as HTMLElement).style.display = 'none';
+          return;
+        }
+
+        window.location.href = `/canon/lore/${data.data.id}`;
+      } catch {
+        errorEl.textContent = 'Network error. Please try again.';
+        submitBtn.disabled = false;
+        (submitBtn.querySelector('.btn-text') as HTMLElement).style.display = 'inline';
+        (submitBtn.querySelector('.btn-loading') as HTMLElement).style.display = 'none';
+      }
+    });
+  }
+  initNewLoreForm();
+  document.addEventListener('astro:after-swap', initNewLoreForm);
 </script>
 
 <style is:global>

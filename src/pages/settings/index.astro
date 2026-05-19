@@ -153,9 +153,11 @@ const skinOptions = [
 </Base>
 
 <script>
+function initSettingsPage() {
   // ─── Toast helper ──────────────────────────────────────────────────
   function showToast(message: string, type: 'success' | 'error' = 'success') {
-    const toast = document.getElementById('toast')!;
+    const toast = document.getElementById('toast');
+    if (!toast) return;
     toast.textContent = message;
     toast.className = `toast toast--${type} toast--show`;
     setTimeout(() => {
@@ -282,6 +284,10 @@ const skinOptions = [
       }
     });
   }
+}
+
+initSettingsPage();
+document.addEventListener('astro:after-swap', initSettingsPage);
 </script>
 
 <style is:global>

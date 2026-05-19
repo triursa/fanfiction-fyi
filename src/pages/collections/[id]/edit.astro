@@ -121,9 +121,11 @@ const privacyOptions = [
 
 {collection && (
   <script define:vars={{ collectionId }}>
-    const form = document.getElementById('edit-collection-form') as HTMLFormElement;
-    const errorEl = document.getElementById('form-error') as HTMLElement;
-    const submitBtn = document.getElementById('submit-btn') as HTMLButtonElement;
+    function initEditCollectionForm() {
+      const form = document.getElementById('edit-collection-form') as HTMLFormElement | null;
+      const errorEl = document.getElementById('form-error') as HTMLElement | null;
+      if (!form || !errorEl) return;
+      const submitBtn = document.getElementById('submit-btn') as HTMLButtonElement;
 
     form.addEventListener('submit', async (e) => {
       e.preventDefault();
@@ -185,6 +187,9 @@ const privacyOptions = [
         }
       });
     }
+    }
+    initEditCollectionForm();
+    document.addEventListener('astro:after-swap', initEditCollectionForm);
   </script>
 )}
 

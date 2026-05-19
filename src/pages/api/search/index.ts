@@ -28,12 +28,19 @@ export const GET: APIRoute = async ({ url, locals }) => {
   const offset = (page - 1) * limit;
 
   // ─── Step 1: FTS5 search to get matching work IDs ──────────────────
-  // Use parameterized query via D1's bind mechanism through raw SQL
+  // Sanitize query for FTS5: strip special chars (", *, (, ), ^, +, -) that
+  // could cause syntax errors, then quote and prefix-match each term.
   const ftsQuery = q
     .split(/\s+/)
     .filter(term => term.length > 0)
-    .map(term => `"${term.replace(/"/g, '""')}"*`)
-    .join(' ');
+    .map(term => {
+      // Remove FTS5-special characters that could break the MATCH query
+      const sanitized = term.replace(/["*()+^~{}!@]/g, '');
+      if (!sanitized) return null;
+      return `"${sanitized}"*`;
+    })
+    .filter(Boolean)
+    .join(' OR ');
 
   const ftsResults = await d1.prepare(
     'SELECT rowid as id FROM works_fts WHERE works_fts MATCH ? ORDER BY rank LIMIT ? OFFSET ?'

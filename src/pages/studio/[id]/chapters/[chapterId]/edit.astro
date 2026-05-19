@@ -123,9 +123,11 @@ if (!chapter && !errorMsg) {
 </Base>
 
 <script define:vars={{ workId, chapterId }}>
+function initChapterEditPage() {
   // ─── Word count ────────────────────────────────────────────────────
-  const contentEditor = document.getElementById('contentMd') as HTMLTextAreaElement;
-  const wordCountEl = document.getElementById('word-count') as HTMLSpanElement;
+  const contentEditor = document.getElementById('contentMd') as HTMLTextAreaElement | null;
+  const wordCountEl = document.getElementById('word-count') as HTMLSpanElement | null;
+  if (!contentEditor || !wordCountEl) return;
 
   function updateWordCount() {
     const text = contentEditor.value.trim();
@@ -136,7 +138,7 @@ if (!chapter && !errorMsg) {
   contentEditor.addEventListener('input', updateWordCount);
 
   // ─── Form submission ──────────────────────────────────────────────
-  const form = document.getElementById('edit-chapter-form') as HTMLFormElement;
+  const form = document.getElementById('edit-chapter-form') as HTMLFormElement | null;
   const errorEl = document.getElementById('form-error') as HTMLElement;
   const submitBtn = document.getElementById('submit-btn') as HTMLButtonElement;
 
@@ -203,6 +205,10 @@ if (!chapter && !errorMsg) {
       errorEl.textContent = 'Network error.';
     }
   });
+}
+
+initChapterEditPage();
+document.addEventListener('astro:after-swap', initChapterEditPage);
 </script>
 
 <style is:global>

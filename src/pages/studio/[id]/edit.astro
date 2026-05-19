@@ -180,11 +180,13 @@ const isComplete = work?.complete;
 </Base>
 
 <script define:vars={{ workId, isDraft, isComplete }}>
+function initEditWorkPage() {
   // ─── Tag handling ──────────────────────────────────────────────────
-  const tagsContainer = document.getElementById('tags-container') as HTMLDivElement;
-  const tagsInput = document.getElementById('tags-input') as HTMLInputElement;
-  const tagsJson = document.getElementById('tags-json') as HTMLInputElement;
-  const suggestions = document.getElementById('tags-suggestions') as HTMLDivElement;
+  const tagsContainer = document.getElementById('tags-container') as HTMLDivElement | null;
+  const tagsInput = document.getElementById('tags-input') as HTMLInputElement | null;
+  const tagsJson = document.getElementById('tags-json') as HTMLInputElement | null;
+  const suggestions = document.getElementById('tags-suggestions') as HTMLDivElement | null;
+  if (!tagsContainer || !tagsInput || !tagsJson || !suggestions) return;
 
   function getSelectedTags() {
     try { return JSON.parse(tagsJson.value); } catch { return []; }
@@ -343,6 +345,10 @@ const isComplete = work?.complete;
       errorEl.textContent = 'Network error.';
     }
   });
+}
+
+initEditWorkPage();
+document.addEventListener('astro:after-swap', initEditWorkPage);
 </script>
 
 <style is:global>

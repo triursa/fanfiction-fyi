@@ -24,36 +24,41 @@ import Base from '@/v2/layouts/Base.astro';
 </Base>
 
 <script>
-  const form = document.getElementById('forgot-form') as HTMLFormElement;
-  const errorEl = document.getElementById('forgot-error') as HTMLElement;
-  const successEl = document.getElementById('forgot-success') as HTMLElement;
+  function initForgotForm() {
+    const form = document.getElementById('forgot-form') as HTMLFormElement | null;
+    const errorEl = document.getElementById('forgot-error') as HTMLElement | null;
+    const successEl = document.getElementById('forgot-success') as HTMLElement | null;
+    if (!form || !errorEl || !successEl) return;
 
-  form.addEventListener('submit', async (e) => {
-    e.preventDefault();
-    errorEl.textContent = '';
-    successEl.textContent = '';
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      errorEl.textContent = '';
+      successEl.textContent = '';
 
-    const email = (document.getElementById('email') as HTMLInputElement).value;
+      const email = (document.getElementById('email') as HTMLInputElement).value;
 
-    try {
-      const res = await fetch('/api/auth/forgot-password', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email }),
-      });
+      try {
+        const res = await fetch('/api/auth/forgot-password', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email }),
+        });
 
-      const data = await res.json();
+        const data = await res.json();
 
-      if (res.ok) {
-        form.style.display = 'none';
-        successEl.textContent = 'If an account with that email exists, a reset link has been sent.';
-      } else {
-        errorEl.textContent = data.error || 'Something went wrong. Please try again.';
+        if (res.ok) {
+          form.style.display = 'none';
+          successEl.textContent = 'If an account with that email exists, a reset link has been sent.';
+        } else {
+          errorEl.textContent = data.error || 'Something went wrong. Please try again.';
+        }
+      } catch {
+        errorEl.textContent = 'Network error. Please try again.';
       }
-    } catch {
-      errorEl.textContent = 'Network error. Please try again.';
-    }
-  });
+    });
+  }
+  initForgotForm();
+  document.addEventListener('astro:after-swap', initForgotForm);
 </script>
 
 <style is:global>

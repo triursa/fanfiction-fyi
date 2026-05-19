@@ -143,83 +143,85 @@ if (seriesData && !isOwner) {
 
 {seriesData && (
   <script define:vars={{ seriesId }}>
-    // ─── Edit form ──────────────────────────────────────────────────
-    const form = document.getElementById('edit-series-form') as HTMLFormElement;
-    const errorEl = document.getElementById('form-error') as HTMLElement;
-    const submitBtn = document.getElementById('submit-btn') as HTMLButtonElement;
+    function initEditSeriesForm() {
+      // ─── Edit form ──────────────────────────────────────────────────
+      const form = document.getElementById('edit-series-form') as HTMLFormElement | null;
+      const errorEl = document.getElementById('form-error') as HTMLElement | null;
+      const submitBtn = document.getElementById('submit-btn') as HTMLButtonElement | null;
+      if (!form || !errorEl || !submitBtn) return;
 
-    form.addEventListener('submit', async (e) => {
-      e.preventDefault();
-      errorEl.textContent = '';
-      submitBtn.disabled = true;
-      (submitBtn.querySelector('.btn-text') as HTMLElement).style.display = 'none';
-      (submitBtn.querySelector('.btn-loading') as HTMLElement).style.display = 'inline';
+      form.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        errorEl.textContent = '';
+        submitBtn.disabled = true;
+        (submitBtn.querySelector('.btn-text') as HTMLElement).style.display = 'none';
+        (submitBtn.querySelector('.btn-loading') as HTMLElement).style.display = 'inline';
 
-      const title = (document.getElementById('title') as HTMLInputElement).value.trim();
-      const description = (document.getElementById('description') as HTMLTextAreaElement).value || undefined;
-      const complete = (document.getElementById('complete') as HTMLInputElement).checked;
+        const title = (document.getElementById('title') as HTMLInputElement).value.trim();
+        const description = (document.getElementById('description') as HTMLTextAreaElement).value || undefined;
+        const complete = (document.getElementById('complete') as HTMLInputElement).checked;
 
-      try {
-        const res = await fetch(`/api/series/${seriesId}`, {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ title, description, complete }),
-        });
+        try {
+          const res = await fetch(`/api/series/${seriesId}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ title, description, complete }),
+          });
 
-        const data = await res.json();
-        if (!res.ok) {
-          errorEl.textContent = data.error || data.fields?.map((f: any) => `${f.field}: ${f.message}`).join(', ') || 'Failed to update series.';
+          const data = await res.json();
+          if (!res.ok) {
+            errorEl.textContent = data.error || data.fields?.map((f: any) => `${f.field}: ${f.message}`).join(', ') || 'Failed to update series.';
+            submitBtn.disabled = false;
+            (submitBtn.querySelector('.btn-text') as HTMLElement).style.display = 'inline';
+            (submitBtn.querySelector('.btn-loading') as HTMLElement).style.display = 'none';
+            return;
+          }
+
+          window.location.href = `/series/${seriesId}`;
+        } catch {
+          errorEl.textContent = 'Network error. Please try again.';
           submitBtn.disabled = false;
           (submitBtn.querySelector('.btn-text') as HTMLElement).style.display = 'inline';
           (submitBtn.querySelector('.btn-loading') as HTMLElement).style.display = 'none';
-          return;
         }
+      });
 
-        window.location.href = `/series/${seriesId}`;
-      } catch {
-        errorEl.textContent = 'Network error. Please try again.';
-        submitBtn.disabled = false;
-        (submitBtn.querySelector('.btn-text') as HTMLElement).style.display = 'inline';
-        (submitBtn.querySelector('.btn-loading') as HTMLElement).style.display = 'none';
-      }
-    });
-
-    // ─── Delete ────────────────────────────────────────────────────
-    const deleteBtn = document.getElementById('delete-btn');
-    if (deleteBtn) {
-      deleteBtn.addEventListener('click', async () => {
-        if (!confirm('Are you sure you want to delete this series? This cannot be undone.')) return;
-        deleteBtn.disabled = true;
-        (deleteBtn as HTMLElement).textContent = 'Deleting…';
-        try {
-          const res = await fetch(`/api/series/${seriesId}`, { method: 'DELETE' });
-          if (res.ok) {
-            window.location.href = '/series';
-          } else {
-            const data = await res.json();
-            alert(data.error || 'Failed to delete series.');
+      // ─── Delete ────────────────────────────────────────────────────
+      const deleteBtn = document.getElementById('delete-btn') as HTMLElement | null;
+      if (deleteBtn) {
+        deleteBtn.addEventListener('click', async () => {
+          if (!confirm('Are you sure you want to delete this series? This cannot be undone.')) return;
+          deleteBtn.disabled = true;
+          (deleteBtn as HTMLElement).textContent = 'Deleting…';
+          try {
+            const res = await fetch(`/api/series/${seriesId}`, { method: 'DELETE' });
+            if (res.ok) {
+              window.location.href = '/series';
+            } else {
+              const data = await res.json();
+              alert(data.error || 'Failed to delete series.');
+              deleteBtn.disabled = false;
+              (deleteBtn as HTMLElement).textContent = 'Delete Series';
+            }
+          } catch {
+            alert('Network error. Please try again.');
             deleteBtn.disabled = false;
             (deleteBtn as HTMLElement).textContent = 'Delete Series';
           }
-        } catch {
-          alert('Network error. Please try again.');
-          deleteBtn.disabled = false;
-          (deleteBtn as HTMLElement).textContent = 'Delete Series';
-        }
-      });
-    }
+        });
+      }
 
-    // ─── Remove work from series ───────────────────────────────────
-    document.querySelectorAll('.btn-remove-work').forEach(btn => {
-      btn.addEventListener('click', async () => {
-        const workId = Number((btn as HTMLElement).dataset.workId);
-        if (!workId || !confirm('Remove this work from the series?')) return;
+      // ─── Remove work from series ───────────────────────────────────
+      document.querySelectorAll('.btn-remove-work').forEach(btn => {
+        btn.addEventListener('click', async () => {
+          const workId = Number((btn as HTMLElement).dataset.workId);
+          if (!workId || !confirm('Remove this work from the series?')) return;
 
-        try {
-          const res = await fetch(`/api/series/${seriesId}/works`, {
-            method: 'DELETE',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ workId }),
+          try {
+            const res = await fetch(`/api/series/${seriesId}/works`, {
+              method: 'DELETE',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ workId }),
           });
           if (res.ok) {
             const item = btn.closest('.work-item') as HTMLElement;
@@ -287,6 +289,9 @@ if (seriesData && !isOwner) {
         addWorkBtn.click();
       }
     });
+    }
+    initEditSeriesForm();
+    document.addEventListener('astro:after-swap', initEditSeriesForm);
   </script>
 )}
 

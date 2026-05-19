@@ -96,26 +96,28 @@ const privacyOptions = [
 </Base>
 
 <script>
-  const form = document.getElementById('new-collection-form') as HTMLFormElement;
-  const errorEl = document.getElementById('form-error') as HTMLElement;
-  const submitBtn = document.getElementById('submit-btn') as HTMLButtonElement;
+  function initNewCollectionForm() {
+    const form = document.getElementById('new-collection-form') as HTMLFormElement | null;
+    const errorEl = document.getElementById('form-error') as HTMLElement | null;
+    if (!form || !errorEl) return;
+    const submitBtn = document.getElementById('submit-btn') as HTMLButtonElement;
 
-  // Auto-generate slug from title
-  const nameInput = document.getElementById('name') as HTMLInputElement;
-  const titleInput = document.getElementById('title') as HTMLInputElement;
-  let slugManuallyEdited = false;
+    // Auto-generate slug from title
+    const nameInput = document.getElementById('name') as HTMLInputElement;
+    const titleInput = document.getElementById('title') as HTMLInputElement;
+    let slugManuallyEdited = false;
 
-  nameInput.addEventListener('input', () => { slugManuallyEdited = true; });
-  titleInput.addEventListener('input', () => {
-    if (!slugManuallyEdited) {
-      nameInput.value = titleInput.value
-        .toLowerCase()
-        .replace(/[^a-z0-9]+/g, '-')
-        .replace(/^-+|-+$/g, '');
-    }
-  });
+    nameInput.addEventListener('input', () => { slugManuallyEdited = true; });
+    titleInput.addEventListener('input', () => {
+      if (!slugManuallyEdited) {
+        nameInput.value = titleInput.value
+          .toLowerCase()
+          .replace(/[^a-z0-9]+/g, '-')
+          .replace(/^-+|-+$/g, '');
+      }
+    });
 
-  form.addEventListener('submit', async (e) => {
+    form.addEventListener('submit', async (e) => {
     e.preventDefault();
     errorEl.textContent = '';
     submitBtn.disabled = true;
@@ -160,6 +162,9 @@ const privacyOptions = [
       (submitBtn.querySelector('.btn-loading') as HTMLElement).style.display = 'none';
     }
   });
+  }
+  initNewCollectionForm();
+  document.addEventListener('astro:after-swap', initNewCollectionForm);
 </script>
 
 <style is:global>

@@ -154,22 +154,23 @@ const appearances: any[] = character?.appearances || [];
 
 {isOwner && (
   <script define:vars={{ characterId }}>
-    const editBtn = document.getElementById('edit-btn');
-    const editDialog = document.getElementById('edit-dialog');
-    const editCancel = document.getElementById('edit-cancel');
-    const editForm = document.getElementById('edit-form');
-    const deleteBtn = document.getElementById('delete-btn');
-    const deleteDialog = document.getElementById('delete-dialog');
-    const deleteCancel = document.getElementById('delete-cancel');
-    const deleteConfirm = document.getElementById('delete-confirm');
+    function initCharacterActions() {
+      const editBtn = document.getElementById('edit-btn');
+      const editDialog = document.getElementById('edit-dialog');
+      const editCancel = document.getElementById('edit-cancel');
+      const editForm = document.getElementById('edit-form');
+      const deleteBtn = document.getElementById('delete-btn');
+      const deleteDialog = document.getElementById('delete-dialog');
+      const deleteCancel = document.getElementById('delete-cancel');
+      const deleteConfirm = document.getElementById('delete-confirm');
 
-    if (editBtn && editDialog) {
-      editBtn.addEventListener('click', () => editDialog.showModal());
-      editCancel.addEventListener('click', () => editDialog.close());
-    }
+      if (editBtn && editDialog) {
+        editBtn.addEventListener('click', () => editDialog.showModal());
+        editCancel.addEventListener('click', () => editDialog.close());
+      }
 
-    if (editForm) {
-      editForm.addEventListener('submit', async (e) => {
+      if (editForm) {
+        editForm.addEventListener('submit', async (e) => {
         e.preventDefault();
         const formData = new FormData(editForm);
         const body = {
@@ -214,6 +215,9 @@ const appearances: any[] = character?.appearances || [];
         }
       });
     }
+    }
+    initCharacterActions();
+    document.addEventListener('astro:after-swap', initCharacterActions);
   </script>
 )}
 

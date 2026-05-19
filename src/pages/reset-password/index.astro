@@ -33,10 +33,11 @@ const token = Astro.url.searchParams.get('token') || '';
 </Base>
 
 <script>
-  const form = document.getElementById('reset-form') as HTMLFormElement;
-  const errorEl = document.getElementById('reset-error') as HTMLElement;
+  function initResetForm() {
+    const form = document.getElementById('reset-form') as HTMLFormElement | null;
+    const errorEl = document.getElementById('reset-error') as HTMLElement | null;
+    if (!form || !errorEl) return;
 
-  if (form) {
     const token = form.getAttribute('data-token') || '';
 
     form.addEventListener('submit', async (e) => {
@@ -75,6 +76,8 @@ const token = Astro.url.searchParams.get('token') || '';
       }
     });
   }
+  initResetForm();
+  document.addEventListener('astro:after-swap', initResetForm);
 </script>
 
 <style is:global>

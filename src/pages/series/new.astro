@@ -72,53 +72,58 @@ try {
 </Base>
 
 <script>
-  const form = document.getElementById('new-series-form') as HTMLFormElement;
-  const errorEl = document.getElementById('form-error') as HTMLElement;
-  const submitBtn = document.getElementById('submit-btn') as HTMLButtonElement;
+  function initNewSeriesForm() {
+    const form = document.getElementById('new-series-form') as HTMLFormElement | null;
+    const errorEl = document.getElementById('form-error') as HTMLElement | null;
+    const submitBtn = document.getElementById('submit-btn') as HTMLButtonElement | null;
+    if (!form || !errorEl || !submitBtn) return;
 
-  form.addEventListener('submit', async (e) => {
-    e.preventDefault();
-    errorEl.textContent = '';
-    submitBtn.disabled = true;
-    (submitBtn.querySelector('.btn-text') as HTMLElement).style.display = 'none';
-    (submitBtn.querySelector('.btn-loading') as HTMLElement).style.display = 'inline';
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      errorEl.textContent = '';
+      submitBtn.disabled = true;
+      (submitBtn.querySelector('.btn-text') as HTMLElement).style.display = 'none';
+      (submitBtn.querySelector('.btn-loading') as HTMLElement).style.display = 'inline';
 
-    const title = (document.getElementById('title') as HTMLInputElement).value.trim();
-    const description = (document.getElementById('description') as HTMLTextAreaElement).value || undefined;
-    const pseudId = Number((document.getElementById('pseudId') as HTMLSelectElement).value);
+      const title = (document.getElementById('title') as HTMLInputElement).value.trim();
+      const description = (document.getElementById('description') as HTMLTextAreaElement).value || undefined;
+      const pseudId = Number((document.getElementById('pseudId') as HTMLSelectElement).value);
 
-    if (!pseudId) {
-      errorEl.textContent = 'Please select a pseudonym.';
-      submitBtn.disabled = false;
-      (submitBtn.querySelector('.btn-text') as HTMLElement).style.display = 'inline';
-      (submitBtn.querySelector('.btn-loading') as HTMLElement).style.display = 'none';
-      return;
-    }
-
-    try {
-      const res = await fetch('/api/series', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ title, description, pseudId }),
-      });
-
-      const data = await res.json();
-      if (!res.ok) {
-        errorEl.textContent = data.error || data.fields?.map((f: any) => `${f.field}: ${f.message}`).join(', ') || 'Failed to create series.';
+      if (!pseudId) {
+        errorEl.textContent = 'Please select a pseudonym.';
         submitBtn.disabled = false;
         (submitBtn.querySelector('.btn-text') as HTMLElement).style.display = 'inline';
         (submitBtn.querySelector('.btn-loading') as HTMLElement).style.display = 'none';
         return;
       }
 
-      window.location.href = `/series/${data.data.id}`;
-    } catch {
-      errorEl.textContent = 'Network error. Please try again.';
-      submitBtn.disabled = false;
-      (submitBtn.querySelector('.btn-text') as HTMLElement).style.display = 'inline';
-      (submitBtn.querySelector('.btn-loading') as HTMLElement).style.display = 'none';
-    }
-  });
+      try {
+        const res = await fetch('/api/series', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ title, description, pseudId }),
+        });
+
+        const data = await res.json();
+        if (!res.ok) {
+          errorEl.textContent = data.error || data.fields?.map((f: any) => `${f.field}: ${f.message}`).join(', ') || 'Failed to create series.';
+          submitBtn.disabled = false;
+          (submitBtn.querySelector('.btn-text') as HTMLElement).style.display = 'inline';
+          (submitBtn.querySelector('.btn-loading') as HTMLElement).style.display = 'none';
+          return;
+        }
+
+        window.location.href = `/series/${data.data.id}`;
+      } catch {
+        errorEl.textContent = 'Network error. Please try again.';
+        submitBtn.disabled = false;
+        (submitBtn.querySelector('.btn-text') as HTMLElement).style.display = 'inline';
+        (submitBtn.querySelector('.btn-loading') as HTMLElement).style.display = 'none';
+      }
+    });
+  }
+  initNewSeriesForm();
+  document.addEventListener('astro:after-swap', initNewSeriesForm);
 </script>
 
 <style is:global>

@@ -66,23 +66,7 @@ export const PUT: APIRoute = async ({ locals, request }) => {
   for (const pref of body.preferences) {
     if (!pref.type || typeof pref.enabled !== 'boolean') continue;
 
-    // Upsert: check if preference exists
-    const existing = await db
-      .select()
-      .from(notificationPreferences)
-      .where(eq(notificationPreferences.userId, auth.user.id))
-      .get();
-
-    const match = existing
-      ? await db
-          .select()
-          .from(notificationPreferences)
-          .where(eq(notificationPreferences.userId, auth.user.id))
-          .get()
-      : null;
-
-    // Simpler approach: delete and re-insert, or use raw SQL upsert
-    // For D1/SQLite we can use INSERT OR REPLACE
+    // Upsert preference using onConflictDoUpdate (INSERT OR REPLACE)
     await db.insert(notificationPreferences).values({
       userId: auth.user.id,
       type: pref.type,

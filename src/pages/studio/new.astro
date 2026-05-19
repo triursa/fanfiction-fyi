@@ -166,10 +166,12 @@ try {
 </Base>
 
 <script>
+function initNewWorkPage() {
   // ─── Shared state ──────────────────────────────────────────────────
   // All selected tags across every category, stored as {id?, name, type}
   const allTags: { id?: number; name: string; type: string }[] = [];
-  const tagsJson = document.getElementById('tags-json') as HTMLInputElement;
+  const tagsJson = document.getElementById('tags-json') as HTMLInputElement | null;
+  if (!tagsJson) return;
 
   function syncHiddenInput() {
     tagsJson.value = JSON.stringify(allTags);
@@ -494,6 +496,10 @@ try {
       (submitBtn.querySelector('.btn-loading') as HTMLElement).style.display = 'none';
     }
   });
+}
+
+initNewWorkPage();
+document.addEventListener('astro:after-swap', initNewWorkPage);
 </script>
 
 <style is:global>
