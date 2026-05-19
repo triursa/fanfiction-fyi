@@ -49,6 +49,7 @@ function getAuthLevel(pathname: string, request: Request): AuthLevel {
   // ─── Public pages (no auth, never needs user context) ───────
   if (pathname === '/login' || pathname === '/signup') return 'public';
   if (pathname === '/pending-approval') return 'public';
+  if (pathname === '/forgot-password' || pathname === '/reset-password') return 'public';
   if (pathname === '/privacy' || pathname === '/terms') return 'public';
   if (pathname === '/feed.xml') return 'public';
 
