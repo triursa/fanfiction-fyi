@@ -2,81 +2,27 @@
 /**
  * Studio Dashboard — Lists the logged-in user's works, grouped by drafts and published.
  * Auth: required (enforced by middleware default).
+ * Uses /api/works?mine=true to get works with authors and tags populated.
  */
 export const prerender = false;
 import Base from '@/v2/layouts/Base.astro';
 import WorkCard from '@/v2/components/WorkCard.astro';
-import { getDb } from '@/v2/lib/db';
-import type { D1Database } from '@cloudflare/workers-types';
-import { works, creatorships, pseuds } from '@/v2/lib/schema';
-import { eq, inArray, desc, sql } from 'drizzle-orm';
 
 const user = Astro.locals.user;
-const d1 = Astro.locals.runtime.env.DB as D1Database;
-const db = getDb(d1);
 
 let drafts: any[] = [];
 let published: any[] = [];
 let errorMsg: string | null = null;
 
 try {
-  // Get user's pseud IDs
-  const userPseuds = await db
-    .select({ id: pseuds.id })
-    .from(pseuds)
-    .where(eq(pseuds.userId, user.id))
-    .all();
-
-  const pseudIds = userPseuds.map(p => p.id);
-
-  if (pseudIds.length > 0) {
-    // Get work IDs via creatorships - query per pseud then deduplicate
-    // (inArray with pseudIds would be cleaner but we build it safely)
-    const workIdSet = new Set<number>();
-    for (const pseudId of pseudIds) {
-      const rows = await db
-        .select({ workId: creatorships.workId })
-        .from(creatorships)
-        .where(eq(creatorships.pseudId, pseudId))
-        .all();
-      for (const row of rows) workIdSet.add(row.workId);
-    }
-
-    const workIds = Array.from(workIdSet);
-
-    if (workIds.length > 0) {
-      // Fetch works including the draft field
-      const allWorks = workIds.length === 1
-        ? await db.select({
-            id: works.id,
-            title: works.title,
-            summary: works.summary,
-            language: works.language,
-            wordCount: works.wordCount,
-            complete: works.complete,
-            draft: works.draft,
-            workSkin: works.workSkin,
-            publishedAt: works.publishedAt,
-            createdAt: works.createdAt,
-            updatedAt: works.updatedAt,
-          }).from(works).where(eq(works.id, workIds[0])).orderBy(desc(works.updatedAt)).all()
-        : await db.select({
-            id: works.id,
-            title: works.title,
-            summary: works.summary,
-            language: works.language,
-            wordCount: works.wordCount,
-            complete: works.complete,
-            draft: works.draft,
-            workSkin: works.workSkin,
-            publishedAt: works.publishedAt,
-            createdAt: works.createdAt,
-            updatedAt: works.updatedAt,
-          }).from(works).where(inArray(works.id, workIds)).orderBy(desc(works.updatedAt)).all();
-
-      drafts = allWorks.filter(w => w.draft);
-      published = allWorks.filter(w => !w.draft);
-    }
+  const res = await fetch(new URL('/api/works?mine=true&limit=100', Astro.url));
+  if (res.ok) {
+    const json = await res.json();
+    const allWorks: any[] = json.data ?? [];
+    drafts = allWorks.filter((w: any) => w.draft);
+    published = allWorks.filter((w: any) => !w.draft);
+  } else {
+    errorMsg = 'Error loading your works.';
   }
 } catch {
   errorMsg = 'Error loading your works.';
