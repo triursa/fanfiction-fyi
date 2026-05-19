@@ -1,11 +1,11 @@
 import type { APIRoute } from 'astro';
 import { eq } from 'drizzle-orm';
 import type { D1Database } from '@cloudflare/workers-types';
-import { getDb } from '../../../lib/db';
-import { hashPassword, createSession, sessionCookie, validateInviteCode, markInviteCodeUsed } from '../../../lib/auth';
-import { users, pseuds } from '../../../lib/schema/index';
+import { getDb } from '../../lib/db';
+import { hashPassword, createSession, sessionCookie, validateInviteCode, markInviteCodeUsed } from '../../lib/auth';
+import { users, pseuds } from '../../lib/schema/index';
 import { z } from 'zod';
-import { validateBody } from '../../../lib/validation';
+import { validateBody } from '../../lib/validation';
 
 const signupSchema = z.object({
   email: z.string().email('Invalid email address'),
@@ -36,13 +36,13 @@ export const POST: APIRoute = async ({ request, locals }) => {
     return new Response(JSON.stringify({ error: 'Email already registered' }), { status: 409, headers: { 'Content-Type': 'application/json' } });
   }
 
-  // Hash password and create user
+  // Hash password and create user (unapproved by default — requires admin approval)
   const passwordHash = await hashPassword(data.password);
   const result = await db.insert(users).values({
     email: data.email,
     passwordHash,
     displayName: data.displayName || data.email.split('@')[0],
-    approved: 1,
+    approved: 0,
   }).returning({ id: users.id });
 
   const userId = result[0].id;
@@ -57,10 +57,10 @@ export const POST: APIRoute = async ({ request, locals }) => {
     isDefault: 1,
   });
 
-  // Create session
+  // Create session (even for unapproved users, so they can reach /pending-approval)
   const token = await createSession(d1, userId);
 
-  return new Response(JSON.stringify({ success: true, userId }), {
+  return new Response(JSON.stringify({ success: true, userId, approved: 0 }), {
     status: 201,
     headers: {
       'Content-Type': 'application/json',

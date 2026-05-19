@@ -1,15 +1,16 @@
 /**
  * Admin Users API
  * GET  /api/admin/users — list users (pagination, role/approval filters)
- * PATCH /api/admin/users — update user (approve, ban, suspend, change role)
+ * PATCH /api/admin/users — update user (approve, reject, ban, suspend, change role)
  * Auth: required, admin+ only
  */
 import type { APIRoute } from 'astro';
 import type { D1Database } from '@cloudflare/workers-types';
 import { requireAuth } from '../../../../lib/auth';
 import { getDb } from '../../../../lib/db';
-import { users, inviteCodes } from '../../../../lib/schema/index';
+import { users, inviteCodes, pseuds, sessions } from '../../../../lib/schema/index';
 import { updateUserRoleSchema, suspendUserSchema, validateBody } from '../../../../lib/validation';
+import { notify } from '../../../../lib/notify';
 import { eq, and, sql, desc, count } from 'drizzle-orm';
 
 // ─── Admin role check ──────────────────────────────────────────────
@@ -145,6 +146,29 @@ export const PATCH: APIRoute = async ({ request, locals }) => {
   const action = body.action;
   if (action === 'approve') {
     updateData.approved = 1;
+  } else if (action === 'reject') {
+    // Reject: delete the user entirely (sessions, pseuds, notifications cascade)
+    // First, try to send a rejection notification (best-effort, before deletion)
+    try {
+      await notify(d1, userId, {
+        type: 'user.rejected',
+        title: 'Account application not approved',
+        body: `Your account application for fanfiction.fyi was not approved. You may sign up again with a different invite code.`,
+      });
+    } catch { /* best effort */ }
+
+    // Null out invite code reference so deletion doesn't violate FK
+    try { await db.update(inviteCodes).set({ usedBy: null }).where(eq(inviteCodes.usedBy, userId)); } catch { /* may not exist */ }
+
+    // Delete sessions, pseuds, then user (cascading tables handle the rest)
+    try { await db.delete(sessions).where(eq(sessions.userId, userId)); } catch { /* may not exist */ }
+    await db.delete(pseuds).where(eq(pseuds.userId, userId));
+    await db.delete(users).where(eq(users.id, userId));
+
+    return new Response(JSON.stringify({ data: { id: userId, action: 'rejected' } }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    });
   } else if (action === 'ban') {
     updateData.banned = 1;
   } else if (action === 'unban') {
@@ -184,13 +208,25 @@ export const PATCH: APIRoute = async ({ request, locals }) => {
     }
     updateData.role = body.role;
   } else {
-    return new Response(JSON.stringify({ error: 'Invalid action. Use: approve, ban, unban, suspend, unsuspend, changeRole' }), {
+    return new Response(JSON.stringify({ error: 'Invalid action. Use: approve, reject, ban, unban, suspend, unsuspend, changeRole' }), {
       status: 422,
       headers: { 'Content-Type': 'application/json' },
     });
   }
 
   await db.update(users).set(updateData).where(eq(users.id, userId));
+
+  // Send approval notification to the user (best-effort)
+  if (action === 'approve') {
+    try {
+      await notify(d1, userId, {
+        type: 'user.approved',
+        title: 'Your account has been approved!',
+        body: 'You can now access fanfiction.fyi. Happy reading and writing!',
+        link: '/',
+      });
+    } catch { /* notification failure should not block approval */ }
+  }
 
   // Return updated user (excluding password)
   const updated = await db.select({
